@@ -79,6 +79,7 @@ const calSetup: TeamSetup = {
       { id: "redis", title: "Redis in Docker", detail: "cal-redis, Redis 8, on localhost:6379" },
     ],
   },
+  agents: ["claude", "codex"],
   projects: [
     { id: "cal", repo: "calcom/cal.com", path: "~/code/cal.com", required: true, kit: "https://github.com/sean-brydon/berth-kit-calcom@5476af4", init: "box/init-cal.sh", init_detail: ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic", first_task: "Find an open issue labelled “good first issue” in calcom/cal.com, explain how you'd fix it, and make the change in a new worktree" },
     { id: "private-api", repo: "calcom/private-api", path: "~/code/private-api", required: false },
@@ -121,6 +122,19 @@ const GITHUB_STEP: PlanStep = {
   commands: ["gh auth status || gh auth login --hostname github.com --git-protocol https --web", "gh auth setup-git", "# a device code: you enter it at github.com/login/device; this computer's sign-in is never copied"],
 };
 
+const AGENT_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor Agent", opencode: "OpenCode" };
+const agentsStep = (ids: string[]): PlanStep => {
+  const names = ids.map((id) => AGENT_NAMES[id] ?? id);
+  return {
+    id: "agents",
+    title: `${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]} on the box`,
+    detail: "the team's agent CLIs, in ~/.local/bin without sudo, with Berth's hooks and skills; you sign in to each",
+    sudo: false,
+    berth: true,
+    commands: [`berthd agents install --integrations ${ids.join(" ")}   # each is skipped when it is already there`],
+  };
+};
+
 const ONEPASSWORD_STEP: PlanStep = {
   id: "1password",
   title: "1Password on the box",
@@ -133,7 +147,12 @@ const ONEPASSWORD_STEP: PlanStep = {
 const usesOp = (setup: TeamSetup) => Object.values(setup.keys ?? {}).some((k) => Object.values(k.shared ?? {}).some((ref) => ref.startsWith("op://")));
 
 function planSteps(setup: TeamSetup): PlanStep[] {
-  return [...(setup.box?.steps ?? []).map((s) => ({ id: s.id, title: s.title, detail: s.detail, sudo: !!s.sudo, commands: STEP_COMMANDS[s.id] ?? [`box/setup.sh ${s.id}`] })), GITHUB_STEP, ...(usesOp(setup) ? [ONEPASSWORD_STEP] : [])];
+  return [
+    ...(setup.box?.steps ?? []).map((s) => ({ id: s.id, title: s.title, detail: s.detail, sudo: !!s.sudo, commands: STEP_COMMANDS[s.id] ?? [`box/setup.sh ${s.id}`] })),
+    ...(setup.agents?.length ? [agentsStep(setup.agents)] : []),
+    GITHUB_STEP,
+    ...(usesOp(setup) ? [ONEPASSWORD_STEP] : []),
+  ];
 }
 
 function calProjects(): ProjectView[] {
