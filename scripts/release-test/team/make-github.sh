@@ -41,7 +41,7 @@ cat > "$w/team.json" <<'J'
 {
   "schema": "berth.team/v1", "id": "acme", "name": "Acme", "org": "acme",
   "description": "A synthetic team setup for Berth's tests.", "contact": "#onboarding",
-  "box": { "script": "box/setup.sh", "steps": [
+  "box": { "script": "box/setup.sh", "settings": { "ACME_PG": "16", "$why": "a comment" }, "steps": [
     { "id": "tools", "title": "Tools", "detail": "/opt/acme, made with sudo", "sudo": true },
     { "id": "db", "title": "Database", "detail": "a stand-in" },
     { "id": "slow", "title": "Slow step", "detail": "waits for /tmp/go" } ] },
@@ -56,15 +56,27 @@ cat > "$w/box/setup.sh" <<'S'
 #!/bin/sh
 set -eu
 [ "$(id -u)" -ne 0 ] || { echo "run this as yourself, not root" >&2; exit 1; }
+# tools, as a team's docker step does, adds you to a group (acmedocker), and
+# puts a tool on a login shell's PATH only (as fnm does with node).
 step_tools() {
   sudo mkdir -p /opt/acme
   sudo chown "$(id -un)" /opt/acme
+  sudo groupadd -f acmedocker
+  sudo usermod -aG acmedocker "$(id -un)"
+  mkdir -p "$HOME/.local/share/acme/bin"
+  printf '#!/bin/sh\necho acmetool\n' > "$HOME/.local/share/acme/bin/acmetool"
+  chmod +x "$HOME/.local/share/acme/bin/acmetool"
+  grep -q acme/bin "$HOME/.profile" 2>/dev/null || echo 'PATH="$HOME/.local/share/acme/bin:$PATH"' >> "$HOME/.profile"
 }
+# The steps after tools need the group it added, in the same terminal.
+group() { id -nG | grep -qw acmedocker || { echo "$1: this terminal is not in acmedocker ($(id -nG))" >&2; exit 4; }; }
 step_db() {
+  group db
   [ ! -f /tmp/fail-db ] || { echo "port 5450 is taken" >&2; exit 3; }
-  touch "$HOME/.acme-db"
+  echo "pg=${BERTH_SETTING_ACME_PG:-unset}" > "$HOME/.acme-db"
 }
 step_slow() {
+  group slow
   while [ ! -f /tmp/go ]; do sleep 1; done
   touch "$HOME/.acme-slow"
 }
@@ -75,9 +87,11 @@ case "${1:-all}" in
   *) "step_$1" ;;
 esac
 S
-printf '#!/bin/sh\nset -eu\necho "api init in $(pwd)" > "$HOME/.acme-api-init"\n' > "$w/box/init-api.sh"
+printf '#!/bin/sh\nset -eu\n{ echo "api init in $(pwd)"; echo "groups $(id -nG)"; env | grep -E "^BERTH_(KIT_DIR|LOCATION|ROOT_PATH|SETTING_ACME_PG)=" | sort; . "$BERTH_KIT_DIR/lib.sh" && echo "kit lib: $(acme_kit_lib)"; } > "$HOME/.acme-api-init"\n' > "$w/box/init-api.sh"
 chmod +x "$w/box/setup.sh" "$w/box/init-api.sh"
-echo '{"id":"acme-api","name":"Acme API","config":{"ports":2,"services":[{"name":"api","run":"python3 -m http.server $BERTH_PORT"}]}}' > "$w/kits/api/kit.json"
+# The kit's own code, which the init reuses through BERTH_KIT_DIR.
+echo 'acme_kit_lib() { echo "from the kit"; }' > "$w/kits/api/lib.sh"
+echo '{"id":"acme-api","name":"Acme API","requires":[{"tool":"acmetool","hint":"the tools step installs it"}],"config":{"ports":2,"services":[{"name":"api","run":"python3 -m http.server $BERTH_PORT"}]}}' > "$w/kits/api/kit.json"
 repo acme/.berth "$w" "Team setup"
 
 w=$(mktemp -d); mkdir -p "$w/.berth"
@@ -93,4 +107,6 @@ mkdir -p "$R/draft"
 d=$(mktemp -d); echo kits > "$d/README.md"; repo draft/kits "$d" "Kits"
 mkdir -p "$d/team" && git clone -q "$R/acme/.berth.git" "$d/b" && cp -R "$d/b/team.json" "$d/b/box" "$d/b/kits" "$d/team/" && rm -rf "$d/b"
 (cd "$d" && git checkout -q -b team-setup && git add -A && git commit -q -m "Acme team setup, a draft" && git push -q "$R/draft/kits.git" team-setup)
+# Another branch whose project id has a dot, which can't be part of a URL.
+(cd "$d" && git checkout -q -b dotted && sed -i 's/"id": "web", "repo"/"id": "web.app", "repo"/; s/"keys": { "web"/"keys": { "web.app"/' team/team.json && git commit -qam "web.app" && git push -q "$R/draft/kits.git" dotted)
 git --git-dir "$R/acme/.berth.git" rev-parse main

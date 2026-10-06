@@ -1,57 +1,65 @@
 {
-  "$comment": "github.com/calcom/.berth -> team.json: Cal.com's team setup for Berth (schema berth.team/v1). Placeholders and open questions are listed in README.md.",
+  "$comment": "An example team setup for Berth (schema berth.team/v1), made from a real run of Cal.com's. Cal.com's own setup lives privately; this one sets a box up for the public calcom/cal.com. Berth reads <org>/.berth/team.json. Placeholders are in README.md; no secrets live here.",
   "schema": "berth.team/v1",
   "id": "calcom",
   "name": "Cal.com",
   "org": "calcom",
-  "description": "Everything a Cal.com engineer needs on their box: Node, Yarn, Postgres and Redis in Docker, and the Cal.com repos, each set up.",
+  "description": "Everything a Cal.com engineer needs on their box: system updates, Docker, gh and 1Password CLIs, Node and Yarn, Postgres and Redis in Docker, then cal.com cloned, migrated and seeded, with a database of its own for every worktree.",
   "contact": "#eng-onboarding on Slack",
+  "$contact": "OPEN: placeholder channel.",
   "docs": "https://github.com/calcom/.berth#readme",
   "box": {
     "os": ["ubuntu>=22.04", "debian>=12", "macos>=14"],
+    "$os": "Ubuntu 22.04/24.04 and Debian 12 are tested first; macOS (Homebrew with OrbStack, Docker Desktop or Colima) is best effort.",
     "script": "box/setup.sh",
+    "settings": {
+      "CAL_POSTGRES_VERSION": "18",
+      "CAL_REDIS_VERSION": "8"
+    },
+    "$settings_why": "The one place these versions live; Berth gives them to box/setup.sh as BERTH_SETTING_CAL_POSTGRES_VERSION and BERTH_SETTING_CAL_REDIS_VERSION, and by hand it reads them from here. Postgres 18 is what cal.com's CI services (.github/workflows/*.yml) and its own local compose (packages/prisma/docker-compose.yml) run; 19 is still beta. Redis 8 is what cal.com's redis:latest (CI e2e-api-v2.yml, apps/api/v2/docker-compose.yaml) resolves to today, pinned to its major. A new Postgres major does not move existing data: the step says how.",
     "steps": [
-      { "id": "packages", "title": "System packages", "detail": "git, curl, build tools, python3, postgresql-client (pg_dump), jq", "sudo": true },
-      { "id": "docker", "title": "Docker", "detail": "Docker Engine, and you in the docker group; Colima on macOS", "sudo": true },
-      { "id": "cli", "title": "GitHub CLI and 1Password CLI", "detail": "gh for the box's own GitHub sign-in and clones; op for keys", "sudo": true },
-      { "id": "node", "title": "Node 20 with fnm", "detail": "in your home folder, loaded from ~/.profile" },
-      { "id": "yarn", "title": "Yarn with corepack", "detail": "each repo's packageManager picks the version" },
-      { "id": "postgres", "title": "Postgres 16 in Docker", "detail": "cal-postgres on localhost:5450" },
-      { "id": "redis", "title": "Redis 7 in Docker", "detail": "cal-redis on localhost:6379" }
+      { "id": "update", "title": "System updates", "detail": "apt-get update and upgrade (brew update on macOS); counts as done for 24 hours", "sudo": true },
+      { "id": "packages", "title": "System packages", "detail": "git, curl, jq, unzip, build tools, python3, openssl, and psql and pg_dump of the Postgres version (PostgreSQL apt repository)", "sudo": true },
+      { "id": "docker", "title": "Docker", "detail": "Docker Engine from Docker's apt repository, started at boot, and you in the docker group", "sudo": true },
+      { "id": "cli", "title": "GitHub CLI and 1Password CLI", "detail": "gh for the box's own GitHub sign-in and clones; op for the shared keys", "sudo": true },
+      { "id": "node", "title": "Node with fnm", "detail": "the version cal.com names (.nvmrc, engines, else its CI), in your home folder, on the PATH of login shells" },
+      { "id": "yarn", "title": "Yarn with corepack", "detail": "cal.com's packageManager picks the version" },
+      { "id": "postgres", "title": "Postgres in Docker", "detail": "cal-postgres, the version in box.settings (18), on 127.0.0.1:5450, database calendso, volume cal-postgres-data, restarts unless stopped" },
+      { "id": "redis", "title": "Redis in Docker", "detail": "cal-redis, the version in box.settings (8), on 127.0.0.1:6379, volume cal-redis-data, restarts unless stopped" }
     ]
   },
   "projects": [
     {
-      "id": "cal.com",
+      "id": "cal",
+      "$id": "The project's name on the box. The cal-com kit puts it in each worktree's URL (<worktree>.cal.<box>.localhost), so it has no dots.",
       "repo": "calcom/cal.com",
-      "$repo": "OPEN: calcom/cal.com, or the internal calcom/cal?",
+      "$repo": "The public calcom/cal.com. Cal.com's own setup, kept privately, is where its team decides which repos an engineer gets.",
       "path": "~/code/cal.com",
       "required": true,
-      "kit": "https://github.com/sean-brydon/berth-kit-calcom@7f93797",
+      "kit": "https://github.com/sean-brydon/berth-kit-calcom@5476af4fedde311e2a4ba77089cfd0dd9c0f0f2a",
+      "$kit": "Used only while calcom/cal.com has no .berth/config.json of its own. Pinned to berth-kit-calcom's main at 5476af4.",
       "init": "box/init-cal.sh",
-      "init_detail": ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic",
+      "init_detail": "once in the main checkout: Node from fnm, .env from .env.example with DATABASE_URL and REDIS_URL at the Docker services, yarn install (prisma generate), prisma migrate deploy, seed-basic",
       "first_task": "Find an open issue labelled \"good first issue\" in calcom/cal.com, explain how you'd fix it, and make the change in a new worktree"
-    },
-    {
-      "id": "private-api",
-      "repo": "calcom/private-api",
-      "path": "~/code/private-api",
-      "required": false,
-      "$required": "OPEN: does every engineer need it?",
-      "kit": "./projects/private-api"
     }
   ],
   "keys": {
-    "$comment": "No secrets in git, ever. Shared keys are references read on the box with the engineer's own 1Password; asked keys stay on that engineer's box. OPEN: the vault and item names are placeholders.",
-    "cal.com": {
+    "$comment": "No secrets in git. shared: op:// references, read on the box with the engineer's own 1Password when a worktree needs them. ask: each engineer's own, asked for once and kept on their box. Ports, URLs and databases are the kit's job, not this. OPEN: the vault (Engineering) and item names are placeholders.",
+    "cal": {
       "from": ".env.example",
       "shared": {
         "STRIPE_PRIVATE_KEY": "op://Engineering/Cal.com Stripe test/secret key",
         "NEXT_PUBLIC_STRIPE_PUBLIC_KEY": "op://Engineering/Cal.com Stripe test/publishable key",
         "STRIPE_WEBHOOK_SECRET": "op://Engineering/Cal.com Stripe test/webhook secret",
-        "DAILY_API_KEY": "op://Engineering/Daily dev/credential"
+        "STRIPE_CLIENT_ID": "op://Engineering/Cal.com Stripe test/client id",
+        "DAILY_API_KEY": "op://Engineering/Cal.com Daily dev/credential",
+        "GOOGLE_API_CREDENTIALS": "op://Engineering/Cal.com Google OAuth dev/credentials json",
+        "ZOOM_CLIENT_ID": "op://Engineering/Cal.com Zoom dev/client id",
+        "ZOOM_CLIENT_SECRET": "op://Engineering/Cal.com Zoom dev/client secret",
+        "MS_GRAPH_CLIENT_ID": "op://Engineering/Cal.com Microsoft dev/client id",
+        "MS_GRAPH_CLIENT_SECRET": "op://Engineering/Cal.com Microsoft dev/client secret"
       },
-      "ask": ["SENDGRID_API_KEY"]
+      "ask": ["SENDGRID_API_KEY", "SENDGRID_EMAIL"]
     }
   },
   "updates": { "notify": true }

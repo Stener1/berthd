@@ -1,0 +1,35 @@
+#!/bin/sh
+# A synthetic 1Password CLI for scripts/team-setup-test.sh: no account, no
+# network. Like the real op, it asks at the terminal (/dev/tty) when it isn't
+# signed in and has one to ask on; Berth must never give it one.
+S="$HOME/.fake-op"
+mkdir -p "$S"
+signed() { [ -n "${OP_SESSION_acme:-}" ] && [ "$OP_SESSION_acme" = "$(cat "$S/token" 2>/dev/null)" ]; }
+case "$1" in
+--version) echo 2.30.0 ;;
+whoami)
+  signed && { echo "dev@acme.test"; exit 0; }
+  echo '[ERROR] 2026/10/06 00:00:00 account is not signed in' >&2
+  exit 1 ;;
+signin)
+  printf 'Enter the password for dev@acme.test at acme.1password.com: ' >&2
+  read -r pw
+  [ "$pw" = op-pass ] || { echo '[ERROR] 2026/10/06 00:00:00 incorrect password' >&2; exit 1; }
+  t="tok-$$"
+  echo "$t" >"$S/token"
+  echo "export OP_SESSION_acme=\"$t\""
+  echo "# This command is meant to be used with your shell's eval function." ;;
+read)
+  if signed; then
+    case "$2" in op://Dev/Stripe/key) printf 'sk_test_synthetic' ;; *) echo "[ERROR] \"$2\" isn't an item" >&2; exit 1 ;; esac
+    exit 0
+  fi
+  if (exec 3<>/dev/tty) 2>/dev/null; then
+    echo asked >>"$S/asked"
+    printf 'No accounts configured for use with 1Password CLI. Do you want to add an account manually now? [Y/n] ' >/dev/tty
+    read -r _ </dev/tty
+  fi
+  echo '[ERROR] 2026/10/06 00:00:00 no accounts configured for use with 1Password CLI' >&2
+  exit 1 ;;
+*) echo "[ERROR] unknown command $1" >&2; exit 1 ;;
+esac
