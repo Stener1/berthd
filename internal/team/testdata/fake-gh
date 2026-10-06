@@ -3,7 +3,7 @@
 touches the network: it answers the gh commands Berth uses from bare git
 repositories on disk.
 
-  $GH_FAKE_ROOT/<owner>/<name>.git    a repository (bare)
+  $GH_FAKE_ROOT/<owner>/<name>.git    a repository (bare); GH_FAKE_ROOT defaults to ~/.fake-gh
   $GH_FAKE_ROOT/<owner>/org.json      makes <owner> an org (login, name, avatar_url, is_verified)
   <repo>.git/berth-private            the repository is private
   <repo>.git/berth-noaccess           the signed-in account can't read it (404, as GitHub answers)
@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 
-ROOT = os.environ.get("GH_FAKE_ROOT", "")
+ROOT = os.environ.get("GH_FAKE_ROOT") or os.path.expanduser("~/.fake-gh")
 AUTH = os.path.join(ROOT, ".auth")
 
 
@@ -227,6 +227,7 @@ def main():
             print("! Failed opening a web browser at https://github.com/login/device")
             time.sleep(float(os.environ.get("GH_FAKE_LOGIN_DELAY", "0.5")))
             who = os.environ.get("GH_FAKE_LOGIN", "engineer")
+            os.makedirs(ROOT, exist_ok=True)
             with open(AUTH, "w") as f:
                 f.write(who)
             print("✓ Authentication complete.")

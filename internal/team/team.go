@@ -43,12 +43,12 @@ type Setup struct {
 	Description string `json:"description,omitempty"`
 	// Contact is where to ask for help or access, in the team's words
 	// ("#eng-onboarding on Slack").
-	Contact  string          `json:"contact,omitempty"`
-	Docs     string          `json:"docs,omitempty"`
-	Box      Box             `json:"box"`
-	Projects []Project       `json:"projects"`
-	Keys     KeySet          `json:"keys,omitempty"`
-	Updates  Updates         `json:"updates"`
+	Contact  string    `json:"contact,omitempty"`
+	Docs     string    `json:"docs,omitempty"`
+	Box      Box       `json:"box"`
+	Projects []Project `json:"projects"`
+	Keys     KeySet    `json:"keys,omitempty"`
+	Updates  Updates   `json:"updates"`
 }
 
 // Box is what a box needs once, before any repository.

@@ -102,10 +102,10 @@ func TestParseWarnsOnUnknownFields(t *testing.T) {
 
 func TestParseKitRef(t *testing.T) {
 	cases := map[string]KitRef{
-		"./kits/web":                                    {Path: "kits/web"},
-		"kits/web":                                      {Path: "kits/web"},
-		"https://github.com/o/kit@abc1234":              {Owner: "o", Name: "kit", Ref: "abc1234", Link: "https://github.com/o/kit"},
-		"github.com/o/kit@v2":                           {Owner: "o", Name: "kit", Ref: "v2", Link: "https://github.com/o/kit"},
+		"./kits/web":                       {Path: "kits/web"},
+		"kits/web":                         {Path: "kits/web"},
+		"https://github.com/o/kit@abc1234": {Owner: "o", Name: "kit", Ref: "abc1234", Link: "https://github.com/o/kit"},
+		"github.com/o/kit@v2":              {Owner: "o", Name: "kit", Ref: "v2", Link: "https://github.com/o/kit"},
 		"https://github.com/o/kits/tree/abc1234/shop":   {Owner: "o", Name: "kits", Ref: "abc1234", Sub: "shop", Link: "https://github.com/o/kits/tree/abc1234/shop"},
 		"https://gitlab.com/o/kit@0123456789abcdef0123": {Link: "https://gitlab.com/o/kit", Ref: "0123456789abcdef0123"},
 	}

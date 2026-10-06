@@ -349,7 +349,10 @@ func serve(b boxHome, args []string) error {
 	bx.BrowserProxies = &box.BrowserProxies{Path: filepath.Join(b.dir, "browser-proxies.json")}
 	defer bx.BrowserProxies.CloseAll()
 	bx.NewBrowsers(filepath.Join(b.dir, "browser"), rc.MaxBrowsers)
+	bx.Team = &box.TeamRunner{Dir: filepath.Join(b.dir, "team")}
+	defer bx.Team.Stop()
 	bx.Mount(s)
+	bx.ResumeTeams()
 	// Hooks that ran while berthd was down, in order, before anything new.
 	if n := integrations.DrainSpool(b.spool(), func(e events.Event) { bus.Publish(e) }); n > 0 {
 		logger.Printf("published %d agent hooks spooled while berthd was down", n)

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sean-brydon/berthd/internal/box"
 	"github.com/sean-brydon/berthd/internal/team/teamtest"
 )
 
@@ -301,5 +303,95 @@ func TestTeamRoutesNeedGitHubConnected(t *testing.T) {
 	resp, body = uiCall(t, a, http.MethodGet, "/v1/team/acme", tok)
 	if resp.StatusCode != 200 || !strings.Contains(body, `"state":"none"`) {
 		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+}
+
+func uiPost(t *testing.T, a *runningAgent, path, token string, body any) (int, string) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, "http://"+a.ui+path, strings.NewReader(string(b)))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(out)
+}
+
+func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
+	g, _ := acmeGitHub(t)
+	b := newBox(t)
+	var got box.TeamBundle
+	b.server.Handle("POST /v1/team", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &got)
+		json.NewEncoder(w).Encode(box.TeamStatus{ID: got.ID, Phase: "steps", Steps: []box.TeamStepStatus{}, Projects: []box.TeamProjectStatus{}, KeysSet: []string{}})
+	}))
+	var retried string
+	b.server.Handle("POST /v1/team/{id}/retry", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		retried = r.PathValue("id") + " " + string(raw)
+		json.NewEncoder(w).Encode(box.TeamStatus{ID: r.PathValue("id"), Phase: "steps"})
+	}))
+	a := startAgent(t, b.pairLaptop())
+	tok := uiToken(t, a)
+	eventually(t, "box online", func() bool { return stateOf(t, a) == StateOnline })
+	st, _ := a.client.Status(context.Background())
+	boxName := st.Boxes[0].Name
+
+	_, body := uiCall(t, a, http.MethodGet, "/v1/team/acme", tok)
+	var v TeamView
+	if err := json.Unmarshal([]byte(body), &v); err != nil || v.Commit == nil {
+		t.Fatalf("view: %s", body)
+	}
+	code, body := uiPost(t, a, "/v1/team/acme/setup", tok, TeamSetupRequest{Box: boxName, Commit: v.Commit.Short,
+		Keys: map[string]map[string]string{"web": {"MAIL_KEY": "SG.mine", "STRIPE_KEY": "typed-but-shared"}}})
+	if code != 200 {
+		t.Fatalf("setup: %d %s", code, body)
+	}
+	if got.ID != "acme" || got.Commit != v.Commit.SHA || got.Script != "box/setup.sh" || len(got.Steps) != 2 || !got.GitHub || len(got.Files) != 6 {
+		t.Fatalf("bundle: %+v", got)
+	}
+	plans := map[string]box.TeamProjectPlan{}
+	for _, p := range got.Projects {
+		plans[p.ID] = p
+	}
+	if _, ok := plans["secret"]; ok || len(plans) != 3 {
+		t.Fatalf("a repository nobody can read was sent: %v", plans)
+	}
+	web := plans["web"]
+	if web.Source != "repo" || web.TrustHash != v.Projects[0].ConfigHash || web.Kit != nil || web.URL != "https://github.com/acme/web.git" || web.Path != "~/code/web" {
+		t.Fatalf("web: %+v", web)
+	}
+	// Shared keys are references; only asked keys take what was typed.
+	if web.Env["STRIPE_KEY"] != "op://Dev/Stripe/key" || web.Env["MAIL_KEY"] != "SG.mine" || len(web.Env) != 3 {
+		t.Fatalf("web env: %v", web.Env)
+	}
+	api := plans["api"]
+	if api.Kit == nil || api.Kit.Kit.ID != "acme-api" || api.Kit.Hash != v.Projects[1].Kit.Hash || api.Init != "box/init-api.sh" {
+		t.Fatalf("api: %+v", api)
+	}
+	if acc, _ := (&Agent{cfg: Config{Dir: a.dir}}).accepted("acme"); acc == nil || acc.Commit != v.Commit.SHA || acc.Box != boxName {
+		t.Fatalf("accepted: %+v", acc)
+	}
+	// A commit nobody reviewed is refused.
+	g.Repo("acme/.berth", map[string]string{"README.md": "changed\n"}, teamtest.Repo{})
+	code, body = uiPost(t, a, "/v1/team/acme/setup", tok, TeamSetupRequest{Box: boxName, Commit: "0000000"})
+	if code == 200 {
+		t.Fatalf("an unreviewed commit ran: %s", body)
+	}
+	code, body = uiPost(t, a, "/v1/team/acme/retry", tok, map[string]string{"from": "db"})
+	if code != 200 || !strings.HasPrefix(retried, `acme {"from":"db"}`) {
+		t.Fatalf("retry: %d %s %q", code, body, retried)
+	}
+	// The picker: an org without .berth sets up the repos chosen.
+	g.Org("northwind", "Northwind", false)
+	g.Repo("northwind/web", map[string]string{".berth/config.json": `{"ports":2}`}, teamtest.Repo{})
+	code, body = uiPost(t, a, "/v1/team/northwind/setup", tok, TeamSetupRequest{Box: boxName, Repos: []string{"northwind/web"}})
+	if code != 200 || got.ID != "northwind" || len(got.Projects) != 1 || got.Projects[0].Source != "repo" || got.Projects[0].TrustHash == "" || len(got.Steps) != 0 || !got.GitHub {
+		t.Fatalf("picker: %d %s %+v", code, body, got)
 	}
 }

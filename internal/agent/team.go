@@ -859,10 +859,19 @@ func (a *Agent) teamRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	a.teamSetupRoutes(mux)
+	// The team setups this laptop accepted, each with how it stands on its
+	// box when the box is online.
 	mux.HandleFunc("GET /v1/team", func(w http.ResponseWriter, r *http.Request) {
+		a.sync()
 		out := []map[string]any{}
 		for _, t := range a.allAccepted() {
-			out = append(out, map[string]any{"org": t.Org, "id": t.ID, "name": t.Name, "commit": t.Commit, "box": t.Box, "boxes": t.Boxes, "at": t.At})
+			row := map[string]any{"org": t.Org, "id": t.ID, "name": t.Name, "commit": t.Commit, "box": t.Box, "boxes": t.Boxes, "at": t.At}
+			var st box.TeamStatus
+			if a.postToBox(r.Context(), t.Box, http.MethodGet, "/v1/team/"+url.PathEscape(t.ID), nil, &st) == nil {
+				row["status"] = st
+			}
+			out = append(out, row)
 		}
 		writeJSON(w, http.StatusOK, out)
 	})

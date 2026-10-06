@@ -152,6 +152,11 @@ func (b *Box) Capabilities() []string {
 	if b.Runs != nil {
 		caps = append(caps, "runs", "exec.detach")
 	}
+	if b.Team != nil {
+		// team: GET/POST /v1/team and POST /v1/team/{id}/retry run team
+		// setups (team.go).
+		caps = append(caps, "team")
+	}
 	if b.Browsers != nil {
 		// browser.health: GET /v1/browser/health, PUT /v1/browser/settings
 		// and POST /v1/browser/check (browsersandbox.go).
