@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/groups"
 )
 
 // A repository's services run in each worktree as managed units, so they
@@ -165,6 +166,11 @@ func (b *Box) StartService(ctx context.Context, location, worktree, name string)
 			return ServiceStatus{}, err
 		}
 		program, args = wrap[0], append(append(wrap[1:], program), args...)
+	}
+	// A unit gets the service manager's groups, from before a group the
+	// user joined since; sg gives it them.
+	if argv := groups.Wrap(append([]string{program}, args...)); argv[0] != program {
+		program, args = argv[0], argv[1:]
 	}
 	unit := serviceUnit(loc.Name, wt.Name, name)
 	if _, err := b.Units.Install(ctx, UnitRequest{

@@ -20,6 +20,7 @@ import (
 
 	"github.com/sean-brydon/berthd/internal/box/runs"
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/hooks"
 )
 
@@ -203,7 +204,7 @@ func (h *runHost) command(ctx context.Context, x *runs.StepCtx) runs.Result {
 	defer cancel()
 	// Values reach the command only through its environment.
 	script, flowVars := shellTemplate(s.Command, x.Vars)
-	cmd := exec.CommandContext(ctx, loginShell(), "-lc", script)
+	cmd := groups.CommandContext(ctx, loginShell(), "-lc", script)
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), sc.env...), flowVars...)
 	var out tailBuffer

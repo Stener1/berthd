@@ -15,6 +15,7 @@ import (
 
 	"github.com/sean-brydon/berthd/internal/box/runs"
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/hooks"
 	"github.com/sean-brydon/berthd/internal/integrations/adapters"
 )
@@ -518,7 +519,7 @@ func (b *Box) handleExec(w http.ResponseWriter, r *http.Request) error {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	cmd := exec.CommandContext(ctx, shell, "-lc", req.Command)
+	cmd := groups.CommandContext(ctx, shell, "-lc", req.Command)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), b.envForDir(ctx, dir)...)
 	var out tailBuffer

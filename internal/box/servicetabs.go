@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sean-brydon/berthd/internal/groups"
 )
 
 // A service with "terminal": true runs in a terminal of its own instead of
@@ -125,7 +127,7 @@ func (s *Sessions) runService(ctx context.Context, r serviceRun) error {
 	}
 	shell := loginShell()
 	argv := []string{shell, "-lc", "cd " + shellQuote(r.Dir) + " && " + sourceCommand(shell, file)}
-	args = append(append(append(args, "--"), r.Wrap...), argv...)
+	args = append(append(args, "--"), groups.Wrap(append(append([]string(nil), r.Wrap...), argv...))...)
 	set := func(k, v string) {
 		args = append(args, ";", "set-option", "-t", target, k, v)
 	}

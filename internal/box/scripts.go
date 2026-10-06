@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/hooks"
 )
 
@@ -103,7 +103,7 @@ func runScript(ctx context.Context, script, repo, dir, name, logPath string, tim
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	cmd := exec.CommandContext(ctx, shell, "-lc", script)
+	cmd := groups.CommandContext(ctx, shell, "-lc", script)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"BERTH_ROOT_PATH="+repo, "BERTH_WORKTREE_PATH="+dir, "BERTH_WORKTREE_NAME="+name,

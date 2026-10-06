@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/sean-brydon/berthd/internal/doctor"
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/integrations"
 )
 
@@ -28,6 +30,11 @@ func (b *Box) Doctor(ctx context.Context) []doctor.Check {
 		// starts with less than a login shell has.
 		doctor.Check{Area: "Worktrees and sessions", Name: "PATH", Status: doctor.Info, Detail: os.Getenv("PATH")},
 	)
+	if m := groups.Now(); len(m.Groups) > 0 {
+		checks = append(checks, doctor.Check{Area: "Worktrees and sessions", Name: "groups", Status: doctor.Info,
+			Detail: "you joined " + strings.Join(m.Groups, ", ") + " after berthd started, so berthd lacks it; what berthd starts now (terminals, services, scripts, hooks) gets it through sg",
+			Fix:    "Terminals and services already running keep their groups until they start again; after the next reboot this goes away"})
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, t := range integrations.Tools {
 			if !t.Present(home) {

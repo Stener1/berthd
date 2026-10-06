@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/integrations/adapters"
 	"github.com/sean-brydon/berthd/internal/statefile"
 	"github.com/sean-brydon/berthd/internal/terminal"
@@ -269,7 +270,9 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
-	args = append(append(append(args, "--"), wrap...), argv...)
+	// A group the user joined since berthd started (docker, say) is given
+	// to the new session through sg.
+	args = append(append(args, "--"), groups.Wrap(append(append([]string(nil), wrap...), argv...))...)
 	// The labels are set in the same tmux command that makes the session,
 	// so no list sees it without them. set-option takes a pane target,
 	// whose exact-match form needs the colon.

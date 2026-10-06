@@ -20,7 +20,6 @@ import (
 	"hash/fnv"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/statefile"
 )
 
@@ -341,7 +341,7 @@ func Exec(ctx context.Context, h Hook, e events.Event, def time.Duration, extra 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	payload, _ := json.Marshal(e)
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", h.Run)
+	cmd := groups.CommandContext(ctx, "/bin/sh", "-c", h.Run)
 	cmd.Dir = h.Dir
 	cmd.Env = append(os.Environ(), Env(e, h.Tool)...)
 	if strings.HasPrefix(h.Source, "plugin:") {
