@@ -123,6 +123,10 @@ func (a *Agent) runStream(w http.ResponseWriter, r *http.Request, timeout time.D
 	// of output: held back until another line follows it, and dropped when
 	// the command then fails with it.
 	var last, held string
+	// errText is the CLI's own error, from its "berth: " line to the end:
+	// an error can go on over lines, ending with a command to run, and
+	// only all of it says what to do.
+	var errText []string
 	var failure json.RawMessage
 	sc := bufio.NewScanner(pr)
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
@@ -141,15 +145,22 @@ func (a *Agent) runStream(w http.ResponseWriter, r *http.Request, timeout time.D
 		}
 		if line != "" {
 			last = line
+			if errText != nil {
+				errText = append(errText, line)
+			}
 		}
 		if strings.HasPrefix(line, "berth: ") {
 			held = line
+			errText = []string{strings.TrimPrefix(line, "berth: ")}
 			continue
 		}
 		send(StreamLine{Line: line})
 	}
 	if err := <-done; err != nil {
 		msg := strings.TrimPrefix(last, "berth: ")
+		if len(errText) > 0 {
+			msg = strings.Join(errText, "\n")
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
