@@ -47,7 +47,7 @@ again.
 - **op never asks in a service's terminal.** Berth runs op without a
   terminal, so a box that isn't signed in no longer leaves a service sitting
   at op's "add an account? [Y/n]": the read fails at once with
-  "1Password isn't signed in on <box>: sign in from Team setup or run
+  "1Password isn't signed in on devbox: sign in from Team setup or run
   `berthd secret signin` on the box", and the service starts without the key.
 - **tmux and git on a fresh box.** `berthd install` (which the install
   command and `berth add ssh` both run) installs tmux, and git if missing,
