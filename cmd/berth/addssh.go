@@ -350,8 +350,10 @@ func addSSHSteps(l laptop, args []string) error {
 	}
 	rep.done(guided.StepPair, name2)
 	fmt.Fprintf(rep, "\r\nReady: paired with %s at %s. SSH is no longer needed for this box.\r\n", name2, addr)
-	if !markers && len(chosen) > 0 {
-		fmt.Fprintf(rep, "Sign in to %s the first time it starts there.\r\n", agentcli.Names(chosen))
+	if !markers && len(chosen) == 1 {
+		fmt.Fprintf(rep, "%s asks you to sign in the first time you start it there.\r\n", agentcli.Names(chosen))
+	} else if !markers && len(chosen) > 1 {
+		fmt.Fprintf(rep, "%s each ask you to sign in the first time you start them there.\r\n", agentcli.Names(chosen))
 	}
 	return nil
 }
@@ -366,7 +368,8 @@ func upload(name string) string {
 // when a person is at this one, so sudo can ask them for their password,
 // with its markers read on the way through. A failed step is the error.
 func runSteps(rep *stepReporter, sshArgs, env []string, target string, interactive bool) error {
-	args := append([]string{}, sshArgs...)
+	// -q: ssh's own "Shared connection … closed" is not a step's output.
+	args := append([]string{"-q"}, sshArgs...)
 	if interactive {
 		args = append(args, "-t")
 	}
@@ -376,7 +379,7 @@ func runSteps(rep *stepReporter, sshArgs, env []string, target string, interacti
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
-	filter := &guided.Filter{Out: rep, OnStep: rep.event}
+	filter := &guided.Filter{Out: rep, OnStep: rep.remote}
 	cmd.Stdout = filter
 	cmd.Stderr = filter
 	err := cmd.Run()

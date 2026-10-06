@@ -3,6 +3,7 @@ package guided
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,6 +77,25 @@ func TestFilterMarkerSplitAcrossWrites(t *testing.T) {
 		t.Fatalf("byte at a time: %q %+v", out, events)
 	}
 }
+
+// What a step printed reaches the screen before the marker after it is
+// handled, so a checklist drawn into the same terminal keeps the order.
+func TestFilterKeepsOrder(t *testing.T) {
+	var log []string
+	var out bytes.Buffer
+	rec := writerFunc(func(p []byte) { log = append(log, "out:"+string(p)) })
+	f := &Filter{Out: io.MultiWriter(&out, rec), OnStep: func(e Event) { log = append(log, "step:"+e.Step+":"+e.State) }}
+	f.Write([]byte("Lingering is on\n::berth-step linger done\nnext\n"))
+	f.Flush()
+	want := []string{"out:Lingering is on\n", "step:linger:done", "out:next\n"}
+	if strings.Join(log, "|") != strings.Join(want, "|") {
+		t.Errorf("order = %q", log)
+	}
+}
+
+type writerFunc func([]byte)
+
+func (w writerFunc) Write(p []byte) (int, error) { w(p); return len(p), nil }
 
 func TestFilterMarkerMidLineEndsTheLine(t *testing.T) {
 	out, events, _ := collect("Downloading 42%::berth-step agents done\nok\n")

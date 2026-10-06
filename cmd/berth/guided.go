@@ -123,6 +123,19 @@ func (r *stepReporter) event(e guided.Event) {
 	}
 }
 
+// remote is an event from the box's step script, which prints its own
+// heading as a step starts: in a person's terminal only the end of a step
+// is drawn, so the heading is not there twice.
+func (r *stepReporter) remote(e guided.Event) {
+	if e.State == guided.Start && !r.markers {
+		r.mu.Lock()
+		r.current = e.Step
+		r.mu.Unlock()
+		return
+	}
+	r.event(e)
+}
+
 func (r *stepReporter) start(id string) { r.event(guided.Event{Step: id, State: guided.Start}) }
 func (r *stepReporter) done(id, msg string) {
 	r.event(guided.Event{Step: id, State: guided.Done, Message: msg})
@@ -155,6 +168,10 @@ func printPlan(w io.Writer, steps []guided.Step, color bool) {
 	fmt.Fprintln(w, paint("1", "Berth will set this box up:"))
 	n := 0
 	for _, s := range steps {
+		if s.ID == guided.StepConnect {
+			// Done by now: this is what comes next.
+			continue
+		}
 		if s.Skip != "" {
 			fmt.Fprintf(w, "   %s\n", paint("2", "– "+s.Title+" ("+s.Skip+")"))
 			continue
@@ -174,7 +191,12 @@ func printPlan(w io.Writer, steps []guided.Step, color bool) {
 	}
 	if sudo := guided.SudoSteps(steps); len(sudo) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "%s needs root: sudo asks for your password on the box, in this terminal.\n", strings.Join(sudo, " and "))
+		if len(sudo) == 1 {
+			fmt.Fprintf(w, "%s needs root", sudo[0])
+		} else {
+			fmt.Fprintf(w, "%d steps need root (%s)", len(sudo), strings.Join(sudo, "; "))
+		}
+		fmt.Fprintln(w, ": sudo asks for your password on the box, in this terminal.")
 		fmt.Fprintln(w, "Berth never sees it or keeps it.")
 	}
 }

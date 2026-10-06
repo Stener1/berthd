@@ -115,23 +115,40 @@ type Filter struct {
 	pending []byte
 	// midLine is whether the last byte passed through was not a newline.
 	midLine bool
+	// out is the output of the Write in progress, err its first error.
+	out *bytes.Buffer
+	err error
 }
 
 var prefixes = [][]byte{[]byte(MarkerPrefix), []byte(FailurePrefix)}
 
-// Write never fails because of a marker; it returns Out's error.
+// Write never fails because of a marker; it returns Out's error. What came
+// before a marker reaches Out before the marker's handler runs, so the two
+// keep their order.
 func (f *Filter) Write(p []byte) (int, error) {
+	f.err = nil
 	var out bytes.Buffer
+	f.out = &out
 	for _, c := range p {
 		f.pending = append(f.pending, c)
 		f.settle(&out)
 	}
-	if out.Len() > 0 {
-		if _, err := f.Out.Write(out.Bytes()); err != nil {
-			return 0, err
-		}
+	f.out = nil
+	f.flushOut(&out)
+	if f.err != nil {
+		return 0, f.err
 	}
 	return len(p), nil
+}
+
+func (f *Filter) flushOut(out *bytes.Buffer) {
+	if out.Len() == 0 {
+		return
+	}
+	if _, err := f.Out.Write(out.Bytes()); err != nil && f.err == nil {
+		f.err = err
+	}
+	out.Reset()
 }
 
 // settle decides what pending is: a whole marker (taken out), a marker
@@ -173,6 +190,7 @@ func (f *Filter) take(out *bytes.Buffer, line string, prefix []byte) {
 		out.WriteString("\r\n")
 		f.midLine = false
 	}
+	f.flushOut(out)
 	if string(prefix) == FailurePrefix {
 		raw := strings.TrimSpace(strings.TrimPrefix(line, FailurePrefix))
 		if json.Valid([]byte(raw)) && f.OnFailure != nil {
