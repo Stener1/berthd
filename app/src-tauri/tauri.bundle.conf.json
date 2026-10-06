@@ -5,6 +5,8 @@
     "resources": {
       "binaries/berthd-linux-amd64": "berthd-linux-amd64",
       "binaries/berthd-linux-arm64": "berthd-linux-arm64",
+      "binaries/tmux-linux-amd64": "tmux-linux-amd64",
+      "binaries/tmux-linux-arm64": "tmux-linux-arm64",
       "binaries/berthd-local": "berthd"
     }
   }

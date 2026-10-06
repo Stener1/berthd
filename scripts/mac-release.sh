@@ -120,7 +120,7 @@ check_app() {
     [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]] ||
       die "$exe is not universal (has: $archs)"
   done
-  for d in berthd-linux-amd64 berthd-linux-arm64; do
+  for d in berthd-linux-amd64 berthd-linux-arm64 tmux-linux-amd64 tmux-linux-arm64; do
     [ -f "$app/Contents/Resources/$d" ] || die "$app carries no $d"
   done
   check_berthd "$app/Contents/Resources/berthd"

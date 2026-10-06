@@ -21,7 +21,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Berth's static tmux for Linux boxes, which berth and the app carry for
+  # boxes without one. Built in Docker (zig cross-compiles both
+  # architectures from pinned, checksummed sources), on a hosted runner,
+  # which has Docker, for the release and macos jobs to download.
+  tmux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: scripts/build-tmux.sh bin amd64 arm64
+      - name: Check they run
+        run: |
+          file bin/tmux-linux-amd64 bin/tmux-linux-arm64
+          bin/tmux-linux-amd64 -V
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tmux
+          path: |
+            bin/tmux-linux-amd64
+            bin/tmux-linux-arm64
+          if-no-files-found: error
+
   release:
+    needs: tmux
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     permissions:
       contents: write
@@ -47,12 +71,17 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: sudo apt-get update && sudo apt-get install -y tmux shellcheck
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tmux
+          path: bin
+      - run: chmod +x bin/tmux-linux-amd64 bin/tmux-linux-arm64
       - run: go vet ./...
       - run: go test -race ./...
         # GitHub's Ubuntu runners stop Chromium's sandbox (user namespaces).
         env:
           BERTH_BROWSER_NO_SANDBOX: "1"
-      - run: shellcheck site/install.sh scripts/build-release.sh scripts/publish.sh scripts/mac-release.sh
+      - run: shellcheck site/install.sh scripts/build-release.sh scripts/build-tmux.sh scripts/publish.sh scripts/mac-release.sh
       - name: Build archives
         run: make release VERSION="$GITHUB_REF_NAME"
       - name: Check the stamped version
@@ -75,12 +104,13 @@ jobs:
           fi
 
   macos:
-    # After the release job, which has made the release by then. Safe to
+    # After the release job, which has made the release by then; it takes
+    # Berth's tmux from the tmux job, since a Mac runner has no Docker. Safe to
     # re-run: it skips when the release's latest.json already announces this
     # version (scripts/publish.sh uploaded it, or an earlier run did), and
     # otherwise replaces only its own four assets, the feed last, so the feed
     # never points at an archive that is not there yet.
-    needs: release
+    needs: [tmux, release]
     runs-on: macos-latest
     timeout-minutes: 90
     permissions:
@@ -131,6 +161,13 @@ jobs:
           # would accept anything.
           sudo spctl --master-enable || true
           spctl --status
+      - if: steps.published.outputs.published != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tmux
+          path: bin
+      - if: steps.published.outputs.published != 'true'
+        run: chmod +x bin/tmux-linux-amd64 bin/tmux-linux-arm64
       - name: Install the app's dependencies
         if: steps.published.outputs.published != 'true'
         working-directory: app

@@ -70,7 +70,7 @@ jobs:
           fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       # ubuntu-latest ships shellcheck. install.sh is served at berthd.app/install.
-      - run: shellcheck site/install.sh scripts/build-release.sh scripts/publish.sh scripts/mac-release.sh
+      - run: shellcheck site/install.sh scripts/build-release.sh scripts/build-tmux.sh scripts/publish.sh scripts/mac-release.sh
       # The release tests (warnings and errors; their style is their own).
       - run: shellcheck -x -S warning scripts/release-check.sh scripts/fresh-user-test.sh scripts/linux-box-test.sh scripts/upgrade-test.sh scripts/release-test/common.sh scripts/release-test/macos/lib.sh scripts/release-test/macos/launchctl scripts/release-test/linux/lib.sh scripts/release-test/linux/fake-chromium
       - run: sh -n site/install.sh && dash -n site/install.sh
