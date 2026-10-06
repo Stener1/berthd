@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""A stand-in for GitHub's gh CLI, for Berth's team setup tests. It never
+touches the network: it answers the gh commands Berth uses from bare git
+repositories on disk.
+
+  $GH_FAKE_ROOT/<owner>/<name>.git    a repository (bare)
+  $GH_FAKE_ROOT/<owner>/org.json      makes <owner> an org (login, name, avatar_url, is_verified)
+  <repo>.git/berth-private            the repository is private
+  <repo>.git/berth-noaccess           the signed-in account can't read it (404, as GitHub answers)
+  <repo>.git/description              its description
+  $GH_FAKE_ROOT/.auth                 signed in, as the login it holds
+  $GH_FAKE_LOGIN                      the login `gh auth login` signs in as (default: engineer)
+  $GH_FAKE_LOG                        every call is appended to this file
+
+Commands: --version, auth status|login|setup-git|token, api PATH.
+"""
+import base64
+import json
+import os
+import subprocess
+import sys
+import time
+
+ROOT = os.environ.get("GH_FAKE_ROOT", "")
+AUTH = os.path.join(ROOT, ".auth")
+
+
+def log():
+    path = os.environ.get("GH_FAKE_LOG")
+    if path:
+        with open(path, "a") as f:
+            f.write(" ".join(sys.argv[1:]) + "\n")
+
+
+def out(value):
+    sys.stdout.write(json.dumps(value) + "\n")
+    sys.exit(0)
+
+
+def not_found():
+    sys.stdout.write(json.dumps({"message": "Not Found", "status": "404"}) + "\n")
+    sys.stderr.write("gh: Not Found (HTTP 404)\n")
+    sys.exit(1)
+
+
+def login():
+    try:
+        with open(AUTH) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def git(repo, *args):
+    r = subprocess.run(["git", "--git-dir", repo, *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return r.stdout
+
+
+def git_bytes(repo, *args):
+    r = subprocess.run(["git", "--git-dir", repo, *args], capture_output=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def repo_dir(owner, name):
+    d = os.path.join(ROOT, owner, name + ".git")
+    if not os.path.isdir(d) or os.path.exists(os.path.join(d, "berth-noaccess")):
+        return None
+    return d
+
+
+def default_branch(d):
+    head = git(d, "symbolic-ref", "HEAD") or "refs/heads/main"
+    return head.strip().replace("refs/heads/", "")
+
+
+def repo_json(owner, name, d):
+    desc = ""
+    try:
+        with open(os.path.join(d, "description")) as f:
+            desc = f.read().strip()
+            if desc.startswith("Unnamed repository"):
+                desc = ""
+    except OSError:
+        pass
+    pushed = git(d, "log", "-1", "--format=%cI", default_branch(d)) or ""
+    size = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            size += os.path.getsize(os.path.join(root, f))
+    return {
+        "name": name,
+        "full_name": owner + "/" + name,
+        "owner": {"login": owner},
+        "private": os.path.exists(os.path.join(d, "berth-private")),
+        "default_branch": default_branch(d),
+        "html_url": "https://github.com/%s/%s" % (owner, name),
+        "description": desc,
+        "pushed_at": pushed.strip(),
+        "size": max(1, size // 1024),
+        "permissions": {"pull": True},
+    }
+
+
+def commit_json(d, ref):
+    sha = git(d, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    if not sha:
+        not_found()
+    sha = sha.strip()
+    fmt = git(d, "log", "-1", "--format=%an%x00%ae%x00%aI%x00%T%x00%B", sha).split("\x00")
+    name, email, date, tree, message = fmt[0], fmt[1], fmt[2], fmt[3], fmt[4].strip()
+    who = email.split("@")[0] if email else name
+    return {
+        "sha": sha,
+        "commit": {"message": message, "author": {"name": name, "email": email, "date": date}, "tree": {"sha": tree}},
+        "author": {"login": who, "avatar_url": "https://avatars.githubusercontent.com/" + who},
+    }
+
+
+def api(path):
+    path, _, query = path.partition("?")
+    params = dict(p.partition("=")[::2] for p in query.split("&") if p)
+    parts = path.strip("/").split("/")
+    if parts == ["user"]:
+        who = login()
+        if not who:
+            sys.stderr.write("gh: Requires authentication (HTTP 401)\n")
+            sys.exit(1)
+        out({"login": who, "name": who.title(), "avatar_url": "https://avatars.githubusercontent.com/" + who})
+    if len(parts) == 2 and parts[0] in ("orgs", "users"):
+        d = os.path.join(ROOT, parts[1])
+        org = os.path.join(d, "org.json")
+        if not os.path.isdir(d):
+            not_found()
+        if parts[0] == "orgs":
+            if not os.path.exists(org):
+                not_found()
+            with open(org) as f:
+                info = json.load(f)
+            info.setdefault("login", parts[1])
+            info.setdefault("type", "Organization")
+            info.setdefault("html_url", "https://github.com/" + parts[1])
+            out(info)
+        out({"login": parts[1], "name": parts[1], "type": "User", "avatar_url": "https://avatars.githubusercontent.com/" + parts[1],
+             "html_url": "https://github.com/" + parts[1]})
+    if len(parts) == 3 and parts[0] in ("orgs", "users") and parts[2] == "repos":
+        d = os.path.join(ROOT, parts[1])
+        if not os.path.isdir(d):
+            not_found()
+        repos = []
+        for entry in sorted(os.listdir(d)):
+            if entry.endswith(".git"):
+                rd = repo_dir(parts[1], entry[:-4])
+                if rd:
+                    repos.append(repo_json(parts[1], entry[:-4], rd))
+        repos.sort(key=lambda r: r["pushed_at"], reverse=True)
+        out(repos)
+    if len(parts) >= 3 and parts[0] == "repos":
+        owner, name = parts[1], parts[2]
+        d = repo_dir(owner, name)
+        if not d:
+            not_found()
+        rest = parts[3:]
+        if not rest:
+            out(repo_json(owner, name, d))
+        if rest[0] == "commits" and len(rest) == 2:
+            out(commit_json(d, rest[1]))
+        if rest[:2] == ["git", "trees"] and len(rest) == 3:
+            tree = git(d, "rev-parse", "--verify", "--quiet", rest[2] + "^{tree}")
+            if not tree:
+                not_found()
+            args = ["ls-tree", "-l"]
+            if params.get("recursive"):
+                args.append("-r")
+            entries = []
+            for line in git(d, *args, tree.strip()).splitlines():
+                meta, p = line.split("\t", 1)
+                mode, kind, sha, size = meta.split()
+                e = {"path": p, "mode": mode, "type": kind, "sha": sha}
+                if kind == "blob":
+                    e["size"] = int(size)
+                entries.append(e)
+            out({"sha": tree.strip(), "tree": entries, "truncated": False})
+        if rest[:2] == ["git", "blobs"] and len(rest) == 3:
+            data = git_bytes(d, "cat-file", "blob", rest[2])
+            if data is None:
+                not_found()
+            out({"sha": rest[2], "size": len(data), "encoding": "base64", "content": base64.encodebytes(data).decode()})
+        if rest[0] == "contents" and len(rest) >= 2:
+            ref = params.get("ref") or default_branch(d)
+            p = "/".join(rest[1:])
+            sha = git(d, "rev-parse", "--verify", "--quiet", "%s:%s" % (ref, p))
+            data = git_bytes(d, "show", "%s:%s" % (ref, p))
+            if not sha or data is None:
+                not_found()
+            out({"type": "file", "path": p, "sha": sha.strip(), "size": len(data), "encoding": "base64",
+                 "content": base64.encodebytes(data).decode()})
+        if rest[0] == "compare" and len(rest) == 2 and "..." in rest[1]:
+            a, b = rest[1].split("...", 1)
+            n = git(d, "rev-list", "--count", "%s..%s" % (a, b))
+            if n is None:
+                not_found()
+            out({"total_commits": int(n.strip()), "status": "ahead"})
+    not_found()
+
+
+def main():
+    log()
+    args = sys.argv[1:]
+    if not args or args[0] in ("--version", "version"):
+        print("gh version 2.99.0 (fake, for tests)")
+        return
+    if args[0] == "auth":
+        sub = args[1] if len(args) > 1 else ""
+        if sub == "status":
+            who = login()
+            if not who:
+                sys.stderr.write("You are not logged into any GitHub hosts. To log in, run: gh auth login\n")
+                sys.exit(1)
+            sys.stderr.write("github.com\n  ✓ Logged in to github.com account %s (fake)\n" % who)
+            return
+        if sub == "login":
+            print("! First copy your one-time code: 4F2A-9C1E")
+            print("Press Enter to open github.com in your browser... ", end="", flush=True)
+            sys.stdin.readline()
+            print("! Failed opening a web browser at https://github.com/login/device")
+            time.sleep(float(os.environ.get("GH_FAKE_LOGIN_DELAY", "0.5")))
+            who = os.environ.get("GH_FAKE_LOGIN", "engineer")
+            with open(AUTH, "w") as f:
+                f.write(who)
+            print("✓ Authentication complete.")
+            print("✓ Logged in as " + who)
+            return
+        if sub == "setup-git":
+            return
+        if sub == "token":
+            if not login():
+                sys.exit(1)
+            print("gho_fake")
+            return
+    if args[0] == "api" and len(args) > 1:
+        path = next((a for a in args[1:] if not a.startswith("-")), "")
+        api(path)
+    sys.stderr.write("fake gh: unknown command: %s\n" % " ".join(args))
+    sys.exit(2)
+
+
+main()

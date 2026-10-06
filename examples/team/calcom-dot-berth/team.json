@@ -1,0 +1,58 @@
+{
+  "$comment": "github.com/calcom/.berth -> team.json: Cal.com's team setup for Berth (schema berth.team/v1). Placeholders and open questions are listed in README.md.",
+  "schema": "berth.team/v1",
+  "id": "calcom",
+  "name": "Cal.com",
+  "org": "calcom",
+  "description": "Everything a Cal.com engineer needs on their box: Node, Yarn, Postgres and Redis in Docker, and the Cal.com repos, each set up.",
+  "contact": "#eng-onboarding on Slack",
+  "docs": "https://github.com/calcom/.berth#readme",
+  "box": {
+    "os": ["ubuntu>=22.04", "debian>=12", "macos>=14"],
+    "script": "box/setup.sh",
+    "steps": [
+      { "id": "packages", "title": "System packages", "detail": "git, curl, build tools, python3, postgresql-client (pg_dump), jq", "sudo": true },
+      { "id": "docker", "title": "Docker", "detail": "Docker Engine, and you in the docker group; Colima on macOS", "sudo": true },
+      { "id": "cli", "title": "GitHub CLI and 1Password CLI", "detail": "gh for the box's own GitHub sign-in and clones; op for keys", "sudo": true },
+      { "id": "node", "title": "Node 20 with fnm", "detail": "in your home folder, loaded from ~/.profile" },
+      { "id": "yarn", "title": "Yarn with corepack", "detail": "each repo's packageManager picks the version" },
+      { "id": "postgres", "title": "Postgres 16 in Docker", "detail": "cal-postgres on localhost:5450" },
+      { "id": "redis", "title": "Redis 7 in Docker", "detail": "cal-redis on localhost:6379" }
+    ]
+  },
+  "projects": [
+    {
+      "id": "cal.com",
+      "repo": "calcom/cal.com",
+      "$repo": "OPEN: calcom/cal.com, or the internal calcom/cal?",
+      "path": "~/code/cal.com",
+      "required": true,
+      "kit": "https://github.com/sean-brydon/berth-kit-calcom@7f93797",
+      "init": "box/init-cal.sh",
+      "init_detail": ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic",
+      "first_task": "Find an open issue labelled \"good first issue\" in calcom/cal.com, explain how you'd fix it, and make the change in a new worktree"
+    },
+    {
+      "id": "private-api",
+      "repo": "calcom/private-api",
+      "path": "~/code/private-api",
+      "required": false,
+      "$required": "OPEN: does every engineer need it?",
+      "kit": "./projects/private-api"
+    }
+  ],
+  "keys": {
+    "$comment": "No secrets in git, ever. Shared keys are references read on the box with the engineer's own 1Password; asked keys stay on that engineer's box. OPEN: the vault and item names are placeholders.",
+    "cal.com": {
+      "from": ".env.example",
+      "shared": {
+        "STRIPE_PRIVATE_KEY": "op://Engineering/Cal.com Stripe test/secret key",
+        "NEXT_PUBLIC_STRIPE_PUBLIC_KEY": "op://Engineering/Cal.com Stripe test/publishable key",
+        "STRIPE_WEBHOOK_SECRET": "op://Engineering/Cal.com Stripe test/webhook secret",
+        "DAILY_API_KEY": "op://Engineering/Daily dev/credential"
+      },
+      "ask": ["SENDGRID_API_KEY"]
+    }
+  },
+  "updates": { "notify": true }
+}

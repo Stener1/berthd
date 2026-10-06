@@ -278,6 +278,7 @@ func Run(ctx context.Context, cfg Config) error {
 	a.startSavedForwards(ctx)
 	go a.healthLoop(ctx)
 	go a.keepLocalBoxCurrent(ctx)
+	go a.watchTeamUpdates(ctx)
 	a.hooks = &hooks.Runner{Path: filepath.Join(cfg.UserDir, "hooks.json"), PluginsDir: filepath.Join(cfg.UserDir, "plugins"), Log: cfg.Log}
 	go a.hooks.Run(ctx, &a.bus)
 
