@@ -97,7 +97,7 @@ else
   c=$?
   [ "$c" != 99 ] || by_hand linger "Turning lingering on needs root, and sudo asks for a password, which Berth can't type without a terminal." "sudo loginctl enable-linger $u"
   [ "$c" != 98 ] || by_hand linger "Turning lingering on needs root, and this box has no sudo." "loginctl enable-linger $u   (as root)"
-  [ "$c" = 0 ] || failed linger "sudo loginctl enable-linger $u did not work (exit $c)"
+  [ "$c" = 0 ] || { m linger cmd "sudo loginctl enable-linger $u"; failed linger "Turning lingering on didn't finish (exit $c); the terminal says why"; }
   note "Lingering is on: berthd keeps running when you log out."
 fi
 m linger done
@@ -176,7 +176,7 @@ m tools done
 	for _, s := range steps {
 		argv := strings.Join(s, " ")
 		if brew {
-			fmt.Fprintf(b, "  %s || failed tools %s\n", argv, shellQuote(argv+" did not work (above says why)"))
+			fmt.Fprintf(b, "  %s || { m tools cmd %s; failed tools %s; }\n", argv, shellQuote(argv), shellQuote("Installing with Homebrew didn't finish; the terminal says why"))
 			continue
 		}
 		if s[0] == "apt-get" {
@@ -186,11 +186,11 @@ m tools done
   c=$?
   [ "$c" != 99 ] || by_hand tools %s %s
   [ "$c" != 98 ] || by_hand tools %s %s
-  [ "$c" = 0 ] || failed tools %s
+  [ "$c" = 0 ] || { m tools cmd %s; failed tools %s; }
 `, argv,
 			shellQuote("Installing"+" "+strings.Join(pkgs, " and ")+" needs root, and sudo asks for a password, which Berth can't type without a terminal."), shellQuote(strings.Join(lines, " && ")),
 			shellQuote("Installing "+strings.Join(pkgs, " and ")+" needs root, and this box has no sudo."), shellQuote(strings.Join(lines, " && ")+"   (as root, without sudo)"),
-			shellQuote(strings.Join(s, " ")+" did not work (above says why)"))
+			shellQuote(CommandLines([][]string{s}, false)[0]), shellQuote("Installing "+strings.Join(pkgs, " and ")+" with "+p.Manager+" didn't finish; the terminal says why"))
 	}
 	b.WriteString(`fi
 for t in` + " " + strings.Join(pkgs, " ") + `; do
