@@ -113,6 +113,7 @@ Berth reads the terminal and sends these itself with `origin: "screen"` and
 | `team.retry` | `team`, `from` |
 | `skills.installed`, `skills.removed` | `skills`, `agents`, `target`, `location`, `paths` |
 | `integrations.installed` | `tool`: an agent CLI's hooks and skills were installed from the app or the API |
+| `agents.installed` | `agents`: agent CLIs were added to the box from the app (**Add agents…**) or `POST /v1/agents/install` |
 | `secret.failed` | `location`, `name`, `path`, `variable`, `ref`, `reason`: a [secret reference](/guides/secrets) could not be read, so the variable was left unset; never the value |
 | `secret.resolved` | `location`, `name`, `path`, `variable`, `ref`: one that failed reads again |
 | `share.started`, `share.stopped` | `id`, `port`, `url` |

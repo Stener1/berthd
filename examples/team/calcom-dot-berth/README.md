@@ -54,7 +54,11 @@ Both containers restart unless you stop them, so they come back after a
 reboot, and listen on localhost only. Postgres takes the user `postgres`
 with no password, as cal.com's `.env.example` expects.
 
-Then Berth's own steps. **GitHub on the box**: `gh auth login` on the box,
+Then Berth's own steps. **Claude Code and Codex on the box**, from
+`"agents"` in `team.json`: `berthd agents install --integrations claude
+codex`, into `~/.local/bin` without sudo (Claude Code with its native
+installer, Codex from its pinned release, sha256 checked), then their hooks
+and skills; each asks you to sign in the first time it starts. **GitHub on the box**: `gh auth login` on the box,
 with a device code you enter on your laptop. The box clones with a
 credential of its own, which you can revoke on its own; your laptop's token
 never goes to the box. **1Password on the box**, since the shared keys are

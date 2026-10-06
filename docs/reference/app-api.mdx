@@ -92,6 +92,8 @@ The app also uses these, mostly as the CLI does:
 | `POST /v1/boxes/pair` | `{ link, name?, network? }`: pair, as `berth pair` |
 | `POST /v1/invite` | `{ boxes? }`: make a join link, as `berth invite --yes`; `{ link, from, expires, boxes: [{ name, addresses, network?, tailnet? }], skipped: [{ name, error }] }`. The app asks the person first |
 | `POST /v1/join/check`, `POST /v1/join` | `{ link }` (any text holding one): what a join link holds, or pair with every box in it, as `berth join`; `{ from, expires, boxes: [{ name, status, error?, address?, network?, tailnet?, sign_in? }] }`. The link reaches the CLI on stdin, never in its arguments |
+| `GET /v1/ssh/install-plan?host=&agents=` | The guided install's plan before connecting: `{ steps: [{ id, title, detail, sudo, when, where, commands }], agents: [{ id, name, offered, why, install, verified, default }], tmux: { bundled } }` |
+| `GET /v1/boxes/add-ssh/terminal?host=&agents=&name=&network=&identity=&trust_host_key=&from=&cols=&rows=` (WebSocket) | The guided install: `berth add ssh` in a pseudo-terminal on the laptop. Binary messages are the terminal both ways (keystrokes, sudo's password included, only pass through); text messages from the agent are JSON: `{ type: "step", step, state, message }` (states `start`, `done`, `fail`, `skip`, `open`, `cmd`), `{ type: "failure", ssh }` and `{ type: "exit", code }`; text from the app is `{ type: "resize", cols, rows }` |
 | `POST /v1/boxes/add-ssh`, `POST /v1/boxes/{box}/upgrade`, `POST /v1/setup/port80?remove=1` | Run `berth add ssh`, `berth upgrade` or `berth setup port80`, streaming its output as NDJSON `{ line?, done?, error? }` |
 | `GET /v1/boxes/outdated?fresh=1` | `{ boxes: [{ box, current?, available?, outdated, error? }] }`: for each online box, whether it runs an older berthd than this Berth ships, from `berth upgrade BOX --check --json`. Answers are kept for two minutes (`fresh=1` checks again) and forgotten after an upgrade |
 | `DELETE /v1/boxes/{box}` | Forget a box, as `berth forget` |
@@ -170,6 +172,7 @@ failed after it went out (the box may have acted on it). The box API:
 | `POST locations/{name}/worktrees/{wt}/sync` | `{ mode? }`: rebase (default) or merge onto its base |
 | `GET locations/{name}/worktrees/{wt}/services/{service}/log` | what a service has written |
 | `POST locations/clone`, `POST locations/new` | clone a repository, or make one and add it: `new` takes `{ name, parent? }` for an empty repository, or `{ sample: "hello" }` for the sample project (`examples/hello`: a tiny Node app and its test, in `~/work/hello`) on boxes that list `sample` in `capabilities` |
+| `GET agents`, `POST agents/install` | the agent CLIs on the box (`[{ id, name, offered, installed, path }]`), and adding some (`{ agents: ["codex"] }`) without sudo, streamed as NDJSON `{ line }`, `{ step: { step, state, message } }` and `{ done, error? }`, on boxes that list `agents.install` in `capabilities` |
 | `GET locations/{name}/branches` | the repository's branches |
 | `PUT locations/{name}/scripts` | `{ setup, archive }`: the box's own lifecycle scripts |
 | `GET fs?path=P` | a folder's entries on the box, for picking a path (default `~/work`) |

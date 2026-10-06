@@ -123,13 +123,29 @@ own signs in only the shell it runs in, which berthd can't see.) A
 [service account](https://developer.1password.com/docs/service-accounts/)
 never ends: see [secrets](/guides/secrets).
 
+### Agent CLIs on the box
+
+A team setup can name the agent CLIs every engineer's box gets
+(`"agents": ["claude", "codex"]`). Berth installs them as a step of its own,
+after the team's steps and before GitHub, like the GitHub and 1Password
+steps: **Claude Code and Codex on devbox**, which runs `berthd agents
+install --integrations claude codex` in the same terminal. They go in
+`~/.local/bin` without sudo (Claude Code with its native installer, Codex
+from its pinned GitHub release with its sha256 checked, Cursor Agent and
+OpenCode with their own installers), each skipped when it is already there,
+and then their hooks and skills. Signing in stays the engineer's: each agent
+asks the first time it starts. `gemini` is refused: it needs Node.js and npm,
+which a team's own step can install.
+
 ### What the box needs first
 
 Berth runs the steps in a terminal on the box, and that terminal is tmux's,
-so the box needs tmux (and git). The install command and `berth add ssh`
-install both when they can without a password, or stop and say the command
-to run; the Team setup page checks the box too, and says **Install tmux on
-devbox**, with the command, until it is there.
+so the box needs tmux (and git). [Adding the box over SSH](/getting-started/add-a-box#over-ssh)
+gives it both: Berth's own tmux (no sudo) and git in the guided terminal,
+where `sudo` asks for your password; the install command installs both when
+it can, or says the command to run. The Team setup page checks the box too,
+and says **Install tmux on devbox**, with the command, until it is there. A
+box you add from Team setup comes back to it when it is **Ready**.
 
 ### Groups a step adds you to
 
@@ -233,6 +249,7 @@ branch is offered as an update, like the org's own.
       { "id": "postgres", "title": "Postgres in Docker", "detail": "the version in box.settings" }
     ]
   },
+  "agents": ["claude", "codex"],
   "projects": [
     { "id": "cal", "repo": "calcom/cal.com", "path": "~/code/cal.com", "required": true,
       "kit": "https://github.com/sean-brydon/berth-kit-calcom@5476af4",
@@ -259,7 +276,8 @@ branch is offered as an update, like the org's own.
 | `description`, `contact`, `docs` | shown on the page; `contact` is where to ask for access |
 | `box.os` | the systems the script supports; shown, not enforced |
 | `box.script` | a path inside `.berth`; see below |
-| `box.steps[]` | `id` (a subcommand of the script), `title`, `detail`, `sudo` (it asks for the password). `all`, `check`, `plan`, `github` and `1password` are reserved |
+| `box.steps[]` | `id` (a subcommand of the script), `title`, `detail`, `sudo` (it asks for the password). `all`, `check`, `plan`, `agents`, `github` and `1password` are reserved |
+| `agents` | optional: the agent CLIs Berth installs on the box as its own step, `claude`, `codex`, `cursor` and `opencode` ([above](#agent-clis-on-the-box)) |
 | `box.settings` | values the team keeps in one place for its script (versions, ports), name → string. Each reaches the script, and each project's `init`, as `BERTH_SETTING_<NAME>`. Names are letters, digits and `_`; values are one line, at most 4096 bytes; at most 64 settings |
 | `projects[]` | `id` (the project's name on the box), `repo` (`owner/name`), `path` (default `~/code/<id>`), `required`, `kit`, `init`, `init_detail`, `first_task` |
 | `projects[].id` | lowercase letters, digits and dashes, not starting or ending with a dash. It is part of every worktree's URL (`<worktree>.<id>.<box>.localhost`), so an id with a dot is refused: for `calcom/cal.com`, use `"id": "cal"` with `"path": "~/code/cal.com"` to keep the folder. (An org without a `.berth` names each picked repo this way itself: `cal.com` becomes `cal-com`.) |
