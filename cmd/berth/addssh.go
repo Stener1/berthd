@@ -390,7 +390,7 @@ func runSteps(rep *stepReporter, sshArgs, env []string, target string, interacti
 	if failed != "" {
 		msg := why
 		if command != "" {
-			msg += ". Run this on the box, then set it up again:\n  " + command
+			msg = strings.TrimRight(msg, ".") + ". Run this on the box, then set it up again:\n  " + command
 		}
 		return errors.New(msg)
 	}

@@ -35,19 +35,21 @@ PATH="$B:$PATH"
 export PATH
 ASK=%d
 m() { printf '%s%%s\n' "$*"; }
-title() { printf '\n\033[1m==> %%s\033[0m\n' "$1"; }
+# Colour only in a terminal: --yes and scripts get plain text.
+if [ -t 1 ]; then BOLD=$(printf '\033[1m') RED=$(printf '\033[31m') OFF=$(printf '\033[0m'); else BOLD= RED= OFF=; fi
+title() { printf '\n%%s==> %%s%%s\n' "$BOLD" "$1" "$OFF"; }
 note() { printf '    %%s\n' "$*"; }
 # failed STEP WHY: stop at STEP; Retry starts again from it.
 failed() {
+  printf '\n%%sStopped at this step: %%s%%s\n' "$RED" "$2" "$OFF"
   m "$1" fail "$2"
-  printf '\n\033[31mStopped at this step: %%s\033[0m\n' "$2"
   exit 1
 }
 # by_hand STEP WHY COMMAND: stop at STEP, saying the command to run.
 by_hand() {
+  printf '\n%%s%%s%%s\nRun this on the box, then set it up again:\n  %%s\n' "$RED" "$2" "$OFF" "$3"
   m "$1" cmd "$3"
   m "$1" fail "$2"
-  printf '\n\033[31m%%s\033[0m\nRun this on the box, then set it up again:\n  %%s\n' "$2" "$3"
   exit 1
 }
 # asroot COMMAND...: run COMMAND as root. sudo asks for the password here
