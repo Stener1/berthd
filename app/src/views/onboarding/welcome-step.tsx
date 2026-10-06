@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { JoinTeamCard } from "@/views/team/team-entry";
 
 // WelcomeStep says what Berth is in a line and offers the quickest way in:
 // this Mac as the box, a sample project on it and a first task, in about a
@@ -47,6 +48,7 @@ export function WelcomeStep({ local, onThisMac, onRemote, onJoin }: { local?: bo
           }
         />
       </div>
+      <JoinTeamCard />
       {onJoin && (
         <Button variant="ghost" className="mt-4 -ml-3 text-muted-foreground" onClick={onJoin}>
           I already use Berth on another computer

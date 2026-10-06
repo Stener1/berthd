@@ -15,6 +15,7 @@ import { useStore } from "@/lib/store";
 import { restartToUpdate, useAgentRestart, useUpdater } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 import { PluginBoundary, pluginContexts } from "@/plugins/plugin-boundary";
+import { TeamStatusItem } from "@/views/team/team-entry";
 import { useRegistry } from "@/plugins/registry";
 
 // StatusBar is the strip along the bottom: what agents are doing on the
@@ -36,7 +37,7 @@ export function StatusBar() {
   const forwards = status?.forwards.length ?? 0;
 
   return (
-    <footer className="flex h-6.5 shrink-0 items-center gap-3 border-t bg-sidebar px-3 text-[11px] text-muted-foreground">
+    <footer className="@container flex h-6.5 shrink-0 items-center gap-3 overflow-hidden whitespace-nowrap border-t bg-sidebar px-3 text-[11px] text-muted-foreground">
       {/* ?shots=1, used by site/scripts/capture.mjs, hides the badge. */}
       {__BERTH_DEMO__ ? (
         !new URLSearchParams(location.search).has("shots") && <Tip label="A demo: invented boxes and repositories, and nothing runs">
@@ -72,6 +73,7 @@ export function StatusBar() {
           </Item>
         </>
       )}
+      <TeamStatusItem />
       <QueueIndicator />
       {items
         .filter((i) => i.item.align !== "right")
@@ -97,7 +99,8 @@ export function StatusBar() {
         if (!mem?.total) return null;
         const used = mem.used / mem.total;
         return (
-          <Item key={b.name} className={cn(used > 0.85 && "text-warning-foreground dark:text-warning")} tip={`${b.name} memory: ${bytes(mem.used)} of ${bytes(mem.total)} in use`} onClick={() => go({ kind: "settings", section: "boxes" })}>
+          // Each box's memory goes first when the bar runs short of room.
+          <Item key={b.name} className={cn("@max-[900px]:hidden", used > 0.85 && "text-warning-foreground dark:text-warning")} tip={`${b.name} memory: ${bytes(mem.used)} of ${bytes(mem.total)} in use`} onClick={() => go({ kind: "settings", section: "boxes" })}>
             {b.name}
             <span className="relative h-1.5 w-6 overflow-hidden rounded-full bg-muted-foreground/20">
               <span className={cn("absolute inset-y-0 left-0 rounded-full", used > 0.85 ? "bg-warning" : "bg-muted-foreground/60")} style={{ width: `${Math.round(used * 100)}%` }} />

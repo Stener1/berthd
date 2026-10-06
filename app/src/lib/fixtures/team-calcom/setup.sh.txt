@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# calcom/.berth box/setup.sh
+#
+# Box-level setup for a Cal.com engineer's box, run once, by the engineer, in
+# a visible terminal tab Berth opens on the box. Each step is its own
+# subcommand so Berth can show progress per step and retry from one:
+#
+#   box/setup.sh all                 # every step, in order
+#   box/setup.sh <step>              # one step: packages docker cli node yarn postgres redis
+#   box/setup.sh check <step>        # exit 0 when the step is already done
+#   box/setup.sh plan                # print the steps and which need sudo
+#
+# Safe to run again: each step checks first and skips what is done.
+# Steps that need root call sudo themselves, so sudo asks the engineer for
+# their password in this terminal. Nothing here stores it, and Berth never
+# sees it. Never run this script as root.
+#
+# Supported: Ubuntu 22.04+, Debian 12+, macOS 14+ (with Homebrew).
+set -euo pipefail
+
+PG_PORT="${CAL_PG_PORT:-5450}"       # what Cal.com's .env.example points at
+REDIS_PORT="${CAL_REDIS_PORT:-6379}"
+PG_IMAGE="postgres:16"
+REDIS_IMAGE="redis:7"
+NODE_MAJOR="${CAL_NODE:-20}"         # UNSURE: Cal.com has no .nvmrc today; 20 matches CI as far as we know
+
+STEPS=(packages docker cli node yarn postgres redis)
+SUDO_STEPS=" packages docker cli "
+
+say()  { printf '\033[1m==> %s\033[0m\n' "$*"; }
+skip() { printf '    \033[2m%s (already done)\033[0m\n' "$*"; }
+die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+[ "$(id -u)" -ne 0 ] || die "run this as yourself, not root; steps that need root ask for your password with sudo"
+
+OS="$(uname -s)"
+case "$OS" in
+  Linux)
+    [ -r /etc/os-release ] || die "unknown Linux: no /etc/os-release"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID:-}:${ID_LIKE:-}" in
+      ubuntu:*|debian:*|*:*debian*) PLATFORM=debian ;;
+      *) die "this setup supports Ubuntu 22.04+ and Debian 12+ (found ${PRETTY_NAME:-$ID})" ;;
+    esac ;;
+  Darwin)
+    PLATFORM=mac
+    have brew || die "install Homebrew first: https://brew.sh" ;;
+  *) die "unsupported OS: $OS" ;;
+esac
+
+# Ask for the password once, up front, for the steps that need it; sudo's
+# own timestamp then covers the rest of the run. Only called by sudo steps.
+need_sudo() {
+  [ "$PLATFORM" = mac ] && return 0          # Homebrew needs no sudo
+  sudo -n true 2>/dev/null && return 0       # passwordless, or still cached
+  say "The next step needs root. sudo asks for your password; Berth never sees or keeps it."
+  sudo -v
+}
+
+apt_install() {
+  local missing=()
+  for p in "$@"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
+  [ ${#missing[@]} -eq 0 ] && { skip "apt: $*"; return 0; }
+  need_sudo
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+}
+
+brew_install() {
+  local p
+  for p in "$@"; do
+    brew list --formula "$p" >/dev/null 2>&1 || brew list --cask "$p" >/dev/null 2>&1 && { skip "brew: $p"; continue; }
+    brew install "$p"
+  done
+}
+
+# Each check_<step> exits 0 when the step has nothing left to do.
+check_packages() {
+  for t in git curl jq python3 pg_dump; do have "$t" || return 1; done
+}
+check_docker()   { have docker && docker info >/dev/null 2>&1; }
+check_cli()      { have gh && have op; }
+check_node()     { [ -x "$HOME/.local/share/fnm/fnm" ] || have fnm || return 1; login_has node; }
+check_yarn()     { login_has yarn; }
+check_postgres() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx cal-postgres; }
+check_redis()    { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx cal-redis; }
+
+# login_has: berth runs setup and services through a login shell, so a tool
+# only counts once a login shell finds it.
+login_has() { "${SHELL:-/bin/bash}" -lc "command -v $1" >/dev/null 2>&1; }
+
+step_packages() {
+  say "System packages"
+  if [ "$PLATFORM" = debian ]; then
+    apt_install git curl ca-certificates gnupg jq unzip build-essential python3 postgresql-client
+  else
+    xcode-select -p >/dev/null 2>&1 || die "install the Xcode command line tools first: xcode-select --install"
+    brew_install git jq python@3 libpq
+    brew link --force libpq >/dev/null 2>&1 || true   # pg_dump on the PATH
+  fi
+}
+
+step_docker() {
+  say "Docker"
+  if check_docker; then skip "docker"; return 0; fi
+  if [ "$PLATFORM" = debian ]; then
+    if ! have docker; then
+      need_sudo
+      # Docker's own apt repository, not the distro's older docker.io.
+      sudo install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL "https://download.docker.com/linux/${ID}/gpg" | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${VERSION_CODENAME} stable" \
+        | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+      sudo apt-get update -qq
+      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    fi
+    sudo systemctl enable --now docker >/dev/null
+    if ! id -nG "$USER" | tr ' ' '\n' | grep -qx docker; then
+      sudo usermod -aG docker "$USER"
+      echo "    added $USER to the docker group; this run uses sudo docker until you log in again"
+    fi
+  else
+    # No Docker Desktop licence needed: Colima, a small VM, through Homebrew.
+    # UNSURE: Cal.com engineers may already use OrbStack or Docker Desktop; any of them passes check_docker.
+    brew_install colima docker
+    colima status >/dev/null 2>&1 || colima start --cpu 4 --memory 8
+  fi
+}
+
+step_cli() {
+  say "GitHub CLI and 1Password CLI"
+  if check_cli; then skip "gh, op"; return 0; fi
+  if [ "$PLATFORM" = debian ]; then
+    need_sudo
+    if ! have gh; then
+      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli.gpg >/dev/null
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+        | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+    fi
+    if ! have op; then
+      curl -fsSL https://downloads.1password.com/linux/keys/1password.asc | sudo gpg --dearmor --yes -o /etc/apt/keyrings/1password.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/1password.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
+        | sudo tee /etc/apt/sources.list.d/1password.list >/dev/null
+    fi
+    sudo apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gh 1password-cli
+  else
+    brew_install gh 1password-cli
+  fi
+}
+
+step_node() {
+  say "Node $NODE_MAJOR with fnm"
+  if check_node; then skip "node $(${SHELL:-/bin/bash} -lc 'node -v' 2>/dev/null)"; return 0; fi
+  if ! have fnm && [ ! -x "$HOME/.local/share/fnm/fnm" ]; then
+    curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+  fi
+  export PATH="$HOME/.local/share/fnm:$PATH"
+  # Load fnm from the profile too, not only the rc file: berth's login
+  # shells read ~/.profile (bash) or ~/.zprofile (zsh).
+  local profiles=("$HOME/.profile")
+  case "${SHELL:-}" in */zsh) profiles+=("$HOME/.zprofile") ;; esac
+  for f in "${profiles[@]}"; do
+    # shellcheck disable=SC2016
+    grep -qs 'fnm env' "$f" || printf '\n# fnm, for Node (calcom/.berth)\nexport PATH="$HOME/.local/share/fnm:$PATH"\neval "$(fnm env --use-on-cd 2>/dev/null || true)"\n' >> "$f"
+  done
+  fnm install "$NODE_MAJOR"
+  fnm default "$NODE_MAJOR"
+}
+
+step_yarn() {
+  say "Yarn with corepack"
+  if check_yarn; then skip "yarn"; return 0; fi
+  "${SHELL:-/bin/bash}" -lc 'corepack enable && corepack prepare yarn@stable --activate >/dev/null'
+}
+
+# docker, or sudo docker on a Linux box where the group change has not
+# reached this login yet.
+dk() { if docker info >/dev/null 2>&1; then docker "$@"; else sudo docker "$@"; fi; }
+
+step_postgres() {
+  say "Postgres 16 in Docker on localhost:$PG_PORT"
+  if dk ps -a --format '{{.Names}}' | grep -qx cal-postgres; then
+    dk start cal-postgres >/dev/null
+    skip "cal-postgres"
+    return 0
+  fi
+  # Matches Cal.com's .env.example: postgres with no password, on 5450,
+  # published on localhost only.
+  dk run -d --name cal-postgres --restart unless-stopped \
+    -p "127.0.0.1:${PG_PORT}:5432" \
+    -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=calendso \
+    -v cal-postgres-data:/var/lib/postgresql/data \
+    "$PG_IMAGE" >/dev/null
+  for _ in $(seq 1 30); do dk exec cal-postgres pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
+  dk exec cal-postgres pg_isready -U postgres >/dev/null || die "Postgres did not start; see: docker logs cal-postgres"
+}
+
+step_redis() {
+  say "Redis 7 in Docker on localhost:$REDIS_PORT"
+  if dk ps -a --format '{{.Names}}' | grep -qx cal-redis; then
+    dk start cal-redis >/dev/null
+    skip "cal-redis"
+    return 0
+  fi
+  dk run -d --name cal-redis --restart unless-stopped -p "127.0.0.1:${REDIS_PORT}:6379" -v cal-redis-data:/data "$REDIS_IMAGE" >/dev/null
+}
+
+run_step() {
+  case " ${STEPS[*]} " in *" $1 "*) ;; *) die "no step $1 (steps: ${STEPS[*]})" ;; esac
+  "step_$1"
+  printf '\033[32m    ✓ %s\033[0m\n' "$1"
+}
+
+case "${1:-all}" in
+  all)   for s in "${STEPS[@]}"; do run_step "$s"; done; say "Box ready." ;;
+  check) [ -n "${2:-}" ] || die "check what? (${STEPS[*]})"; "check_$2" ;;
+  plan)  for s in "${STEPS[@]}"; do case "$SUDO_STEPS" in *" $s "*) echo "$s sudo" ;; *) echo "$s" ;; esac; done ;;
+  *)     run_step "$1" ;;
+esac

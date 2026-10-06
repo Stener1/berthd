@@ -31,7 +31,11 @@ export type View =
   | { kind: "review"; run?: { box: string; id: string } }
   | { kind: "worktrees" }
   | { kind: "settings"; section?: string }
-  | { kind: "plugin"; screen: string };
+  | { kind: "plugin"; screen: string }
+  // Team setup (lib/team): an org's <org>/.berth, read from GitHub, to set a
+  // box up with. No org asks for one; from says how the page was reached.
+  // update opens it on a newer commit's changes, to review and apply.
+  | { kind: "team"; org?: string; from?: "onboarding" | "addbox" | "link" | "sidebar" | "palette"; box?: string; update?: boolean };
 
 export interface Connection {
   state: "connecting" | "online" | "offline";

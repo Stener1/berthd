@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:1378; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1378 ws://127.0.0.1:1378 data:; frame-src http://*.localhost:* http://*.localhost http://localhost:* http://127.0.0.1:* https:"
+      "csp": "default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:1378 https://avatars.githubusercontent.com; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1378 ws://127.0.0.1:1378 data:; frame-src http://*.localhost:* http://*.localhost http://localhost:* http://127.0.0.1:* https:"
     }
   },
   "bundle": {

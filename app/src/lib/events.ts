@@ -7,6 +7,7 @@ import { flowKey, resolveFromEvent, route, secretKey, serviceKey } from "@/lib/n
 import { handlePreview } from "@/lib/preview";
 import { handleQueueEvent } from "@/lib/queue";
 import { scheduleRuns } from "@/lib/runs";
+import { handleTeamEvent } from "@/lib/team";
 import { handleSessionOpen } from "@/lib/session-open";
 import { archiveFailed, worktreeGone } from "@/lib/remove-worktree";
 import { markRemoving, markScript, removalOf, useRemovals } from "@/lib/removing";
@@ -53,6 +54,8 @@ export function handleEvent(e: BerthEvent) {
 
   // Prompts queued for a box that was away: the list, and what came of them.
   if (e.type.startsWith("queue.")) handleQueueEvent(e);
+  // A team setup's runner on a box, or a newer commit of one (lib/team).
+  if (e.type.startsWith("team.")) handleTeamEvent(e);
   notifyFor(e);
 }
 

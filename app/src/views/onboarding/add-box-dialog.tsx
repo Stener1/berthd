@@ -5,6 +5,7 @@ import { toastManager } from "@/components/ui/toast";
 import { useStore } from "@/lib/store";
 import { AddBoxFlow } from "@/views/onboarding/add-box-flow";
 import { prefetchTailnets } from "@/views/onboarding/tailnet";
+import { openTeam, TeamBoxEntry } from "@/views/team/team-entry";
 
 const useAddBox = create<{ open: boolean }>()(() => ({ open: false }));
 
@@ -27,6 +28,18 @@ export function AddBoxDialog() {
           <AddBoxFlow
             variant="dialog"
             intro={{ title: "Add a box", description: "Any VPS or dev machine. Agents and dev servers run there; this computer only watches." }}
+            lead={
+              // Team setup picks or adds the box on its own page, so it is
+              // offered only from the app, not from inside that page.
+              useStore.getState().view.kind !== "team" ? (
+                <TeamBoxEntry
+                  onPick={() => {
+                    close();
+                    openTeam(undefined, "addbox");
+                  }}
+                />
+              ) : undefined
+            }
             onDone={(box) => {
               close();
               toastManager.add({ title: `${box} is ready`, description: "Paired and online. Add a repo on it to start working there.", type: "success" });

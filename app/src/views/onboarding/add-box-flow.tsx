@@ -39,8 +39,11 @@ export function AddBoxFlow({
   onDone,
   onExit,
   onStage,
+  lead,
 }: {
   intro: { title: ReactNode; description: ReactNode };
+  // lead, when given, comes first on the first screen: another way in.
+  lead?: ReactNode;
   variant: "dialog" | "page";
   onDone(box: string): void;
   onExit?(): void;
@@ -137,6 +140,7 @@ export function AddBoxFlow({
       )}
       {placement && (
         <div hidden={!!signingIn}>
+          {lead}
           {placement === "top" && (
             <>
               {machines}

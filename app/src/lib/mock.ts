@@ -7,6 +7,7 @@ import { browserCall, mockScreencast, mockShotSvg } from "@/lib/mock-browser";
 import { phoneCall } from "@/lib/mock-phone";
 import { worktreesCall } from "@/lib/mock-worktrees";
 import { kitsCall, kitsStream } from "@/lib/mock-kits";
+import { initTeamMock, isTeamSession, teamAttach, teamBoxCall, teamLaptopCall } from "@/lib/mock-team";
 import { reviewCall, reviewExec } from "@/lib/mock-review";
 import { editorsCall } from "@/lib/mock-editors";
 import { imageGenCall } from "@/lib/mock-imagegen";
@@ -567,6 +568,8 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
   if (!online) return Promise.reject(new ApiError(`${box} is offline`, 503));
   const doc = mockBoxDoctor(box, !!status.boxes.find((b) => b.name === box)?.local, method, path);
   if (doc) return doc;
+  const team = teamBoxCall(box, method, path, body, delay);
+  if (team) return team;
   const flows = flowsCall(box, method, path, body, emit, delay);
   if (flows) return flows;
   const runs = runsCall(box, method, path, body, emit, delay);
@@ -772,6 +775,8 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
 function mockAttach(box: string, session: string, h: TerminalHandlers) {
   // A service's own terminal (lib/mock-services).
   if (sessions[box]?.some((x) => x.name === session && x.service)) return mockServiceAttach(box, session, h);
+  // A team setup's runner (lib/mock-team).
+  if (isTeamSession(box, session)) return teamAttach(box, session, h);
   if (__BERTH_DEMO__) {
     return demoAttach(box, session, h, {
       session: () => sessions[box]?.find((x) => x.name === session),
@@ -1064,7 +1069,13 @@ initMockLocalBox({ status, addBox: addMockBox, delay });
 // The offline prompt queue and its box-offline simulator (lib/mock-queue).
 initMockQueue({ status, sessions, emit, delay, send: (box, session, text, enter) => boxCall(box, "POST", `sessions/${encodeURIComponent(session)}/send`, { text, enter, when: "now" }) }, fresh);
 
+let teamWired = false;
+
 export function mockClient(): Client {
+  if (!teamWired) {
+    teamWired = true;
+    initTeamMock({ status, locations, sessions, emit, delay, addBox: (name, address) => addMockBox(name, address) });
+  }
   return {
     status: () => delay(status),
     themes: () => delay([]),
@@ -1143,6 +1154,8 @@ export function mockClient(): Client {
       if (queued) return queued as Promise<T>;
       const kits = kitsCall(method, path, body, emit, delay);
       if (kits) return kits as Promise<T>;
+      const team = teamLaptopCall(method, path, body, delay);
+      if (team) return team as Promise<T>;
       const eds = editorsCall(method, path, body, delay);
       if (eds) return eds as Promise<T>;
       const gen = imageGenCall(method, path, delay);

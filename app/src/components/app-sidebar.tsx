@@ -23,6 +23,7 @@ import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
+import { TeamSidebarCard } from "@/views/team/team-entry";
 
 // The sidebar is always open on a desktop window; coss ui's menu pieces only
 // need to know that.
@@ -69,6 +70,8 @@ export function AppSidebar() {
           </button>
           <PlacesNav />
         </div>
+        {/* A team setup while it runs, or a newer commit of one to review. */}
+        <TeamSidebarCard />
 
         <div className={cn("flex items-center justify-between pt-4 pr-2 pb-1 pl-3", noBoxes && "hidden")}>
           <span className="font-medium text-[11px] text-muted-foreground">Projects</span>
