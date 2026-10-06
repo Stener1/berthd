@@ -34,6 +34,16 @@ const Repo = ".berth"
 // with, which can be revoked on its own.
 const GitHubStep = "github"
 
+// OnePasswordStep is the step Berth adds after GitHub when a team setup's
+// keys read 1Password (op:// references): the box's own op is signed in, in
+// the terminal, by the engineer, so berthd can read the shared keys
+// without ever asking in a service's terminal.
+const OnePasswordStep = "1password"
+
+// SettingEnvPrefix starts the environment variable each box.settings entry
+// reaches the box script as: BERTH_SETTING_<NAME>.
+const SettingEnvPrefix = "BERTH_SETTING_"
+
 // Setup is team.json.
 type Setup struct {
 	Schema      string `json:"schema"`
@@ -60,6 +70,42 @@ type Box struct {
 	// check <step> (exit 0 when the step is done) and plan.
 	Script string `json:"script,omitempty"`
 	Steps  []Step `json:"steps,omitempty"`
+	// Settings are values the team keeps in one place for its script
+	// (versions, ports): each reaches the script as BERTH_SETTING_<NAME>
+	// in its environment. Strings only; entries starting with "$" are
+	// comments.
+	Settings Settings `json:"settings,omitempty"`
+}
+
+// Settings are box.settings, by name.
+type Settings map[string]string
+
+func (st *Settings) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("box.settings must be an object of names and strings")
+	}
+	*st = Settings{}
+	for name, v := range raw {
+		if strings.HasPrefix(name, "$") {
+			continue
+		}
+		var one string
+		if err := json.Unmarshal(v, &one); err != nil {
+			return fmt.Errorf("box.settings.%s must be a string (\"%s\"), not %s", name, strings.Trim(string(v), `"`), string(v))
+		}
+		(*st)[name] = one
+	}
+	return nil
+}
+
+// Env is the settings as the box script's environment, sorted.
+func (st Settings) Env() []string {
+	out := make([]string, 0, len(st))
+	for _, name := range sortedKeys(st) {
+		out = append(out, SettingEnvPrefix+name+"="+st[name])
+	}
+	return out
 }
 
 // Step is one subcommand of the box script.
@@ -135,14 +181,17 @@ type Updates struct {
 func (s *Setup) NotifyUpdates() bool { return s.Updates.Notify == nil || *s.Updates.Notify }
 
 var (
-	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
-	stepPattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-	folderPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
-	repoPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$`)
-	orgPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
-	keyPattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
-	refPattern    = regexp.MustCompile(`^(op|env)://[^\n\r]+$`)
-	reservedSteps = map[string]bool{"all": true, "check": true, "plan": true, GitHubStep: true}
+	idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
+	// A project's id names its location on the box, which is part of each
+	// worktree's URL (<worktree>.<project>.<box>.localhost): one DNS label.
+	projectPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$`)
+	settingPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+	stepPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	repoPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$`)
+	orgPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
+	keyPattern     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+	refPattern     = regexp.MustCompile(`^(op|env)://[^\n\r]+$`)
+	reservedSteps  = map[string]bool{"all": true, "check": true, "plan": true, GitHubStep: true, OnePasswordStep: true}
 )
 
 // ValidOrg reports whether s can be a GitHub org or user name.
@@ -169,7 +218,7 @@ func Parse(data []byte) (*Setup, []string, error) {
 // known lists the fields of each object in team.json, for warnings.
 var known = map[string][]string{
 	"":        {"schema", "id", "name", "org", "description", "contact", "docs", "box", "projects", "keys", "updates"},
-	"box":     {"os", "script", "steps"},
+	"box":     {"os", "script", "steps", "settings"},
 	"step":    {"id", "title", "detail", "sudo"},
 	"project": {"id", "repo", "path", "required", "kit", "init", "init_detail", "first_task"},
 	"keys":    {"from", "shared", "ask"},
@@ -277,13 +326,16 @@ func (s *Setup) Validate() error {
 			return fmt.Errorf("box.script: %v", err)
 		}
 	}
+	if err := s.Box.Settings.Validate(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i, st := range s.Box.Steps {
 		if !stepPattern.MatchString(st.ID) {
 			return fmt.Errorf("box.steps[%d]: id %q must be lowercase letters, digits and dashes, starting with a letter", i, st.ID)
 		}
 		if reservedSteps[st.ID] {
-			return fmt.Errorf("box.steps[%d]: %q is reserved (all, check, plan and github are not step names)", i, st.ID)
+			return fmt.Errorf("box.steps[%d]: %q is reserved (all, check, plan, github and 1password are not step names)", i, st.ID)
 		}
 		if seen[st.ID] {
 			return fmt.Errorf("box.steps: %q is there twice", st.ID)
@@ -296,8 +348,8 @@ func (s *Setup) Validate() error {
 	ids, repos := map[string]bool{}, map[string]bool{}
 	for i, p := range s.Projects {
 		where := fmt.Sprintf("projects[%d]", i)
-		if !folderPattern.MatchString(p.ID) {
-			return fmt.Errorf("%s: id %q must be a folder name (letters, digits, . _ -)", where, p.ID)
+		if !projectPattern.MatchString(p.ID) {
+			return fmt.Errorf("%s: id %q can't be part of a URL: it names the project on the box, and each worktree's URL is <worktree>.<project>.<box>.localhost, so use lowercase letters, digits and dashes (%q, with \"path\": \"~/code/%s\" to keep the folder's name)", where, p.ID, URLSafeName(p.ID), p.ID)
 		}
 		if ids[p.ID] {
 			return fmt.Errorf("projects: %q is there twice", p.ID)
@@ -360,6 +412,71 @@ func (s *Setup) Validate() error {
 		}
 	}
 	return nil
+}
+
+// maxSettings bounds box.settings; each is an environment variable.
+const maxSettings = 64
+
+func (st Settings) Validate() error {
+	if len(st) > maxSettings {
+		return fmt.Errorf("box.settings has %d entries; at most %d", len(st), maxSettings)
+	}
+	for _, name := range sortedKeys(st) {
+		if !settingPattern.MatchString(name) {
+			return fmt.Errorf("box.settings: %q is not a setting name (letters, digits and _, not starting with a digit); it becomes %s<NAME> in the script's environment", name, SettingEnvPrefix)
+		}
+		v := st[name]
+		if len(v) > 4096 {
+			return fmt.Errorf("box.settings.%s is longer than 4096 bytes", name)
+		}
+		for _, r := range v {
+			if r < 0x20 && r != '\t' || r == 0x7f {
+				return fmt.Errorf("box.settings.%s has a control character (a newline?); settings are one line", name)
+			}
+		}
+	}
+	return nil
+}
+
+// URLSafeName turns a name into one that can be part of a URL's host
+// (a DNS label): lowercase letters, digits and dashes, "cal.com" →
+// "cal-com". It returns "" when nothing is left.
+func URLSafeName(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	out := strings.TrimRight(b.String(), "-")
+	if len(out) > 48 {
+		out = strings.TrimRight(out[:48], "-")
+	}
+	return out
+}
+
+// ValidProjectID reports whether id can name a project: one URL label.
+func ValidProjectID(id string) bool { return projectPattern.MatchString(id) }
+
+// UsesOnePassword reports whether any project's shared keys are 1Password
+// references, so the box needs op signed in.
+func (s *Setup) UsesOnePassword() bool {
+	for id, k := range s.Keys {
+		if strings.HasPrefix(id, "$") {
+			continue
+		}
+		for _, ref := range k.Shared {
+			if strings.HasPrefix(ref, "op://") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ProjectPath is where p is cloned: its path, or ~/code/<id>.

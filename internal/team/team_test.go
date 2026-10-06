@@ -18,30 +18,103 @@ func TestParseCalcomExample(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Fatalf("warnings on the example: %v", warnings)
 	}
-	if s.ID != "calcom" || s.Org != "calcom" || len(s.Box.Steps) != 7 || len(s.Projects) != 2 {
+	if s.ID != "calcom" || s.Org != "calcom" || len(s.Box.Steps) != 8 || len(s.Projects) != 1 {
 		t.Fatalf("parsed %+v", s)
 	}
-	if s.SudoSteps() != 3 {
+	if s.SudoSteps() != 4 {
 		t.Fatalf("sudo steps = %d", s.SudoSteps())
 	}
 	if !s.NotifyUpdates() {
 		t.Fatal("updates should notify by default and here")
 	}
-	p, _ := s.Project("private-api")
-	if p.ProjectPath() != "~/code/private-api" {
-		t.Fatal(p.ProjectPath())
+	if got := strings.Join(s.Box.Settings.Env(), " "); got != "BERTH_SETTING_CAL_POSTGRES_VERSION=18 BERTH_SETTING_CAL_REDIS_VERSION=8" {
+		t.Fatalf("settings env %q", got)
 	}
-	k, err := ParseKitRef(p.Kit)
-	if err != nil || k.Path != "projects/private-api" {
-		t.Fatalf("kit ref %+v %v", k, err)
+	if !s.UsesOnePassword() {
+		t.Fatal("the example's shared keys are op:// references")
 	}
-	cal, _ := s.Project("cal.com")
-	k, err = ParseKitRef(cal.Kit)
-	if err != nil || k.Owner != "sean-brydon" || k.Name != "berth-kit-calcom" || k.Ref != "7f93797" || !k.IsCommit() {
+	cal, ok := s.Project("cal")
+	if !ok || cal.Repo != "calcom/cal.com" || cal.ProjectPath() != "~/code/cal.com" {
+		t.Fatalf("project %+v", cal)
+	}
+	k, err := ParseKitRef(cal.Kit)
+	if err != nil || k.Owner != "sean-brydon" || k.Name != "berth-kit-calcom" || !k.IsCommit() {
 		t.Fatalf("kit ref %+v %v", k, err)
 	}
 	if k.String() != cal.Kit {
 		t.Fatalf("round trip %q", k.String())
+	}
+	// Nothing in the example names a repository but the public one.
+	if strings.Contains(string(b), "private-api") || strings.Contains(string(b), "calcom/cal\"") {
+		t.Fatal("the example names a private repository")
+	}
+}
+
+func TestSettings(t *testing.T) {
+	doc := strings.Replace(minimal, `"script":"box/setup.sh",`, `"script":"box/setup.sh","settings":{"PG_VERSION":"18","$why":{"any":"comment"},"redis_port":"6379"},"$settings":{"OLD":1},`, 1)
+	s, warnings, err := Parse([]byte(doc))
+	if err != nil || len(warnings) != 0 {
+		t.Fatal(err, warnings)
+	}
+	if got := strings.Join(s.Box.Settings.Env(), " "); got != "BERTH_SETTING_PG_VERSION=18 BERTH_SETTING_redis_port=6379" {
+		t.Fatalf("env %q", got)
+	}
+	bad := map[string]string{
+		`"settings":{"PG":18}`:          `must be a string ("18")`,
+		`"settings":{"PG-VERSION":"1"}`: "not a setting name",
+		`"settings":{"9PG":"1"}`:        "not a setting name",
+		`"settings":{"PG":"a\nb"}`:      "control character",
+		`"settings":["PG"]`:             "object of names and strings",
+	}
+	for in, want := range bad {
+		doc := strings.Replace(minimal, `"script":"box/setup.sh",`, `"script":"box/setup.sh",`+in+`,`, 1)
+		if _, _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", in, err, want)
+		}
+	}
+	old, _, _ := Parse([]byte(strings.Replace(minimal, `"script":"box/setup.sh",`, `"script":"box/setup.sh","settings":{"PG":"17","GONE":"x"},`, 1)))
+	nw, _, _ := Parse([]byte(strings.Replace(minimal, `"script":"box/setup.sh",`, `"script":"box/setup.sh","settings":{"PG":"18","NEW":"y"},`, 1)))
+	var lines []string
+	for _, c := range Diff(old, nw, nil, nil) {
+		lines = append(lines, c.Kind+" "+c.Area+" "+c.ID+" | "+c.Detail)
+	}
+	if got := strings.Join(lines, "\n"); got != "add setting NEW | y\nchange setting PG | 17 → 18\nremove setting GONE | no longer set" {
+		t.Fatalf("diff:\n%s", got)
+	}
+}
+
+func TestProjectIDsAreURLSafe(t *testing.T) {
+	doc := strings.Replace(minimal, `{"id":"web","repo":"acme/web"`, `{"id":"cal.com","repo":"acme/web"`, 1)
+	doc = strings.Replace(doc, `"keys":{"web"`, `"keys":{"cal.com"`, 1)
+	_, _, err := Parse([]byte(doc))
+	if err == nil || !strings.Contains(err.Error(), `id "cal.com" can't be part of a URL`) || !strings.Contains(err.Error(), `"cal-com"`) || !strings.Contains(err.Error(), `~/code/cal.com`) {
+		t.Fatalf("got %v", err)
+	}
+	for _, id := range []string{"Web", "web_app", "-web", "web-", "a.b"} {
+		if ValidProjectID(id) {
+			t.Errorf("%q is valid", id)
+		}
+	}
+	for _, id := range []string{"web", "cal", "private-api", "a1"} {
+		if !ValidProjectID(id) {
+			t.Errorf("%q is not valid", id)
+		}
+	}
+	for in, want := range map[string]string{"cal.com": "cal-com", "Web_App": "web-app", "..x..": "x", "a  b": "a-b", "!!": ""} {
+		if got := URLSafeName(in); got != want {
+			t.Errorf("URLSafeName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestUsesOnePassword(t *testing.T) {
+	s, _, _ := Parse([]byte(minimal))
+	if !s.UsesOnePassword() {
+		t.Fatal("op:// shared key not seen")
+	}
+	s, _, _ = Parse([]byte(strings.Replace(minimal, `"op://Dev/Stripe/key"`, `"env://STRIPE"`, 1)))
+	if s.UsesOnePassword() {
+		t.Fatal("env:// is not 1Password")
 	}
 }
 
@@ -61,6 +134,8 @@ func TestParseRejects(t *testing.T) {
 		{`"id":"db"`, `"id":"tools"`, "twice"},
 		{`"id":"db"`, `"id":"check"`, "reserved"},
 		{`"id":"db"`, `"id":"github"`, "reserved"},
+		{`"id":"db"`, `"id":"1password"`, "lowercase letters"},
+		{`"id":"web"`, `"id":"web.app"`, "can't be part of a URL"},
 		{`"title":"Database"`, `"title":""`, "no title"},
 		{`"repo":"acme/api"`, `"repo":"api"`, "owner/name"},
 		{`"repo":"acme/api"`, `"repo":"acme/web"`, "twice"},

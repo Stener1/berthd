@@ -9,8 +9,8 @@ import (
 // Change is one difference between two commits of a team setup, as an
 // engineer reviews an update.
 type Change struct {
-	// Kind is add, remove or change; Area is step, project, key, file or
-	// setup.
+	// Kind is add, remove or change; Area is step, setting, project, key,
+	// file or setup.
 	Kind   string `json:"kind"`
 	Area   string `json:"area"`
 	ID     string `json:"id"`
@@ -62,6 +62,20 @@ func Diff(old, new *Setup, oldFiles, newFiles map[string]string) []Change {
 	for _, s := range old.Box.Steps {
 		if !newSteps[s.ID] {
 			out = append(out, Change{Kind: "remove", Area: "step", ID: s.ID, Text: s.Title, Detail: "no longer run; what it installed stays"})
+		}
+	}
+
+	for _, name := range sortedKeys(new.Box.Settings) {
+		v := new.Box.Settings[name]
+		if was, ok := old.Box.Settings[name]; !ok {
+			out = append(out, Change{Kind: "add", Area: "setting", ID: name, Text: name, Detail: v})
+		} else if was != v {
+			out = append(out, Change{Kind: "change", Area: "setting", ID: name, Text: name, Detail: fmt.Sprintf("%s → %s", was, v)})
+		}
+	}
+	for _, name := range sortedKeys(old.Box.Settings) {
+		if _, ok := new.Box.Settings[name]; !ok {
+			out = append(out, Change{Kind: "remove", Area: "setting", ID: name, Text: name, Detail: "no longer set"})
 		}
 	}
 
