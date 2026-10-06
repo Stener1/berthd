@@ -20,7 +20,7 @@ again.
   what you'll get with every exact command, and turns into the progress when
   you press **Set up**. GitHub goes through the GitHub CLI: your laptop's `gh`
   reads the setup and checks you can read each repo (no membership check;
-  "You can't read calcom/private-api: ask an admin · Set up the other 2"),
+  "You can't read calcom/website: ask an admin · Set up the other 2"),
   and the box signs in with its own `gh auth login`, so your laptop's token
   never leaves it. Box steps run in a terminal on the box, as you; steps
   that need root ask for your password there, and Berth never sees it.
@@ -36,6 +36,50 @@ again.
   then names the repo and branch it came from. `berth team show|setup|status|retry`
   does the same from the command line. Cal.com's is the worked example, in
   `examples/team/calcom-dot-berth`. See [team setup](/guides/team-setup).
+
+- **Team setup signs 1Password in.** A team setup whose shared keys are
+  `op://` references gets a Berth step of its own after GitHub's,
+  **1Password on the box**: `op signin` runs in the box's terminal, the page
+  shows it inline while op asks (its questions count as waiting for you, as
+  sudo's do), and berthd keeps op's session for its reads. `berthd secret
+  signin` does the same by hand, and `--check` only says whether the box can
+  read 1Password.
+- **op never asks in a service's terminal.** Berth runs op without a
+  terminal, so a box that isn't signed in no longer leaves a service sitting
+  at op's "add an account? [Y/n]": the read fails at once with
+  "1Password isn't signed in on <box>: sign in from Team setup or run
+  `berthd secret signin` on the box", and the service starts without the key.
+- **tmux and git on a fresh box.** `berthd install` (which the install
+  command and `berth add ssh` both run) installs tmux, and git if missing,
+  when that needs no password: as root, with sudo that needs none, or with
+  Homebrew. The install command offers to run it with sudo when it can ask;
+  otherwise it stops before installing anything, with the command to run.
+  The Team setup page says when the box has no tmux, with the command, and
+  waits for it.
+- **`box.settings` in `team.json`.** Values the team keeps in one place
+  (versions, ports) reach the box script, and each project's init, as
+  `BERTH_SETTING_<NAME>`. Strings only, checked; `$` fields are still
+  comments.
+- **New groups reach what berthd starts.** A step that adds you to a group
+  (docker) used to leave berthd, and every terminal and service it started,
+  without it until a reboot. The team's terminal now carries on with the new
+  group, and berthd starts terminals, services, scripts and hooks through
+  `sg` while it lacks one; `berthd doctor` says so.
+- **Kit requirements are checked as a login shell finds them.** A kit's
+  `requires` used berthd's own PATH, so a project warned "node is not
+  installed" right after the box steps installed it with fnm. They are
+  looked for through your login shell now, and checked again when a team
+  setup's steps end.
+- **A project's init gets the kit.** A team setup's `init` script gets
+  `BERTH_KIT_DIR`, `BERTH_LOCATION`, `BERTH_ROOT_PATH` and `BERTH_BOX`, as
+  kit scripts do, so it can reuse the kit's code.
+- **Team project ids are URL-safe.** A project's id names it on the box and
+  is part of every worktree's URL, so `team.json` refuses one with a dot
+  (`cal.com`; use `cal`, with `path` keeping the folder). Repos picked from
+  an org without a `.berth` get one (`cal.com` → `cal-com`).
+- **The Cal.com example** is now the one a real run on a fresh Ubuntu 24.04
+  box went through: 8 box steps, 4 with sudo, versions in `box.settings`,
+  for the public `calcom/cal.com` (Cal.com's own setup lives privately).
 
 ## v0.3.8
 

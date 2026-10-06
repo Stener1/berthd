@@ -20,7 +20,7 @@ flows, skills) can drive it directly. `berthd help` prints this list.
 | Command | What it does |
 | --- | --- |
 | `berthd serve [--listen ADDR]` | Serve paired laptops (default: the tailnet address only, port 7444) |
-| `berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--dry-run]` | Run `serve` as a user service (systemd, or launchd on macOS), and install hooks and skills for the agent CLIs found on the box (`--no-integrations` skips that). `--keep-listen` keeps an installed service's non-tailnet address; `--dry-run` checks the box and prints what it would do |
+| `berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--no-tools] [--dry-run]` | Run `serve` as a user service (systemd, or launchd on macOS), and install hooks and skills for the agent CLIs found on the box (`--no-integrations` skips that). First it installs tmux, and git if missing, when that needs no password (as root, with sudo that needs none, or with Homebrew), and otherwise stops with the command to run (`--no-tools` skips this). `--keep-listen` keeps an installed service's non-tailnet address; `--dry-run` checks the box and prints what it would do |
 | `berthd uninstall` | Remove that service |
 | `berthd pair [--address HOST[:PORT]] [--ttl 10m] [--json]` | Print a single-use pairing link; `--json` prints `{ link, address, fingerprint, expires }`, which the laptop agent reads to pair with this computer's own berthd ([Use this Mac](/getting-started/add-a-box#this-mac)) |
 | `berthd clients` | List paired laptops |
@@ -112,6 +112,7 @@ owns, not the journal.
 | `berthd skills [list\|install\|uninstall] [SKILL...] [--agent claude\|codex\|all] [--target user\|project] [--location LOC] [--commit]` | Teach Claude Code and Codex to use Berth |
 | `berthd secret test REF` | Check this box can resolve `op://vault/item/field` or `env://NAME` (prints the value's length, never the value) |
 | `berthd secret exec [--socket PATH] -- PROGRAM [ARGS...]` | Used by sessions and services: resolves secret references, then runs the program. See [secrets](/guides/secrets#how-values-are-handled). |
+| `berthd secret signin [--check]` | Signs the box's `op` in to 1Password in this terminal (`op signin`) and keeps its session for berthd's `op://` reads; a team setup's 1Password step runs it. `--check` asks nothing and exits 0 when berthd can read 1Password now. See [secrets](/guides/secrets#setting-up-1password-on-a-box). |
 | `berthd emit TYPE [key=value...] [--origin TOOL]` | Announce an event, e.g. `deploy.finished` |
 | `berthd events [--json]` | Stream the box's events |
 

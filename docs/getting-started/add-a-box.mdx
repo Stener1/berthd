@@ -12,7 +12,11 @@ TLS; it never needs SSH to reach the box, and at most uses it once, to install.
 ## What a box needs
 
 - Linux (or macOS) on amd64 or arm64
-- `git` (repositories and worktrees) and `tmux` (sessions)
+- `git` (repositories and worktrees) and `tmux` (sessions). A fresh Ubuntu
+  has neither: the install command and `berth add ssh` install them when
+  that needs no password, the install command offers to with `sudo` when it
+  can ask, and otherwise they stop with the command to run
+  (`sudo apt-get install -y tmux git`)
 - a [Tailscale](https://tailscale.com) address, unless you choose to listen
   elsewhere (see [Where berthd listens](#where-berthd-listens))
 - optional: the agent CLIs you want to run (`claude`, `codex`, …), and

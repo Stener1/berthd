@@ -67,6 +67,8 @@ State, in `<state>/box/`:
 | `browser/profiles/` | Running browsers' throwaway profiles, removed when each closes |
 | `browser-proxies.json` | Each worktree's browser proxy port |
 | `trigger-secrets.json` | Webhook flows' signing secrets (0600) |
+| `op-session` | The 1Password CLI session `berthd secret signin` made (0600), passed to `op` for `op://` reads; op ends it after 30 minutes unused |
+| `team/<id>/` | A [team setup](/guides/team-setup): what the laptop sent, its runner script, the progress file and its state |
 | `turns.json`, `turns-archive.jsonl`, `inbox.json`, `journal/`, `spool/` | The turn ledger, the event journal and hooks kept while berthd was down |
 | `flow-github.json` | What GitHub-triggered flows have already seen |
 
