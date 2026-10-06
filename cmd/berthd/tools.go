@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sean-brydon/berthd/internal/box"
+	"github.com/sean-brydon/berthd/internal/guided"
 )
 
 // Berth needs two tools on a box before anything else works: tmux, which
@@ -50,38 +51,19 @@ func planTools(goos string, found func(string) bool, have func(string) bool) too
 		}
 		return p
 	}
-	switch {
-	case have("apt-get"):
-		p.Steps = [][]string{{"apt-get", "update", "-q"}, append([]string{"apt-get", "install", "-y", "-q"}, pkgs...)}
-	case have("dnf"):
-		p.Steps = [][]string{append([]string{"dnf", "install", "-y"}, pkgs...)}
-	case have("yum"):
-		p.Steps = [][]string{append([]string{"yum", "install", "-y"}, pkgs...)}
-	case have("pacman"):
-		p.Steps = [][]string{append([]string{"pacman", "-S", "--noconfirm", "--needed"}, pkgs...)}
-	case have("zypper"):
-		p.Steps = [][]string{append([]string{"zypper", "--non-interactive", "install"}, pkgs...)}
-	case have("apk"):
-		p.Steps = [][]string{append([]string{"apk", "add"}, pkgs...)}
-	case have("brew"):
-		p.Brew, p.Steps = true, [][]string{append([]string{"brew", "install"}, pkgs...)}
-	default:
-		p.Help = "https://github.com/tmux/tmux/wiki/Installing"
+	for _, m := range []string{"apt-get", "dnf", "yum", "pacman", "zypper", "apk", "brew"} {
+		if have(m) {
+			p.Steps, p.Brew = guided.PackageSteps(m, pkgs)
+			return p
+		}
 	}
+	p.Help = "https://github.com/tmux/tmux/wiki/Installing"
 	return p
 }
 
 // command is the plan as one line to type: sudo where it needs root.
 func (p toolsPlan) command() string {
-	var parts []string
-	for _, s := range p.Steps {
-		line := strings.Join(s, " ")
-		if !p.Brew {
-			line = "sudo " + line
-		}
-		parts = append(parts, line)
-	}
-	return strings.Join(parts, " && ")
+	return strings.Join(guided.CommandLines(p.Steps, p.Brew), " && ")
 }
 
 func (p toolsPlan) what() string { return strings.Join(p.Missing, " and ") }

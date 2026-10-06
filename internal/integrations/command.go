@@ -16,7 +16,7 @@ import (
 )
 
 const Usage = `Integrations
-  %[1]s integrations install claude|cursor|codex|gemini|opencode|all
+  %[1]s integrations install claude|cursor|codex|gemini|opencode|all|present
                          Install berth's skills and agent hooks for a tool
   %[1]s hook TOOL EVENT [PAYLOAD]
                          What those hooks run: turns a tool's hook into a
@@ -62,7 +62,7 @@ func Hook(args []string, stdin *os.File, stdout, stderr io.Writer, emit Emit) {
 // Install handles `integrations install TOOL...` for the binary at bin.
 func Install(args []string, bin string, out io.Writer) error {
 	if len(args) < 2 || args[0] != "install" {
-		return errors.New("usage: integrations install claude|cursor|codex|gemini|opencode|all")
+		return errors.New("usage: integrations install claude|cursor|codex|gemini|opencode|all|present")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -71,6 +71,12 @@ func Install(args []string, bin string, out io.Writer) error {
 	tools := args[1:]
 	if len(tools) == 1 && tools[0] == "all" {
 		tools = AllTools
+	}
+	// present: every agent CLI on this machine, saying nothing of the
+	// others (the guided install runs this after installing the agents
+	// the person chose).
+	if len(tools) == 1 && tools[0] == "present" {
+		return InstallPresent(home, bin, out)
 	}
 	for _, tool := range tools {
 		if err := InstallTool(home, tool, bin, out); err != nil {

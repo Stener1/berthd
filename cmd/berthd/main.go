@@ -66,6 +66,10 @@ const usage = `berthd — the berth daemon for a development box
                                           (--check: only say whether it can read now)
   berthd mcp                              A stdio MCP server of berth's tools for agents on this box
                                           (integrations install adds it to Claude, Codex and Gemini)
+  berthd agents install [--integrations] [--markers] claude|codex|cursor|opencode ...
+                                          Install agent CLIs into ~/.local/bin, without sudo (each is
+                                          skipped when it is already here)
+  berthd agents list [--json]             Which agent CLIs are here, and how to add the others
   berthd browser install                  Download a Chromium (Playwright's headless shell) for agents' browsers
   berthd headless --agent A --out FILE.jsonl --prompt-file FILE [--read-only] [--add-dir D]
                                           One non-interactive agent turn, as runs start in tmux
@@ -195,6 +199,8 @@ func run(args []string) error {
 		return box.RunHeadless(args[1:], os.Stdout)
 	case "mcp":
 		return mcpserver.Serve(context.Background(), b.socket(), os.Stdin, os.Stdout)
+	case "agents":
+		return agents(args[1:], os.Stdout)
 	case "integrations":
 		exe, err := os.Executable()
 		if err != nil {
