@@ -9,6 +9,31 @@ upgrades with `berth upgrade BOX`, or by running the
 [install command](/getting-started/add-a-box#with-the-install-command)
 again.
 
+## Unreleased
+
+- **Team setup.** A GitHub org publishes how its engineers' boxes are set
+  up in a repository called `.berth` (`team.json`, schema `berth.team/v1`,
+  plus the box script and any kits), and a new engineer runs it from Berth:
+  **Joining a team?** on the welcome screen, **Set this box up for a team**
+  in Add a box, or a link, `berth://team?org=<org>`. One page reads like the
+  org's repository (who published it, the commit, who changed it last), lists
+  what you'll get with every exact command, and turns into the progress when
+  you press **Set up**. GitHub goes through the GitHub CLI: your laptop's `gh`
+  reads the setup and checks you can read each repo (no membership check;
+  "You can't read calcom/private-api: ask an admin · Set up the other 2"),
+  and the box signs in with its own `gh auth login`, so your laptop's token
+  never leaves it. Box steps run in a terminal on the box, as you; steps
+  that need root ask for your password there, and Berth never sees it.
+  Progress survives berthd restarting, a failed step keeps the ones before
+  it and retries from itself, and each repo is set up from its own
+  `.berth/config.json` (trusted as you reviewed it) or the team's kit,
+  pinned to a commit. Shared keys are 1Password references, your own are
+  asked for once and stay on your box. A newer commit of `.berth` is an
+  update to review, with a diff, never run by itself. An org without a
+  `.berth` gets a picker of its repos. `berth team show|setup|status|retry`
+  does the same from the command line. Cal.com's is the worked example, in
+  `examples/team/calcom-dot-berth`. See [team setup](/guides/team-setup).
+
 ## v0.3.8
 
 - **The Files panel.** ⌘⇧E (or View → Files panel, or its button in the

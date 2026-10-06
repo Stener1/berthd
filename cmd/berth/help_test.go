@@ -11,7 +11,7 @@ import (
 )
 
 // Every flag a command defines is in its usage error and in berth help (or
-// berth kit help), and every flag the help offers exists.
+// berth kit help, berth team help), and every flag the help offers exists.
 func TestHelpMatchesFlags(t *testing.T) {
 	cmds, err := usagecheck.Commands(".", usagecheck.Dir("internal/boxcmd"))
 	if err != nil {
@@ -20,7 +20,7 @@ func TestHelpMatchesFlags(t *testing.T) {
 	if len(cmds) < 20 {
 		t.Fatalf("found only %d commands with flags; is the scan still finding them?", len(cmds))
 	}
-	for _, p := range usagecheck.Problems("berth", helpText()+"\n"+kitUsage, cmds, nil) {
+	for _, p := range usagecheck.Problems("berth", helpText()+"\n"+kitUsage+"\n"+teamUsage, cmds, nil) {
 		t.Error(p)
 	}
 }

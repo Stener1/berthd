@@ -53,6 +53,13 @@ The agent serves the app on `http://127.0.0.1:1378`.
 | `POST /v1/plugins/{id}/enable`, `POST /v1/plugins/{id}/disable` | turns a plugin on or off. Enable takes `{ hash }`, the hash of the code you reviewed, and is refused (409) if the plugin's files no longer hash to it; see [trust and consent](/guides/plugins#trust-and-consent) |
 | `GET /v1/app/{key}`, `PUT /v1/app/{key}` | an app settings document, `~/.berth/app/<key>.json` (JSON, at most 1 MB; `null` when missing). The app keeps `prompts`, `projects`, `sidebar` and `notifications` here; a change announces `app.changed`. |
 | `GET /v1/kits`, `GET /v1/kits/installed`, `GET /v1/kits/{id}`, `POST /v1/kits/preview`, `POST /v1/kits/add`, `POST /v1/kits/{id}/apply`, `POST /v1/kits/{id}/update`, `DELETE /v1/kits/{id}`, `POST /v1/kits/remove`, `POST /v1/kits/save` | the [kits](/guides/kits) library, as `berth kit` uses it |
+| `GET /v1/github` | `{ state, login?, name?, avatar_url?, install?, error? }`: whether this laptop's `gh` is `missing` (with `install: { os, command, url }`), `signed-out` or `ready` (as `login`). [Team setups](/guides/team-setup) read GitHub through it |
+| `POST /v1/github/login` | opens a terminal on this computer running `gh auth login`; `{ opened, command, error? }`. Poll `GET /v1/github` until it is `ready` |
+| `GET /v1/team/{org}?box=B&from=link` | `TeamView`: the org (`login`, `name`, `avatar_url`, `verified`), `state` (`found`, `none`: no `.berth` this account can read, with `repos` to pick from; `unreadable`: the same, opened from a link; `no-org`), the `.berth` `repo` and pinned `commit` (`sha`, `short`, `author`, `date`), the parsed `setup`, every file (`files`), the `steps` with their commands (Berth's own `github` step last), each project after the access check (`access`, `source`: `repo`, `kit` or `none`, `config_hash`, `kit`, `services`, `commands`, `keys`), `access` (`readable`, `total`, `missing`), `keys` (`shared`, `ask` with `set` when `box` has it), `accepted` and `update`. 412 with code `gh_missing` or `gh_signed_out` when `gh` isn't ready |
+| `POST /v1/team/{org}/setup` | `{ box, commit, projects?, keys?: { project: { KEY: value } }, repos? }` → the box's `TeamStatus`. Reads `.berth` at `commit` (409 `team_changed` if that is not the commit reviewed), sends it to the box and records it as accepted. `repos` instead sets up an org's repositories without a `.berth` |
+| `POST /v1/team/{org}/retry` | `{ box?, from? }` → `TeamStatus`: start again from a step or a project (default: the one that failed) |
+| `GET /v1/team/{org}/update` | `{ update }`: `null`, or a newer `.berth` commit than the one accepted: `from`, `to`, `author`, `commits`, `changes` (`kind`: add, remove or change; `area`: step, project, key or file; `sudo` on a step that newly asks for the password) and `sudo` (their titles). Nothing runs |
+| `GET /v1/team` | the team setups this laptop accepted: `org`, `id`, `name`, `commit`, `box`, `boxes`, `at`, and `status` (the box's `TeamStatus`) when the box is online |
 | `GET /v1/hooks`, `PUT /v1/hooks` | the laptop's `hooks.json`: `{ path, hooks }`; PUT takes `{ hooks }` and announces `hooks.changed` |
 | `GET /v1/queue` | `QueueItem[]`: prompts waiting for their box, oldest first |
 | `POST /v1/queue` | `{ id?, box, session, text, wait?, enter? }` → `QueueItem`; the same `id` again returns the item already queued |
@@ -146,6 +153,9 @@ failed after it went out (the box may have acted on it). The box API:
 | `GET skills`, `POST skills/install`, `POST skills/uninstall` | [skills](/guides/agent-integrations#skills) |
 | `GET integrations`, `POST integrations/install` `{"tool": "claude"}` | Agent CLIs on the box and whether Berth's hooks are installed for each; install one tool's hooks and skills, as `berthd integrations install` does. Announces `integrations.installed`; a `before:integrations.install` gate can refuse it |
 | `GET kits`, `PUT locations/{name}/kit`, `DELETE locations/{name}/kit` | installed kits |
+| `GET team`, `GET team/{id}` | `TeamStatus[]`, one: a [team setup](/guides/team-setup) on the box: `phase` (`steps`, `projects`, `done`, `failed`), `session` (the terminal the steps run in), `steps` (`id`, `title`, `sudo`, `state`: `todo`, `running`, `waiting` (at a password prompt, or with GitHub's device `code` and `url`), `done`, `skipped`, `failed`; `secs`, `error`), `projects` (`id`, `repo`, `state`: `queued`, `cloning`, `setting-up`, `ready`, `failed`; `location`, `trust`, `warnings`, `error`), `keys_set` |
+| `POST team` | a `TeamBundle` from the laptop (`id`, `name`, `org`, `commit`, `script`, `steps`, `github`, `files`: path → base64, `projects`: `id`, `repo`, `url`, `path`, `source`, `trust_hash`, `kit`, `init`, `env`) → `TeamStatus`. Starts the steps in a terminal; 409 while it runs. Boxes with the `team` capability |
+| `POST team/{id}/retry` | `{ from? }` → `TeamStatus` |
 | `GET shares`, `POST shares`, `DELETE shares/{id}` | public shares |
 | `GET units`, `POST units`, `GET units/{name}`, `DELETE units/{name}`, `POST units/{name}/restart`, `GET units/{name}/log` | units |
 | `GET phone`, `PUT phone` | the [phone companion](/guides/phone) |
@@ -222,6 +232,6 @@ The app reacts to most box and laptop events: connections (`box.*`),
 locations and worktrees (`location.*`, `worktree.*`, `service.*`), sessions
 and agents (`session.*`, `agent.*`, `task.created`, `preview.open`),
 automation (`flow.*`, `guard.acted`, `config.changed`, `hooks.changed`),
-kits, shares, forwards, units, the queue (`queue.*`, never the prompt) and
+kits, team setups (`team.*`), shares, forwards, units, the queue (`queue.*`, never the prompt) and
 secrets (`secret.*`, never a value). [Events and gates](/reference/events)
 lists every type and its data.

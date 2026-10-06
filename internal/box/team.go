@@ -445,7 +445,9 @@ func (t *TeamRunner) Stop() {
 }
 
 var (
-	sudoPrompt  = regexp.MustCompile(`(?i)(\[sudo\] password for [^:]*:|^password:|press enter to open)\s*$`)
+	// A step waits for its person at a password prompt, a yes/no question
+	// (gh asks one before its device code), or gh's "Press Enter to open".
+	sudoPrompt  = regexp.MustCompile(`(?i)(\[sudo\] password for [^:]*:|^password:|\(y/n\)|press enter to open.*)\s*$`)
 	deviceCode  = regexp.MustCompile(`one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})`)
 	deviceURL   = "https://github.com/login/device"
 	progressRow = regexp.MustCompile(`^(\S+) (\S+) (\d+) ?(\S*)$`)

@@ -1,0 +1,237 @@
+---
+title: Team setup
+description: Set a new engineer's box up the way the team's are, from a repository the GitHub org owns.
+---
+
+A team setup sets a box up the way your team's boxes are: the tools it
+needs once, then the team's repositories, each cloned and set up. An org
+publishes it on GitHub in a repository called `.berth` (`github.com/<org>/.berth`),
+and an engineer runs it from Berth by typing the org's name or opening a
+link such as `berth://team?org=calcom`. Under the hood it is a workspace
+kit: a [kit](/guides/kits) for a whole box, not one project.
+
+Any GitHub org (or user) can publish one. Cal.com's is the worked example,
+in [`examples/team/calcom-dot-berth`](https://github.com/sean-brydon/berthd/tree/main/examples/team/calcom-dot-berth).
+
+## Setting up your box
+
+Open the Team setup page one of three ways:
+
+- On the welcome screen, **Joining a team?**: type your company's GitHub org.
+- **Add a box** → **Set this box up for a team**.
+- A link from your team, `berth://team?org=<org>`, often in an onboarding
+  doc. It opens Berth on the page.
+
+The page reads like the org's repository on GitHub: the org's avatar and
+name, **Published by Cal.com on GitHub**, `calcom / .berth`, who changed it
+last and when, and the commit Berth will run. **What you'll get** lists:
+
+- **On your box, once**: the box steps, those that ask for your password
+  marked **sudo**, then Berth's own step, **GitHub on the box**. Open any line
+  for its exact commands; **Read every command** shows every file of `.berth`
+  as it is at that commit.
+- **Repos**: each repository, where it is cloned, and where its setup comes
+  from: the **repo's .berth/config.json**, the **team kit**, or none.
+- **Keys**: one line, such as "5 from 1Password · 1 to enter".
+
+On the right is a short checklist, **GitHub**, **Box** and **Keys**, which
+ends in **Set up for Cal.com**. Pressing it turns the same rows into
+progress, so what you read is what runs.
+
+### GitHub, through the GitHub CLI
+
+Berth has no GitHub sign-in of its own and keeps no GitHub token. On your
+laptop it reads the team setup and the repositories with your own `gh`:
+
+- Without `gh`, the page says how to install it (`brew install gh` on a
+  Mac) and checks again.
+- Signed out, **Connect GitHub** opens a terminal running
+  `gh auth login`; when you finish there, the page notices.
+
+Signing in comes first, so a private `.berth`, and private repositories,
+can be read.
+
+The box signs in on its own, as the last box step: `gh auth login` runs in
+the box's terminal and shows a device code, which the page shows too, with
+a button to open `github.com/login/device` on your laptop. The box then
+clones with a credential of its own, which you can revoke without touching
+your laptop's. Your laptop's token never goes to the box.
+
+### Access, not membership
+
+There is no separate check that you are in the org. Being able to read
+`<org>/.berth`, and each repository, is the check: the page says **You have
+access to all 3 repos**, or **You can't read calcom/private-api: ask an
+admin · Set up the other 2**. If you can't read the team setup at all (it is
+private and you have no access yet), the page says **You can't read this
+setup**: ask an admin of the org for access, accept the invitation, then
+**Check again**.
+
+### Your password
+
+Steps that need root run `sudo` in a terminal on the box, as you; you type
+your password there. Berth never sees it and nothing keeps it. The page
+shows that terminal inline on the step that is waiting (and **Open
+terminal** opens it as a tab). There is no root-over-SSH path, and the
+runner refuses to run as root.
+
+### Progress, failure and Retry
+
+The sidebar and the status bar show the setup as soon as it starts: the
+repositories appear under the box, queued, then setting up, then new. When
+a step fails, its row shows the output and **Retry from** that step; the steps
+before it stay done. Repositories that are ready while others still set up
+get **Start on** that repo, and a toast says so if the page is not in front.
+At the end, **You're set up** offers the team's first task.
+
+The box keeps its progress on disk (`~/.berth/box/team/<id>/`), so a setup
+carries on after berthd restarts: the terminal keeps running in tmux, and
+berthd reads where it got to.
+
+### Keys
+
+No secrets live in git. A team setup lists, per repository:
+
+- **shared** keys as 1Password references (`op://vault/item/field`), read
+  on the box with your own 1Password when a worktree needs them;
+- **asked** keys, each engineer's own (an email API key, say), which the
+  page asks for once and keeps on that box, in the project's own config.
+
+The keys a repository needs come from its `.env.example`. Berth only sets
+what is its business (ports, URLs, databases, through the repository's
+config or kit); everything else stays as the repository has it. When
+nothing is missing, the keys line is skipped.
+
+### Updates
+
+When the team changes `.berth`, Berth notices the newer commit (it checks
+every few hours) and shows **Cal.com's setup changed · Review update**. It
+never runs by itself. Reviewing opens the same page with what changed:
+steps added or changed (one that now asks for your password is called
+out), repositories added, kits moved to a new commit, keys. **Update**, with your box's name on it, runs it; steps whose checks already pass are skipped.
+
+### An org with no .berth
+
+If the org has no `.berth` you can read, the page lists its repositories you
+can read, with those that carry their own `.berth/config.json` picked. Berth
+clones the ones you choose and sets each up from its own config, after the
+box's GitHub sign-in.
+
+### From the command line
+
+```sh
+berth team show calcom                    # the org, the commit, the steps, each repo and whether you can read it
+berth team setup calcom devbox            # run it on devbox; prints progress, and where to type your password
+berth team status                         # each team setup you accepted, and how it stands
+berth team retry calcom --from postgres   # start again from a step (or a repo)
+```
+
+`berth team setup` follows the setup until it ends; the steps run in the
+box's terminal, which `berth attach devbox/team-calcom` opens.
+
+## Publishing a team setup
+
+Create a repository called `.berth` in your org. Public or private both work:
+a private one is read by people with access to it.
+
+```text
+team.json                       the team setup (berth.team/v1)
+box/setup.sh                    the box steps, one subcommand each
+box/init-cal.sh                 a repo's first-time setup, run once in the fresh clone
+projects/private-api/kit.json   a kit kept here, for a repo with no .berth/config.json
+README.md                       for people reading it on GitHub
+```
+
+Then share `berth://team?org=<org>` in your onboarding doc.
+
+### team.json
+
+```json
+{
+  "schema": "berth.team/v1",
+  "id": "calcom",
+  "name": "Cal.com",
+  "org": "calcom",
+  "description": "Everything a Cal.com engineer needs on their box.",
+  "contact": "#eng-onboarding on Slack",
+  "docs": "https://github.com/calcom/.berth#readme",
+  "box": {
+    "os": ["ubuntu>=22.04", "debian>=12", "macos>=14"],
+    "script": "box/setup.sh",
+    "steps": [
+      { "id": "packages", "title": "System packages", "detail": "git, curl, build tools", "sudo": true },
+      { "id": "node", "title": "Node 20 with fnm", "detail": "in your home folder" }
+    ]
+  },
+  "projects": [
+    { "id": "cal.com", "repo": "calcom/cal.com", "path": "~/code/cal.com", "required": true,
+      "kit": "https://github.com/sean-brydon/berth-kit-calcom@7f93797",
+      "init": "box/init-cal.sh", "first_task": "Find a good first issue and fix it" },
+    { "id": "private-api", "repo": "calcom/private-api", "kit": "./projects/private-api" }
+  ],
+  "keys": {
+    "cal.com": {
+      "from": ".env.example",
+      "shared": { "STRIPE_PRIVATE_KEY": "op://Engineering/Cal.com Stripe test/secret key" },
+      "ask": ["SENDGRID_API_KEY"]
+    }
+  },
+  "updates": { "notify": true }
+}
+```
+
+| Field | |
+| --- | --- |
+| `schema` | `berth.team/v1` |
+| `id` | lowercase letters, digits and dashes; names the setup on the box |
+| `name` | the org as people say it: "Set up for **Cal.com**" |
+| `org` | the GitHub org (or user) that publishes it; must be the repository's owner |
+| `description`, `contact`, `docs` | shown on the page; `contact` is where to ask for access |
+| `box.os` | the systems the script supports; shown, not enforced |
+| `box.script` | a path inside `.berth`; see below |
+| `box.steps[]` | `id` (a subcommand of the script), `title`, `detail`, `sudo` (it asks for the password). `all`, `check`, `plan` and `github` are reserved |
+| `projects[]` | `id` (its folder and project name), `repo` (`owner/name`), `path` (default `~/code/<id>`), `required`, `kit`, `init`, `init_detail`, `first_task` |
+| `projects[].kit` | for a repository without its own `.berth/config.json`: a kit link pinned to a commit (`https://github.com/o/kit@7f93797`, or `…/tree/<commit>/<dir>`), or a folder inside `.berth` (`./projects/api`). A link without a commit is refused |
+| `keys.<project>` | `from` (default `.env.example`), `shared` (name → `op://…` or `env://…` reference; a value is refused), `ask` (names each engineer enters once) |
+| `updates.notify` | default `true`: offer newer commits as updates |
+
+Fields starting with `$` are comments. Fields Berth does not know are
+reported as warnings and ignored.
+
+### The box script
+
+`box.script` is run as the engineer, in a terminal on the box, with these
+subcommands:
+
+| Subcommand | |
+| --- | --- |
+| `<step>` | do one step |
+| `check <step>` | exit 0 when the step is already done; Berth skips it then |
+| `plan` | print the steps, one per line, `sudo` after those that need it |
+| `all` | every step, in order, for running it by hand |
+
+Write each step so it is safe to run again, and let it call `sudo` itself
+for what needs root: the engineer types the password in that terminal. The
+script should refuse to run as root. Berth runs `check <step>` then `<step>`
+for each step in order, and stops at the first that fails; Retry starts
+again from it.
+
+### Where each repo's setup comes from
+
+1. The repository's own committed `.berth/config.json`, when it has one.
+   Accepting the team setup trusts that file as the engineer saw it on the
+   page (its sha256); if the file changed since, the box asks to trust it
+   again, as for any [project config](/guides/project-config).
+2. Otherwise the kit the team setup names for it, at its pinned commit.
+3. Then the engineer's own additions, in Project settings on their box.
+
+Several apps in one repository (a web app, an API, Prisma Studio) are that
+repository's services, in its own config or its kit, not the team setup's.
+
+### Trust
+
+Accepting a team setup runs `.berth`'s script at the commit the engineer
+reviewed: the laptop reads `.berth` with their `gh` at that commit, and the
+box runs exactly those files. A newer commit is an update to review, never
+run by itself. Repositories are cloned with the box's own `gh` sign-in from
+`https://github.com/<repo>.git`, and nothing else.

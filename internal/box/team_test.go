@@ -417,3 +417,18 @@ func TestTheTeamRunnerRefusesRoot(t *testing.T) {
 		t.Fatalf("the runner script does not parse: %s", out)
 	}
 }
+
+func TestWaitingPrompts(t *testing.T) {
+	for line, want := range map[string]bool{
+		"[sudo] password for dev:": true,
+		"Password:":                true,
+		"? Authenticate Git with your GitHub credentials? (Y/n)":                  true,
+		"Press Enter to open https://github.com/login/device in your browser... ": true,
+		"==> Docker":                    false,
+		"Reading package lists... Done": false,
+	} {
+		if got := sudoPrompt.MatchString(strings.TrimSpace(line)); got != want {
+			t.Errorf("%q: %v", line, got)
+		}
+	}
+}

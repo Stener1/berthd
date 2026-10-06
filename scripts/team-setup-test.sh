@@ -202,6 +202,19 @@ s_update() {
 	detail "a newer acme/.berth shows as an update: + Node 22, which asks for the password; the box stays at ${COMMIT:0:7}"
 }
 
+s_cli() {
+	local out
+	out=$(lp "berth team show acme") || fail "berth team show failed" || return 1
+	echo "$out"
+	echo "$out" | grep -q "Acme team setup" || fail "show: $out" || return 1
+	echo "$out" | grep -q "Repos (2 of 3 you can read)" || fail "show: no access line" || return 1
+	echo "$out" | grep -q "Update: ${COMMIT:0:7} →" || fail "show: no update" || return 1
+	out=$(lp "berth team status") || fail "berth team status failed" || return 1
+	echo "$out"
+	echo "$out" | grep -q "Acme (acme) *$BOX *${COMMIT:0:7} *set up *4/4 steps, 2/2 repos" || fail "status: $out" || return 1
+	detail "berth team show lists the plan, access and the update; berth team status: set up, 4/4 steps, 2/2 repos"
+}
+
 RT_CRITICAL=1 step "Build berthd, berth and the Ubuntu image" s_build
 RT_CRITICAL=1 step "Start a box and a laptop" s_machines
 RT_CRITICAL=1 step "A synthetic GitHub, sudo with a password" s_github
@@ -216,4 +229,5 @@ RT_CRITICAL=1 step "The box's own GitHub sign-in" s_box_github
 step "Repos cloned and set up" s_projects
 step "A second run skips what is done" s_rerun
 step "A newer .berth is an update to review" s_update
+step "berth team show and status" s_cli
 rt_finish

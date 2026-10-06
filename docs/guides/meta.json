@@ -13,6 +13,7 @@
     "resource-guard",
     "project-config",
     "kits",
+    "team-setup",
     "secrets",
     "task-templates",
     "agent-integrations",

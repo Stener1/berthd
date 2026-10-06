@@ -55,6 +55,8 @@ Boxes
   berth ping BOX                         Check a box answers and still trusts you
   berth upgrade BOX [--check] [--json]   Upgrade the box's daemon over berth (no SSH); --check only reports
   berth kit add|apply|list|save …        Set projects up the same way on every box; see berth kit help
+  berth team show|setup|status|retry …   Set a box up the way your team's are, from <org>/.berth
+                                         on GitHub (read with gh); see berth team help
   berth edit BOX/PROJECT[/WT] [FILE[:LINE[:COL]]] [--in EDITOR]
                                          Open a worktree, or a file at a line, in your editor
                                          (EDITOR: cursor, vscode, windsurf or zed; default: the first installed)
@@ -168,6 +170,8 @@ func run(args []string) error {
 		return upgrade(l, rest)
 	case "kit", "kits":
 		return kitCommand(l, rest)
+	case "team":
+		return teamCommand(l, rest)
 	case "ssh-config":
 		return sshConfigCommand(l, rest)
 	case "edit":

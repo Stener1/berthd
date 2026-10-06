@@ -5,7 +5,7 @@ description: Every command of berth, the laptop CLI.
 
 `berth` runs on your laptop. It talks to the [laptop agent](/concepts/laptop-agent),
 starting it if needed, and through it to every box. `berth help` prints this
-list; `berth kit help` the kit commands.
+list; `berth kit help` the kit commands, `berth team help` the team setup ones.
 
 - **Addressing.** A box is `devl`; a location on it `devl/shop`; a worktree
   `devl/shop/checkout`; a session `devl/SESSION`.
@@ -59,6 +59,18 @@ network's, and `tailscale` and `tailnet` are left out.
 | `berth kit save BOX/PROJECT ID [--name N]` | Make a kit of how a project is set up on a box |
 
 See [kits](/guides/kits).
+
+## Team setup
+
+| Command | What it does |
+| --- | --- |
+| `berth team show ORG [--box BOX] [--json]` | What `<org>/.berth` does: the org, the pinned commit, each box step (and which ask for your password), each repo and whether you can read it, the keys, and an update if there is one |
+| `berth team setup ORG BOX [--yes] [--only ID,…] [--key PROJECT/KEY=VALUE]…` | Run it on BOX: the steps in a terminal on the box (`berth attach BOX/team-<id>` to type your password), then the repos; asks for keys it needs, and follows the progress |
+| `berth team status [--json]` | Each team setup you accepted, its box, commit, state and progress |
+| `berth team retry ORG [--from STEP\|PROJECT] [--box BOX]` | Start a failed setup again from a step or a repo |
+
+GitHub goes through `gh`: this laptop's reads the team setup, and the box
+signs in with its own. See [team setup](/guides/team-setup).
 
 ## Reaching services
 

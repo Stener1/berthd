@@ -105,6 +105,12 @@ Berth reads the terminal and sends these itself with `origin: "screen"` and
 | `hooks.changed` | |
 | `kit.installed` | `location`, `kit`, `version`, `source`, `warnings` |
 | `kit.removed` | `location`, `kit` |
+| `team.started` | `team`, `name`, `commit`: a [team setup](/guides/team-setup) started on the box |
+| `team.step` | `team`, `step`, `state` (`running`, `waiting`, `done`, `skipped`, `failed`), `secs`, `code` (GitHub's device code, while the box signs in) |
+| `team.project` | `team`, `project`, `state` (`cloning`, `setting-up`, `ready`, `failed`), `location`, `error` |
+| `team.done` | `team`, `name` |
+| `team.failed` | `team`, `step` or `project`, `error` |
+| `team.retry` | `team`, `from` |
 | `skills.installed`, `skills.removed` | `skills`, `agents`, `target`, `location`, `paths` |
 | `integrations.installed` | `tool`: an agent CLI's hooks and skills were installed from the app or the API |
 | `secret.failed` | `location`, `name`, `path`, `variable`, `ref`, `reason`: a [secret reference](/guides/secrets) could not be read, so the variable was left unset; never the value |
@@ -139,6 +145,8 @@ runs, so `flow` and `scope` name one flow.
 | `queue.delivered` | `id`, `box`, `session`, `attempts` |
 | `queue.failed` | `id`, `box`, `session`, `reason` (never the prompt) |
 | `kit.added` | `kit`, `source` |
+| `team.accepted` | `org`, `team`, `box`, `commit`: a team setup was sent to a box |
+| `team.update` | `org`, `name`, `from`, `to`, `changes`, `sudo`: a newer commit of a team setup this laptop accepted, to review; once per commit |
 | `app.changed` | `key`: an app settings document changed |
 | `hooks.changed` | |
 
@@ -170,6 +178,8 @@ exits non-zero refuses it with what it printed. Gates in a laptop's
 | `before:browser.allow` | `origin`: letting agents' browsers load a public origin |
 | `before:kit.install` | `location`, `kit`, `source` |
 | `before:kit.remove` | `location` |
+| `before:team.setup` | `team`, `org`, `commit`: a team setup about to start on the box |
+| `before:team.retry` | `team`, `from` |
 | `before:skills.install`, `before:skills.uninstall` | `skills`, `agents`, `target`, `location` |
 | `before:integrations.install` | `tool` |
 | `before:config.change` | `location`, `flows`, `env` or `guard`: what is about to change |
