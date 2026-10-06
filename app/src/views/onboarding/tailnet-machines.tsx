@@ -10,9 +10,9 @@ import { plainError } from "@/lib/errors";
 import { openUrl } from "@/lib/open-url";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ApproveLogin, FailurePanel, useAddSsh, useSshPlan } from "@/views/onboarding/ssh-setup";
+import { GuidedInstall, useInstallTarget } from "@/views/onboarding/guided-install";
+import { useSshPlan } from "@/views/onboarding/ssh-setup";
 import { discoverNetwork, type SystemTailnet, sortMachines, type TailnetSource } from "@/views/onboarding/tailnet";
-import { CommandLog } from "@/views/settings/command-log";
 
 const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
 
@@ -29,6 +29,7 @@ export function TailnetMachines({
   onRunning,
   onPaired,
   onSignIn,
+  readyLabel,
 }: {
   sources: TailnetSource[];
   system?: SystemTailnet;
@@ -38,6 +39,7 @@ export function TailnetMachines({
   onRunning(running: boolean): void;
   onPaired(box: string): void;
   onSignIn(): void;
+  readyLabel?: string;
 }) {
   const source = sources.find((s) => s.key === active) ?? sources[0];
   const found = useDiscovery(source, system);
@@ -82,6 +84,7 @@ export function TailnetMachines({
         }}
         onPaired={onPaired}
         onSignIn={onSignIn}
+        readyLabel={readyLabel}
       />
     </section>
   );
@@ -125,6 +128,7 @@ function MachineList({
   onRunning,
   onPaired,
   onSignIn,
+  readyLabel,
 }: {
   source: TailnetSource;
   found: Found;
@@ -135,6 +139,7 @@ function MachineList({
   onRunning(running: boolean): void;
   onPaired(box: string): void;
   onSignIn(): void;
+  readyLabel?: string;
 }) {
   const [filter, setFilter] = useState("");
   const all = useMemo(() => (found.state === "ok" ? sortMachines(found.discovery.machines) : []), [found]);
@@ -210,6 +215,7 @@ function MachineList({
           onRunning={onRunning}
           onPaired={onPaired}
           onClose={() => onPick(undefined)}
+          readyLabel={readyLabel}
         />
       )}
     </div>
@@ -266,7 +272,8 @@ function MachineSetup({
   network,
   onRunning,
   onPaired,
-  onClose,
+  onClose: _onClose,
+  readyLabel,
 }: {
   machine: Machine;
   user: string;
@@ -274,6 +281,7 @@ function MachineSetup({
   onRunning(running: boolean): void;
   onPaired(box: string): void;
   onClose(): void;
+  readyLabel?: string;
 }) {
   // A Berth network is dialed by address; this Mac's tailnet by name.
   const host = network ? m.ip : m.dns_name || m.ip;
@@ -282,10 +290,11 @@ function MachineSetup({
   const [user, setUser] = useState(suggested);
   const [touched, setTouched] = useState(false);
   const [name, setName] = useState(() => boxName(m.name, boxes?.map((b) => b.name) ?? []));
-  const [identity, setIdentity] = useState("");
-  const setup = useAddSsh({ onRunning, onPaired });
-  const { state, lines, failure } = setup;
-  const running = state === "running";
+  // Install and pair opens the guided install, full screen.
+  const install = useInstallTarget();
+  const running = !!install.target;
+  const state = running ? "running" : "ready";
+  useEffect(() => onRunning(running), [running, onRunning]);
 
   // ssh's own answer for the user (~/.ssh/config's User), until one is typed.
   const planned = plan && plan !== "loading" ? plan.user : undefined;
@@ -303,10 +312,10 @@ function MachineSetup({
     );
   }
 
-  const go = (trust?: string) => {
+  const go = () => {
     const u = user.trim();
     if (/[\s@]/.test(u)) return;
-    void setup.run({ host: `${u ? `${u}@` : ""}${host}`, name: name.trim() || undefined, network, identity: identity.trim() || undefined, trust_host_key: trust }, { knownHostKeys: m.host_keys });
+    install.open({ host: `${u ? `${u}@` : ""}${host}`, name: name.trim() || undefined, network, knownHostKeys: m.host_keys });
   };
   const userError = /@/.test(user) ? `Only the user: Berth connects to ${m.name}.` : /\s/.test(user.trim()) ? "A user name has no spaces." : undefined;
 
@@ -323,7 +332,7 @@ function MachineSetup({
           <input
             autoFocus
             value={user}
-            disabled={running || state === "done"}
+            disabled={running}
             onChange={(e) => {
               setUser(e.target.value);
               setTouched(true);
@@ -340,15 +349,9 @@ function MachineSetup({
           />
           <span className="min-w-0 truncate text-muted-foreground">@{host}</span>
         </div>
-        {running ? (
-          <Button type="button" size="sm" variant="ghost" className="shrink-0 text-muted-foreground" onClick={setup.stop}>
-            Stop
-          </Button>
-        ) : (
-          <Button type="submit" size="sm" className="shrink-0" disabled={!!userError || state === "done"}>
-            Install and pair
-          </Button>
-        )}
+        <Button type="submit" size="sm" className="shrink-0" disabled={!!userError || running} data-testid="machine-install">
+          Install and pair
+        </Button>
       </form>
       <div aria-live="polite" className="mt-2 flex min-h-5 min-w-0 items-center gap-1.5 text-muted-foreground text-xs leading-5">
         {userError ? (
@@ -376,7 +379,7 @@ function MachineSetup({
             placeholder="after its hostname"
             aria-label="Name in Berth"
             spellCheck={false}
-            disabled={running || state === "done"}
+            disabled={running}
             className="h-5 w-28 border-input border-b bg-transparent px-0.5 text-foreground outline-none placeholder:text-muted-foreground/72 focus:border-ring"
           />
         </span>
@@ -386,26 +389,15 @@ function MachineSetup({
           Berth logs in once to install berthd for that user. It listens on {m.name}'s tailnet address only, and Berth never needs SSH for it again.
         </p>
       )}
-      {(running || state === "done") && <CommandLog className="mt-2" lines={lines} done={state === "done"} />}
-      {running && setup.approve && <ApproveLogin url={setup.approve} />}
-      {state === "done" && (
-        <p className="mt-2 flex items-center gap-1.5 text-sm text-success-foreground">
-          <CheckIcon className="size-4" /> Paired
-        </p>
-      )}
-      {state === "failed" && failure && (
-        <FailurePanel
-          failure={failure}
-          identity={identity}
-          setIdentity={setIdentity}
-          onRetry={(trust) => go(trust)}
-        />
-      )}
-      {state === "failed" && (
-        <Button size="xs" variant="ghost" className="mt-1 -ms-2 text-muted-foreground" onClick={onClose}>
-          Pick another machine
-        </Button>
-      )}
+      <GuidedInstall
+        target={install.target}
+        readyLabel={readyLabel}
+        onClose={install.close}
+        onReady={(box) => {
+          install.close();
+          onPaired(box);
+        }}
+      />
     </div>
   );
 }

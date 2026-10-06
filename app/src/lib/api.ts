@@ -114,6 +114,62 @@ export interface TerminalHandlers {
   onClose(byUs: boolean): void;
 }
 
+// The guided install (berth add ssh in a terminal on this computer, shown
+// full screen): its plan, the agents to choose from, and what the terminal's
+// socket says besides the screen.
+export interface InstallPlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  // Asks for the person's password with sudo; when, if set, says when.
+  sudo?: boolean;
+  when?: string;
+  where: "laptop" | "box";
+  commands: string[];
+  // Why there is nothing to do, once the box is known.
+  skip?: string;
+}
+
+export interface AgentChoice {
+  id: string;
+  name: string;
+  command: string;
+  install?: string;
+  verified?: string;
+  default?: boolean;
+  // false: Berth leaves it to the person; why says why.
+  offered: boolean;
+  why?: string;
+}
+
+export interface InstallPlan {
+  steps: InstallPlanStep[];
+  agents: AgentChoice[];
+  tmux: { bundled: boolean };
+}
+
+export interface GuidedInstallRequest {
+  host: string;
+  name?: string;
+  network?: string;
+  identity?: string;
+  trust_host_key?: string;
+  agents: string[];
+  // Start from this step; the ones before it are kept.
+  from?: string;
+}
+
+export type InstallStepState = "start" | "done" | "fail" | "skip" | "open" | "cmd";
+
+export type InstallEvent =
+  | { type: "step"; step: string; state: InstallStepState; message?: string }
+  | { type: "failure"; ssh: SshFailure }
+  | { type: "exit"; code: number; message?: string };
+
+export interface InstallHandlers extends TerminalHandlers {
+  onEvent(e: InstallEvent): void;
+}
+
 // Client is everything the app asks of the agent. The real one speaks HTTP;
 // mock mode (?mock=1) swaps in fixtures with the same shape.
 export interface Client {
@@ -143,12 +199,41 @@ export interface Client {
   // runs on every (re)connect so callers can catch up on what they missed.
   events(onEvent: (e: BerthEvent) => void, onConnect: () => void, signal: AbortSignal): void;
   attach(box: string, session: string, cols: number, rows: number, handlers: TerminalHandlers): TerminalConnection;
+  // The guided install's terminal: berth add ssh in a pseudo-terminal on
+  // this computer. Its steps come as events beside the screen's bytes.
+  installTerminal(req: GuidedInstallRequest, cols: number, rows: number, handlers: InstallHandlers): TerminalConnection;
   // The laptop proxy's URL for a port on a box.
   serviceUrl(box: string, port: number, proxyPort?: number): string;
 }
 
 // Typed helpers over Client.box for the box API.
 export const boxApi = {
+  // The agent CLIs on a box and how to add the others ("agents.install"
+  // capability).
+  agentCLIs: async (c: Client, box: string) => (await c.box<(AgentChoice & { installed: boolean; path?: string })[] | null>(box, "GET", "agents")) ?? [],
+  // installAgents adds agent CLIs to a paired box, without sudo, streaming
+  // what it prints and each agent's step.
+  installAgents: async (c: Client, box: string, agents: string[], on: { line(l: string): void; step(e: { step: string; state: InstallStepState; message?: string }): void }, signal?: AbortSignal) => {
+    let failure: string | undefined;
+    let finished = false;
+    await c.stream(
+      "POST",
+      `/v1/boxes/${encodeURIComponent(box)}/api/agents/install`,
+      { agents },
+      (v) => {
+        const l = v as { line?: string; step?: { step: string; state: InstallStepState; message?: string }; done?: boolean; error?: string };
+        if (l.line !== undefined) on.line(l.line);
+        if (l.step) on.step(l.step);
+        if (l.done) {
+          finished = true;
+          failure = l.error;
+        }
+      },
+      signal,
+    );
+    if (failure) throw new Error(failure);
+    if (!finished && !signal?.aborted) throw new Error("The box stopped answering before the agents were installed.");
+  },
   locations: async (c: Client, box: string) => (await c.box<Location[] | null>(box, "GET", "locations")) ?? [],
   sessions: async (c: Client, box: string) => (await c.box<Session[] | null>(box, "GET", "sessions")) ?? [],
   stats: (c: Client, box: string) => c.box<Stats>(box, "GET", "stats"),
@@ -362,6 +447,10 @@ export const laptopApi = {
     onLine: (line: string) => void,
     signal?: AbortSignal,
   ) => runCommand(c, "POST", "/v1/boxes/add-ssh", req, onLine, signal),
+  // installPlan is the guided install's plan before connecting, and the
+  // agent CLIs to choose from.
+  installPlan: (c: Client, host: string, agents: string[]) =>
+    c.laptop<InstallPlan>("GET", `/v1/ssh/install-plan?${new URLSearchParams({ host, agents: agents.join(",") || "none" })}`),
   // sshPlan says how Berth will log in to a host, without connecting.
   sshPlan: (c: Client, host: string, network?: string) =>
     c.laptop<SshPlan>("GET", `/v1/ssh/plan?host=${encodeURIComponent(host)}${network ? `&network=${encodeURIComponent(network)}` : ""}`),
@@ -517,6 +606,12 @@ export function httpClient(ep: Endpoint): Client {
       url.search = new URLSearchParams({ cols: String(cols), rows: String(rows), token: ep.token }).toString();
       return attachSocket(url.toString(), handlers);
     },
+    installTerminal: (req, cols, rows, handlers) => {
+      const url = new URL("/v1/boxes/add-ssh/terminal", ep.url);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.search = installQuery(req, cols, rows, ep.token).toString();
+      return attachSocket(url.toString(), handlers, handlers.onEvent);
+    },
     serviceUrl: (box, port, proxyPort = 1377) => `http://${port}.${box}.localhost${proxyPort === 80 ? "" : `:${proxyPort}`}/`,
   };
 }
@@ -569,9 +664,19 @@ function followEvents(ep: Endpoint, onEvent: (e: BerthEvent) => void, onConnect:
   void loop();
 }
 
+// installQuery is the guided install's request as its socket's query.
+export function installQuery(req: GuidedInstallRequest, cols: number, rows: number, token?: string): URLSearchParams {
+  const q = new URLSearchParams({ host: req.host, agents: req.agents.join(",") || "none", cols: String(cols), rows: String(rows) });
+  for (const k of ["name", "network", "identity", "trust_host_key", "from"] as const) if (req[k]) q.set(k, req[k]!);
+  if (token) q.set("token", token);
+  return q;
+}
+
 // attachSocket relays a terminal over a WebSocket: binary messages carry
-// bytes both ways, and text messages carry resizes to the box.
-function attachSocket(url: string, h: TerminalHandlers): TerminalConnection {
+// bytes both ways, and text messages carry resizes to the box. With onText,
+// text from the other end is JSON for it (the guided install's steps),
+// not screen.
+function attachSocket(url: string, h: TerminalHandlers, onText?: (e: InstallEvent) => void): TerminalConnection {
   const ws = new WebSocket(url);
   ws.binaryType = "arraybuffer";
   let closedByUs = false;
@@ -582,7 +687,17 @@ function attachSocket(url: string, h: TerminalHandlers): TerminalConnection {
     h.onClose(closedByUs);
   };
   ws.onopen = () => h.onOpen();
-  ws.onmessage = (m) => h.onData(typeof m.data === "string" ? m.data : new Uint8Array(m.data as ArrayBuffer));
+  ws.onmessage = (m) => {
+    if (typeof m.data === "string" && onText) {
+      try {
+        onText(JSON.parse(m.data) as InstallEvent);
+      } catch {
+        // Not an event: dropped rather than drawn.
+      }
+      return;
+    }
+    h.onData(typeof m.data === "string" ? m.data : new Uint8Array(m.data as ArrayBuffer));
+  };
   ws.onclose = end;
   ws.onerror = end;
   const encoder = new TextEncoder();

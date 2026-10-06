@@ -61,6 +61,9 @@ export interface Prefs {
   // Home's widgets, in order and size (lib/home-layout.ts). Null until the
   // person customises Home: they get the default layout, which can change.
   home: HomeLayout | null;
+  // The agent CLIs the guided install last put on a box (Add a box ›
+  // Agents); null until the person chooses, when Claude Code is ticked.
+  installAgents: string[] | null;
 }
 
 export type ChatWidth = "narrow" | "default" | "wide" | "xwide" | "full";
@@ -91,6 +94,7 @@ const DEFAULTS: Prefs = {
   filesPanel: false,
   systemThemes: { light: "berth-light", dark: "berth-dark" },
   home: null,
+  installAgents: null,
 };
 
 // PREFS_VERSION counts changes of default that saved prefs are moved to

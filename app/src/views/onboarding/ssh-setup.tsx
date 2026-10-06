@@ -1,17 +1,15 @@
-import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, MonitorIcon, ServerIcon, ShieldAlertIcon, TerminalIcon } from "lucide-react";
+import { KeyRoundIcon, MonitorIcon, ServerIcon, ShieldAlertIcon, TerminalIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import { CommandError, laptopApi, type SshFailure, type SshPlan } from "@/lib/api";
-import { plainError } from "@/lib/errors";
-import { openUrl } from "@/lib/open-url";
+import { laptopApi, type SshFailure, type SshPlan } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { GuidedInstall, useInstallTarget } from "@/views/onboarding/guided-install";
 import { InstallCommand } from "@/views/onboarding/install-command";
-import { CommandLog } from "@/views/settings/command-log";
 
 type Suggestion = { value: string; label: string; detail: string; os?: string; network?: string };
 export type Failure = SshFailure | { kind: "plain"; message: string };
@@ -25,7 +23,8 @@ export function SshSetup({
   retry,
   onRunning,
   onPaired,
-  onSignIn,
+  onSignIn: _onSignIn,
+  readyLabel,
 }: {
   network?: string;
   // Changing retry runs the setup again: after signing in to a tailnet.
@@ -33,15 +32,19 @@ export function SshSetup({
   onRunning(running: boolean): void;
   onPaired(box: string): void;
   onSignIn(): void;
+  // The guided install's last button ("Continue", "Back to Team setup").
+  readyLabel?: string;
 }) {
   const [host, setHost] = useState("");
   const [name, setName] = useState("");
-  const [identity, setIdentity] = useState("");
   const [active, setActive] = useState(-1);
   const [focused, setFocused] = useState(false);
   const field = useRef<HTMLInputElement>(null);
-  const setup = useAddSsh({ onRunning, onPaired });
-  const { state, lines, failure } = setup;
+  // Setting up opens the guided install, full screen: the plan, then the
+  // terminal it runs in.
+  const install = useInstallTarget();
+  const state = install.target ? "running" : "ready";
+  useEffect(() => onRunning(!!install.target), [install.target, onRunning]);
 
   const suggestions = useSuggestions(network);
   const plan = useSshPlan(host.trim(), network);
@@ -55,7 +58,9 @@ export function SshSetup({
     const target = (opts.target ?? host).trim();
     if (!target) return;
     if (opts.target) setHost(opts.target);
-    void setup.run({ host: target, name: name.trim() || undefined, network, identity: identity.trim() || undefined, trust_host_key: opts.trust });
+    // A refused key is asked about in the guided install, which can retry
+    // with a key file.
+    install.open({ host: target, name: name.trim() || undefined, network, trust_host_key: opts.trust });
   };
 
   const tried = useRef(retry);
@@ -102,7 +107,6 @@ export function SshSetup({
           onChange={(e) => {
             setHost(e.target.value);
             setActive(-1);
-            if (state === "failed" || state === "done") setup.reset();
           }}
           onKeyDown={(e) => {
             if (e.key === "ArrowDown" && matches.length) {
@@ -115,27 +119,13 @@ export function SshSetup({
               // Tab completes, as in a shell.
               e.preventDefault();
               pick(matches[Math.max(active, 0)], false);
-            } else if (e.key === "Escape" && running) {
-              setup.stop();
             }
           }}
           className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13px] outline-none placeholder:font-sans placeholder:text-muted-foreground/72 placeholder:text-sm disabled:opacity-64"
         />
-        {running ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            className="shrink-0 text-muted-foreground"
-            onClick={setup.stop}
-          >
-            Stop
-          </Button>
-        ) : (
-          <Button type="submit" size="xs" variant="outline" className="shrink-0" disabled={!host.trim() && active < 0}>
-            Set up
-          </Button>
-        )}
+        <Button type="submit" size="xs" variant="outline" className="shrink-0" disabled={running || (!host.trim() && active < 0)} data-testid="ssh-set-up">
+          Set up
+        </Button>
       </form>
 
       {/* What Berth will use, before it connects: a wrong agent is obvious here. */}
@@ -205,121 +195,15 @@ export function SshSetup({
         </ul>
       )}
 
-      {(running || state === "done") && <CommandLog className="mt-2" lines={lines} done={state === "done"} />}
-      {running && setup.approve && <ApproveLogin url={setup.approve} />}
-      {state === "done" && (
-        <p className="mt-2 flex items-center gap-1.5 text-sm text-success-foreground">
-          <CheckIcon className="size-4" /> Paired
-        </p>
-      )}
-      {state === "failed" && failure && (
-        <FailurePanel
-          failure={failure}
-          identity={identity}
-          setIdentity={setIdentity}
-          onRetry={(trust) => run({ trust })}
-          onSignIn={onSignIn}
-        />
-      )}
-    </div>
-  );
-}
-
-export type AddSshRequest = { host: string; name?: string; network?: string; identity?: string; trust_host_key?: string };
-
-// useAddSsh runs `berth add ssh` through the agent: its output as it goes,
-// and a failed login explained. SshSetup and the tailnet's machines both
-// set boxes up with it.
-export function useAddSsh({ onRunning, onPaired }: { onRunning(running: boolean): void; onPaired(box: string): void }) {
-  const client = useStore((s) => s.client);
-  const [state, setState] = useState<"ready" | "running" | "done" | "failed">("ready");
-  const [lines, setLines] = useState<string[]>([]);
-  const [failure, setFailure] = useState<Failure>();
-  // The page that approves a Tailscale SSH login in check mode, while the
-  // login waits for it.
-  const [approve, setApprove] = useState<string>();
-  const abort = useRef<AbortController>(null);
-  const busy = useRef(false);
-  useEffect(() => () => abort.current?.abort(), []);
-
-  // knownHostKeys are host key fingerprints the tailnet vouches for: a new
-  // box presenting one of them is trusted without asking.
-  const run = async (req: AddSshRequest, opts: { knownHostKeys?: string[] } = {}) => {
-    if (!client || !req.host || busy.current) return;
-    busy.current = true;
-    const ctl = new AbortController();
-    abort.current = ctl;
-    setLines([]);
-    setFailure(undefined);
-    setApprove(undefined);
-    setState("running");
-    onRunning(true);
-    const before = new Set(useStore.getState().status?.boxes.map((b) => b.name));
-    const onLine = (l: string) => {
-      setLines((prev) => [...prev, l]);
-      const url = APPROVE.exec(l)?.[1];
-      if (url) {
-        setApprove(url);
-        void openUrl(url);
-      }
-    };
-    let trust = req.trust_host_key;
-    try {
-      for (;;) {
-        try {
-          await laptopApi.addSsh(client, { ...req, trust_host_key: trust }, onLine, ctl.signal);
-          break;
-        } catch (err) {
-          const fp = err instanceof CommandError && err.ssh?.kind === "host-key-unknown" ? err.ssh.fingerprint : undefined;
-          if (ctl.signal.aborted || trust || !fp || !opts.knownHostKeys?.includes(fp)) throw err;
-          trust = fp;
-          setLines((prev) => [...prev, "Its host key is the one your tailnet reports for it, so Berth trusts it."]);
-        }
-      }
-      setState("done");
-      setApprove(undefined);
-      await useStore.getState().refreshAll();
-      const added = useStore.getState().status?.boxes.find((b) => !before.has(b.name))?.name;
-      onPaired(added ?? (req.name || req.host.split("@").pop()!.split(".")[0]));
-    } catch (err) {
-      if (ctl.signal.aborted) return;
-      const f: Failure = err instanceof CommandError && err.ssh ? err.ssh : { kind: "plain", message: plainError(err) };
-      // The error is shown once, in the panel, not again as the last line.
-      setLines((prev) => prev.filter((l) => !l.includes(f.message) && !(f.kind === "plain" && f.message.includes(l.trim()) && l.trim().length > 12)));
-      setFailure(f);
-      setApprove(undefined);
-      setState("failed");
-      onRunning(false);
-    } finally {
-      if (abort.current === ctl) busy.current = false;
-    }
-  };
-  const stop = () => {
-    abort.current?.abort();
-    busy.current = false;
-    setApprove(undefined);
-    setState("ready");
-    onRunning(false);
-  };
-  const reset = () => {
-    setState("ready");
-    setFailure(undefined);
-  };
-  return { state, lines, failure, approve, run, stop, reset };
-}
-
-// berth add ssh's line when Tailscale SSH holds a login for approval.
-const APPROVE = /approve this login in your browser: (https:\/\/\S+)/;
-
-// ApproveLogin asks for the browser approval a Tailscale SSH login waits on.
-export function ApproveLogin({ url }: { url: string }) {
-  return (
-    <div aria-live="polite" className="mt-2 flex items-center gap-2 text-xs">
-      <Spinner className="size-3 text-muted-foreground" />
-      <span className="min-w-0 flex-1 text-muted-foreground">Tailscale SSH wants you to approve this login in your browser.</span>
-      <Button size="xs" variant="outline" onClick={() => void openUrl(url)}>
-        <ExternalLinkIcon /> Open again
-      </Button>
+      <GuidedInstall
+        target={install.target}
+        readyLabel={readyLabel}
+        onClose={install.close}
+        onReady={(box) => {
+          install.close();
+          onPaired(box);
+        }}
+      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { ArrowUpCircleIcon, CopyIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, ShieldIcon, Trash2Icon } from "lucide-react";
+import { ArrowUpCircleIcon, BotIcon, CopyIcon, EllipsisIcon, PlusIcon, RefreshCwIcon, ShieldIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { StatusDot, useBoxState } from "@/components/agent-glyph";
@@ -21,6 +21,7 @@ import { BOX_WORDS, boxWhy } from "@/lib/state-model";
 import { NONE, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
+import { AddAgents } from "@/views/onboarding/guided-install";
 import { CommandLog } from "@/views/settings/command-log";
 import { ConfirmDialog } from "@/views/settings/confirm";
 import { RemoveLocalBoxDialog } from "@/views/settings/local-box-remove";
@@ -89,6 +90,8 @@ function BoxRow({ box }: { box: BoxStatus }) {
   const [forgetting, setForgetting] = useState(false);
   const [removingLocal, setRemovingLocal] = useState(false);
   const [guarding, setGuarding] = useState(false);
+  const [addingAgents, setAddingAgents] = useState(false);
+  const canAddAgents = !!info?.capabilities?.includes("agents.install");
   const [retrying, setRetrying] = useState(false);
   const online = box.state === "online";
   const state = useBoxState(box.name);
@@ -156,6 +159,12 @@ function BoxRow({ box }: { box: BoxStatus }) {
               <CopyIcon />
               Copy address
             </MenuItem>
+            {canAddAgents && (
+              <MenuItem disabled={!online} onClick={() => setAddingAgents(true)} data-testid="box-add-agents">
+                <BotIcon />
+                Add agents…
+              </MenuItem>
+            )}
             <MenuItem disabled={!online} onClick={() => setGuarding(true)}>
               <ShieldIcon />
               Resource guard…
@@ -179,6 +188,7 @@ function BoxRow({ box }: { box: BoxStatus }) {
       {update && update.state !== "queued" && <CommandLog className="mt-3" lines={update.lines ?? []} done={update.state === "done"} error={update.error} />}
       {update?.state === "queued" && <p className="mt-2 text-muted-foreground text-xs">Waiting for the box before it to finish updating…</p>}
       <GuardDialog box={box.name} open={guarding} onOpenChange={setGuarding} />
+      {canAddAgents && <AddAgents box={box.name} open={addingAgents} onClose={() => setAddingAgents(false)} />}
       {box.local && <RemoveLocalBoxDialog box={box.name} open={removingLocal} onOpenChange={setRemovingLocal} />}
       <ConfirmDialog
         open={forgetting}
