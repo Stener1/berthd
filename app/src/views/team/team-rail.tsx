@@ -1,6 +1,7 @@
 import { CheckIcon, CircleAlertIcon, KeyRoundIcon, LockIcon, PlusIcon, RotateCwIcon, ServerIcon, SquareTerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { RequirementsCard } from "@/components/requirements-card";
 import { SimpleSelect } from "@/components/simple-select";
 import { Tip } from "@/components/tip";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,10 @@ export interface ChecklistProps {
   onRun(): void;
   // At narrow widths, the same in less height, above the plan.
   compact?: boolean;
+  // The box has no tmux, which the steps' terminal runs in.
+  noTmux?: boolean;
+  // The keys are 1Password references: Berth signs op in on the box.
+  onePassword?: boolean;
 }
 
 export function Checklist(p: ChecklistProps) {
@@ -157,8 +162,13 @@ export function Checklist(p: ChecklistProps) {
             {accessLine}
           </Check>
           <div className="divide-y">
-            <Check compact n={2} title="Box" state={p.box ? "done" : "active"} value={<span id="team-box-label" className="sr-only">Box</span>}>
+            <Check compact n={2} title="Box" state={p.noTmux ? "warn" : p.box ? "done" : "active"} value={<span id="team-box-label" className="sr-only">Box</span>}>
               {boxPick}
+              {p.noTmux && p.box && (
+                <p data-testid="box-no-tmux" className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-warning-foreground leading-relaxed">
+                  <CircleAlertIcon className="mt-0.5 size-3 shrink-0" /> tmux isn't installed on {p.box}: the steps run in it.
+                </p>
+              )}
             </Check>
             {keyCount > 0 && (
               <Check compact n={3} title="Keys" state={asks.length && asks.some((k) => !p.keys[`${k.project}/${k.key}`]) ? "active" : "done"} value={keysValue}>
@@ -178,9 +188,15 @@ export function Checklist(p: ChecklistProps) {
         <Check n={1} title="GitHub" state={missing.length ? "warn" : "done"} value={<GitHubWho github={github} />}>
           {accessLine}
         </Check>
-        <Check n={2} title="Box" state={p.box ? "done" : "active"} value={<span id="team-box-label" className="sr-only">Box</span>}>
+        <Check n={2} title="Box" state={p.noTmux ? "warn" : p.box ? "done" : "active"} value={<span id="team-box-label" className="sr-only">Box</span>}>
           {boxPick}
-          <p className="mt-1.5 text-[11.5px] text-muted-foreground leading-relaxed">It signs in to GitHub itself, in its own terminal: this computer's sign-in is never copied there.</p>
+          {p.noTmux && p.box ? (
+            <RequirementsCard box={p.box} team className="mt-2.5 -ml-7.5" />
+          ) : (
+            <p className="mt-1.5 text-[11.5px] text-muted-foreground leading-relaxed">
+              It signs in to GitHub itself{p.onePassword ? ", and to 1Password," : ""} in its own terminal: this computer's sign-in is never copied there.
+            </p>
+          )}
         </Check>
         {keyCount > 0 && (
           <Check n={3} title="Keys" state={asks.length && asks.some((k) => !p.keys[`${k.project}/${k.key}`]) ? "active" : "done"} value={keysValue}>
@@ -305,6 +321,8 @@ export function runSummary(run: TeamStatus): { title: string; detail: string; to
   if (run.phase === "done") return { title: "Set up", detail: `${run.box} matches ${run.name}'s team setup.`, tone: "done", pct: 1, status: "done" };
   if (waiting?.id === "github")
     return { title: "Sign the box in to GitHub", detail: `Enter the code at github.com/login/device. Box step ${running + 1} of ${steps.length}, then ${plural(repos.length, "repo")}.`, tone: "waiting", pct, status: "waiting for GitHub's code" };
+  if (waiting?.id === "1password")
+    return { title: "Sign the box in to 1Password", detail: `op asks in ${run.box}'s terminal, once, so Berth can read the team's shared keys. Box step ${running + 1} of ${steps.length}, then ${plural(repos.length, "repo")}.`, tone: "waiting", pct, status: "waiting for 1Password" };
   if (waiting) return { title: "Waiting for your password", detail: `sudo asks in ${run.box}'s terminal. Box step ${running + 1} of ${steps.length}, then ${plural(repos.length, "repo")}.`, tone: "waiting", pct, status: "waiting for your password" };
   if (run.phase === "projects") {
     const busy = repos.filter((p) => p.state !== "ready").map((p) => p.id);

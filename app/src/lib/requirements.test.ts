@@ -69,3 +69,12 @@ test("requirementsCopy: Homebrew on a Mac, brew.sh without it, the package manag
   assert.equal(requirementsCopy("agent", agent, "devl", { agent: "codex" })?.command, "npm install -g @openai/codex");
   assert.equal(requirementsCopy("hidden", agent, "devl"), undefined);
 });
+
+test("requirementsCopy: a team setup's card says its steps run in tmux", () => {
+  const linux = parseRequirements({ os: "linux", tmux: { found: false, install: "sudo apt install tmux", manager: "apt" }, agents: [] });
+  const c = requirementsCopy("tmux", linux, "devl", { team: true });
+  assert.equal(c?.title, "Install tmux on devl");
+  assert.match(c?.body ?? "", /^Berth runs the team setup's steps, and later your agents, in tmux on the box\. /);
+  assert.equal(c?.command, "sudo apt install tmux");
+  assert.match(requirementsCopy("tmux", linux, "devl")?.body ?? "", /^Berth runs agents in tmux/);
+});

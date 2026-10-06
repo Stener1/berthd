@@ -110,15 +110,17 @@ export function agentToInstall(r: Requirements, agent?: string): AgentRequiremen
 
 // requirementsCopy is what the card says, in plain words. box is how the
 // box is named to the person ("this Mac" for the local one).
-export function requirementsCopy(card: RequirementsCard, r: Requirements | undefined, box: string, o: { local?: boolean; agent?: string } = {}): RequirementsCopy | undefined {
+// team is a team setup about to run, whose steps run in a terminal there.
+export function requirementsCopy(card: RequirementsCard, r: Requirements | undefined, box: string, o: { local?: boolean; agent?: string; team?: boolean } = {}): RequirementsCopy | undefined {
   if (!r || card === "hidden") return undefined;
   const where = o.local ? "Terminal on this Mac" : `a terminal on ${box} (over SSH)`;
   if (card === "tmux") {
     const t = r.tmux;
+    const why = o.team ? "Berth runs the team setup's steps, and later your agents, in tmux on the box." : "Berth runs agents in tmux, so they keep going when you close it.";
     if (isMac(r) && t.manager_missing)
       return {
         title: `Install tmux on ${box}`,
-        body: "Berth runs agents in tmux, so they keep going when you close it. tmux comes from Homebrew, which isn't on this Mac yet: install Homebrew, then tmux.",
+        body: `${why} tmux comes from Homebrew, which isn't on this Mac yet: install Homebrew, then tmux.`,
         first: BREW_INSTALL,
         command: t.install ?? "brew install tmux",
         help: { label: "brew.sh", url: t.help ?? BREW_HELP },
@@ -127,15 +129,15 @@ export function requirementsCopy(card: RequirementsCard, r: Requirements | undef
     if (isMac(r))
       return {
         title: `Install tmux on ${box}`,
-        body: "Berth runs agents in tmux, so they keep going when you close it. Install it with Homebrew; it takes a minute.",
+        body: `${why} Install it with Homebrew; it takes a minute.`,
         command: t.install ?? "brew install tmux",
         where,
       };
     return {
       title: `Install tmux on ${box}`,
       body: t.install
-        ? "Berth runs agents in tmux, so they keep going when you close it. Install it with the box's package manager; it asks for your password."
-        : "Berth runs agents in tmux, so they keep going when you close it. Install it with the box's package manager.",
+        ? `${why} Install it with the box's package manager; it asks for your password.`
+        : `${why} Install it with the box's package manager.`,
       command: t.install,
       where,
     };

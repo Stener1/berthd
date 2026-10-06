@@ -1,7 +1,6 @@
 import type { BerthEvent, Location, Session, Status, TerminalConnection, TerminalHandlers } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import initCal from "@/lib/fixtures/team-calcom/init-cal.sh.txt?raw";
-import privateApiKit from "@/lib/fixtures/team-calcom/kit.json.txt?raw";
 import readme from "@/lib/fixtures/team-calcom/README.md.txt?raw";
 import setupSh from "@/lib/fixtures/team-calcom/setup.sh.txt?raw";
 import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
@@ -62,29 +61,31 @@ const calSetup: TeamSetup = {
   id: "calcom",
   name: "Cal.com",
   org: "calcom",
-  description: "Everything a Cal.com engineer needs on their box: Node, Yarn, Postgres and Redis in Docker, and the Cal.com repos, each set up.",
+  description: "Everything a Cal.com engineer needs on their box: system updates, Docker, gh and 1Password CLIs, Node and Yarn, Postgres and Redis in Docker, then the Cal.com repos, each set up.",
   contact: "#eng-onboarding on Slack",
   docs: "https://github.com/calcom/.berth#readme",
   box: {
     os: ["ubuntu>=22.04", "debian>=12", "macos>=14"],
     script: "box/setup.sh",
+    settings: { CAL_POSTGRES_VERSION: "18", CAL_REDIS_VERSION: "8" },
     steps: [
-      { id: "packages", title: "System packages", detail: "git, curl, build tools, python3, postgresql-client, jq", sudo: true },
-      { id: "docker", title: "Docker", detail: "Docker Engine, and you in the docker group", sudo: true },
-      { id: "cli", title: "GitHub CLI and 1Password CLI", detail: "gh for the sign-in and clones, op for secrets", sudo: true },
-      { id: "node", title: "Node 20 with fnm", detail: "in your home folder, loaded from ~/.profile" },
-      { id: "yarn", title: "Yarn with corepack", detail: "each repo's packageManager picks the version" },
-      { id: "postgres", title: "Postgres 16 in Docker", detail: "cal-postgres on localhost:5450" },
-      { id: "redis", title: "Redis 7 in Docker", detail: "cal-redis on localhost:6379" },
+      { id: "update", title: "System updates", detail: "apt-get update and upgrade; counts as done for 24 hours", sudo: true },
+      { id: "packages", title: "System packages", detail: "git, curl, jq, build tools, python3, and psql and pg_dump 18", sudo: true },
+      { id: "docker", title: "Docker", detail: "Docker Engine, started at boot, and you in the docker group", sudo: true },
+      { id: "cli", title: "GitHub CLI and 1Password CLI", detail: "gh for the sign-in and clones, op for the shared keys", sudo: true },
+      { id: "node", title: "Node with fnm", detail: "the version cal.com names, in your home folder" },
+      { id: "yarn", title: "Yarn with corepack", detail: "cal.com's packageManager picks the version" },
+      { id: "postgres", title: "Postgres in Docker", detail: "cal-postgres, Postgres 18, on localhost:5450" },
+      { id: "redis", title: "Redis in Docker", detail: "cal-redis, Redis 8, on localhost:6379" },
     ],
   },
   projects: [
-    { id: "cal.com", repo: "calcom/cal.com", path: "~/code/cal.com", required: true, kit: "https://github.com/sean-brydon/berth-kit-calcom@7f93797", init: "box/init-cal.sh", init_detail: ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic", first_task: "Find an open issue labelled “good first issue” in calcom/cal.com, explain how you'd fix it, and make the change in a new worktree" },
-    { id: "private-api", repo: "calcom/private-api", path: "~/code/private-api", required: false, kit: "./projects/private-api" },
+    { id: "cal", repo: "calcom/cal.com", path: "~/code/cal.com", required: true, kit: "https://github.com/sean-brydon/berth-kit-calcom@5476af4", init: "box/init-cal.sh", init_detail: ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic", first_task: "Find an open issue labelled “good first issue” in calcom/cal.com, explain how you'd fix it, and make the change in a new worktree" },
+    { id: "private-api", repo: "calcom/private-api", path: "~/code/private-api", required: false },
     { id: "website", repo: "calcom/website", path: "~/code/website", required: false },
   ],
   keys: {
-    "cal.com": {
+    cal: {
       from: ".env.example",
       shared: {
         STRIPE_PRIVATE_KEY: "op://Engineering/Cal.com Stripe test/secret key",
@@ -101,13 +102,14 @@ const calSetup: TeamSetup = {
 
 // What each step runs, as the plan opens it: the script's own lines.
 const STEP_COMMANDS: Record<string, string[]> = {
+  update: ["box/setup.sh update", "# skipped when the box was updated in the last 24 hours", "sudo apt-get update -qq", "sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq"],
   packages: ["box/setup.sh packages", "# checks each package with dpkg -s first", "sudo apt-get update -qq", "sudo apt-get install -y git curl ca-certificates gnupg jq unzip build-essential python3 postgresql-client"],
   docker: ["box/setup.sh docker", "# Docker's own apt repository, not the distro's docker.io", "sudo install -m 0755 -d /etc/apt/keyrings", "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg", "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin", "sudo usermod -aG docker $USER"],
   cli: ["box/setup.sh cli", "sudo apt-get install -y gh 1password-cli", "# from cli.github.com and downloads.1password.com, keys checked"],
   node: ["box/setup.sh node", "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell", "fnm install 20 && fnm default 20", "# fnm is loaded from ~/.profile, so login shells find node"],
   yarn: ["box/setup.sh yarn", "corepack enable && corepack prepare yarn@stable --activate"],
-  postgres: ["box/setup.sh postgres", "docker run -d --name cal-postgres --restart unless-stopped \\", "  -p 127.0.0.1:5450:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=calendso \\", "  -v cal-postgres-data:/var/lib/postgresql/data postgres:16"],
-  redis: ["box/setup.sh redis", "docker run -d --name cal-redis --restart unless-stopped -p 127.0.0.1:6379:6379 -v cal-redis-data:/data redis:7"],
+  postgres: ["box/setup.sh postgres", "# the version is box.settings' CAL_POSTGRES_VERSION (18), as BERTH_SETTING_CAL_POSTGRES_VERSION", "docker run -d --name cal-postgres --restart unless-stopped \\", "  -p 127.0.0.1:5450:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=calendso \\", "  -v cal-postgres-data:/var/lib/postgresql postgres:18"],
+  redis: ["box/setup.sh redis", "docker run -d --name cal-redis --restart unless-stopped -p 127.0.0.1:6379:6379 -v cal-redis-data:/data redis:8"],
 };
 
 const GITHUB_STEP: PlanStep = {
@@ -119,14 +121,25 @@ const GITHUB_STEP: PlanStep = {
   commands: ["gh auth status || gh auth login --hostname github.com --git-protocol https --web", "gh auth setup-git", "# a device code: you enter it at github.com/login/device; this computer's sign-in is never copied"],
 };
 
+const ONEPASSWORD_STEP: PlanStep = {
+  id: "1password",
+  title: "1Password on the box",
+  detail: "the shared keys are op:// references: op signs in, in the box's terminal",
+  sudo: false,
+  berth: true,
+  commands: ["berthd secret signin --check || berthd secret signin   # op signin; its session kept for berthd, readable by you alone"],
+};
+
+const usesOp = (setup: TeamSetup) => Object.values(setup.keys ?? {}).some((k) => Object.values(k.shared ?? {}).some((ref) => ref.startsWith("op://")));
+
 function planSteps(setup: TeamSetup): PlanStep[] {
-  return [...(setup.box?.steps ?? []).map((s) => ({ id: s.id, title: s.title, detail: s.detail, sudo: !!s.sudo, commands: STEP_COMMANDS[s.id] ?? [`box/setup.sh ${s.id}`] })), GITHUB_STEP];
+  return [...(setup.box?.steps ?? []).map((s) => ({ id: s.id, title: s.title, detail: s.detail, sudo: !!s.sudo, commands: STEP_COMMANDS[s.id] ?? [`box/setup.sh ${s.id}`] })), GITHUB_STEP, ...(usesOp(setup) ? [ONEPASSWORD_STEP] : [])];
 }
 
 function calProjects(): ProjectView[] {
   return [
     {
-      id: "cal.com",
+      id: "cal",
       repo: "calcom/cal.com",
       path: "~/code/cal.com",
       required: true,
@@ -136,12 +149,12 @@ function calProjects(): ProjectView[] {
       description: "Scheduling infrastructure for absolutely everyone.",
       default_branch: "main",
       source: "kit",
-      kit: { ref: "https://github.com/sean-brydon/berth-kit-calcom@7f93797", commit: "7f93797", id: "cal-com", name: "Cal.com", hash: "a91c03e5b27d" },
+      kit: { ref: "https://github.com/sean-brydon/berth-kit-calcom@5476af4", commit: "5476af4", id: "cal-com", name: "Cal.com", hash: "a91c03e5b27d" },
       services: ["Web", "Prisma Studio"],
       init: "box/init-cal.sh",
       init_detail: ".env from .env.example pointed at localhost:5450, yarn install, prisma migrate deploy, seed-basic",
       first_task: calSetup.projects![0].first_task,
-      commands: ["git clone https://github.com/calcom/cal.com ~/code/cal.com", "# then the cal-com kit (sean-brydon/berth-kit-calcom @ 7f93797)", "box/init-cal.sh   # .env, yarn install, migrate, seed"],
+      commands: ["git clone https://github.com/calcom/cal.com ~/code/cal.com", "# then the cal-com kit (sean-brydon/berth-kit-calcom @ 5476af4)", "box/init-cal.sh   # .env, yarn install, migrate, seed"],
     },
     {
       id: "private-api",
@@ -200,7 +213,7 @@ const calOrg = { login: "calcom", name: "Cal.com", avatar_url: CAL_AVATAR, verif
 function calFiles() {
   const team = JSON.stringify(calSetup, null, 2);
   const f = (path: string, text: string) => ({ path, size: text.length, text });
-  return [f("team.json", team), f("box/setup.sh", setupSh), f("box/init-cal.sh", initCal), f("projects/private-api/kit.json", privateApiKit), f("README.md", readme)];
+  return [f("team.json", team), f("box/setup.sh", setupSh), f("box/init-cal.sh", initCal), f("README.md", readme)];
 }
 
 const UPDATE: TeamUpdate = {
@@ -213,8 +226,9 @@ const UPDATE: TeamUpdate = {
     { kind: "add", area: "project", id: "cal-video", text: "calcom/cal-video", detail: "a new repo, with its own .berth/config.json · Video dev server" },
     { kind: "add", area: "step", id: "playwright", text: "Playwright's system libraries", detail: "npx playwright install-deps chromium", sudo: true },
     { kind: "change", area: "step", id: "node", text: "Node 20 → 22", detail: "fnm install 22 && fnm default 22 · no password needed" },
-    { kind: "change", area: "project", id: "cal.com", text: "cal-com kit 7f93797 → b81d0e4", detail: "Prisma Studio starts with the worktree" },
-    { kind: "remove", area: "key", id: "cal.com/DAILY_API_KEY", text: "DAILY_API_KEY", detail: "no longer read from 1Password" },
+    { kind: "change", area: "setting", id: "CAL_REDIS_VERSION", text: "CAL_REDIS_VERSION", detail: "8 → 8.2" },
+    { kind: "change", area: "project", id: "cal", text: "cal-com kit 5476af4 → b81d0e4", detail: "Prisma Studio starts with the worktree" },
+    { kind: "remove", area: "key", id: "cal/DAILY_API_KEY", text: "DAILY_API_KEY", detail: "no longer read from 1Password" },
   ],
   sudo: ["Playwright's system libraries"],
 };
@@ -252,7 +266,7 @@ function calView(box?: string): TeamView {
     steps: planSteps(setup),
     projects,
     access: { readable: readable.length, total: projects.length, missing: projects.filter((p) => !p.access).map((p) => p.repo) },
-    keys: { shared: teamScenario === "partial" ? 4 : 5, ask: [{ project: "cal.com", key: "SENDGRID_API_KEY", set: !!run?.keys_set.includes("cal.com/SENDGRID_API_KEY") }] },
+    keys: { shared: teamScenario === "partial" ? 4 : 5, ask: [{ project: "cal", key: "SENDGRID_API_KEY", set: !!run?.keys_set.includes("cal/SENDGRID_API_KEY") }] },
     warnings: [],
   };
   view.source = orgSource;
@@ -374,7 +388,7 @@ async function play(r: TeamStatus, from = 0, again = false) {
   for (let i = from; i < r.steps.length; i++) {
     const s = r.steps[i];
     // Re-running an update skips what is already done (each step checks first).
-    if (again && !["node"].includes(s.id) && s.id !== "github") {
+    if (again && !["node"].includes(s.id) && s.id !== "github" && s.id !== "1password") {
       s.state = "skipped";
       touch(r, "team.step", { step: s.id, state: s.state });
       say(key, `\x1b[2m    ${s.title} (already done)\x1b[0m\r\n`);
@@ -397,6 +411,14 @@ async function play(r: TeamStatus, from = 0, again = false) {
       s.code = undefined;
       s.url = undefined;
       say(key, "✓ Authentication complete.\r\n✓ Logged in as sean-brydon\r\n\x1b[2m$ gh auth setup-git\x1b[0m\r\n");
+    } else if (s.id === "1password") {
+      say(key, "\r\n\x1b[1m==> 1Password on this box\x1b[0m\r\n    The team's shared keys are 1Password references (op://...). Sign op in\r\n    here, once, so Berth can read them when a worktree needs them.\r\n\r\n");
+      await wait(400);
+      s.state = "waiting";
+      say(key, "Enter the password for sean@cal.com at my.1password.com: ");
+      touch(r, "team.step", { step: s.id, state: s.state });
+      await gate("1password", 1500);
+      say(key, "\r\n\r\n1Password: signed in as sean@cal.com. berthd reads op:// references with this session.\r\n");
     } else {
       say(key, `\x1b[1m==> ${s.title}\x1b[0m\r\n`);
       await wait(250);
@@ -428,7 +450,7 @@ async function play(r: TeamStatus, from = 0, again = false) {
       await wait(200);
     }
     s.state = "done";
-    s.secs = [41, 63, 18, 22, 3, 6, 4, 12][i] ?? Math.max(1, Math.round((Date.now() - started) / 1000));
+    s.secs = [94, 41, 63, 18, 22, 3, 6, 4, 12, 9][i] ?? Math.max(1, Math.round((Date.now() - started) / 1000));
     say(key, `\x1b[32m    ✓ ${s.id}\x1b[0m\r\n`);
     touch(r, "team.step", { step: s.id, state: s.state, secs: s.secs });
   }
@@ -455,14 +477,14 @@ async function project(r: TeamStatus, p: TeamStatus["projects"][number], i: numb
   touch(r, "team.project", { project: p.id, state: p.state });
   await wait(600);
   p.state = "setting-up";
-  p.line = p.id === "cal.com" ? "box/init-cal.sh · yarn install" : p.id === "private-api" ? "yarn install" : "pnpm install";
+  p.line = p.id === "cal" ? "box/init-cal.sh · yarn install" : p.id === "private-api" ? "yarn install" : "pnpm install";
   addLocation(r.box, p);
   touch(r, "team.project", { project: p.id, state: p.state, location: p.location });
   if (i === 0) await wait(700);
   else await gate(`repos-${p.id}`, holds.has("repos") ? undefined : 2200 + i * 300);
   p.state = "ready";
   p.line = undefined;
-  p.trust = p.id === "cal.com" ? "none" : "trusted";
+  p.trust = p.id === "cal" ? "none" : "trusted";
   touch(r, "team.project", { project: p.id, state: p.state, location: p.location });
 }
 
@@ -505,7 +527,9 @@ function setup(org: string, req: SetupRequest): Promise<TeamStatus> {
     const projects = v.projects.filter((p) => picked.includes(p.id)).map((p) => ({ id: p.id, repo: p.repo }));
     if (again) projects.push({ id: "cal-video", repo: "calcom/cal-video" });
     const keys = Object.entries(req.keys ?? {}).flatMap(([p, kv]) => Object.keys(kv).filter((k) => kv[k]).map((k) => `${p}/${k}`));
-    const steps = again ? [...(v.steps ?? []).slice(0, -1), { id: "playwright", title: "Playwright's system libraries", sudo: true, commands: [] }, GITHUB_STEP] : (v.steps ?? []);
+    const own = (v.steps ?? []).filter((s) => !s.berth);
+    const berths = (v.steps ?? []).filter((s) => s.berth);
+    const steps = again ? [...own, { id: "playwright", title: "Playwright's system libraries", sudo: true, commands: [] }, ...berths] : (v.steps ?? []);
     r = newRun(box, "calcom", "Cal.com", commit, steps, projects, keys);
     if (again) {
       // Repos already there stay ready; only the new one is cloned.
@@ -541,11 +565,11 @@ function retry(box: string, id: string, from: string): Promise<TeamStatus> {
 function seedDone() {
   if (teamScenario !== "done" && teamScenario !== "update") return;
   const v = calView(TEAM_BOX);
-  const r = newRun(TEAM_BOX, "calcom", "Cal.com", COMMIT.slice(0, 7), v.steps ?? [], v.projects.map((p) => ({ id: p.id, repo: p.repo })), ["cal.com/SENDGRID_API_KEY"]);
+  const r = newRun(TEAM_BOX, "calcom", "Cal.com", COMMIT.slice(0, 7), v.steps ?? [], v.projects.map((p) => ({ id: p.id, repo: p.repo })), ["cal/SENDGRID_API_KEY"]);
   r.phase = "done";
   r.started = ago(60 * 24 * 9);
   r.updated = teamScenario === "done" ? iso() : ago(60 * 24 * 9);
-  r.steps.forEach((s, i) => Object.assign(s, { state: "done", secs: [41, 63, 18, 22, 3, 6, 4, 12][i] }));
+  r.steps.forEach((s, i) => Object.assign(s, { state: "done", secs: [94, 41, 63, 18, 22, 3, 6, 4, 12, 9][i] }));
   r.projects.forEach((p) => {
     p.state = "ready";
     addLocation(TEAM_BOX, p);

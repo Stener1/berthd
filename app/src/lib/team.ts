@@ -57,7 +57,8 @@ export interface TeamSetup {
   description?: string;
   contact?: string;
   docs?: string;
-  box?: { os?: string[]; script?: string; steps?: TeamStep[] };
+  // settings reach the box script as BERTH_SETTING_<NAME>.
+  box?: { os?: string[]; script?: string; steps?: TeamStep[]; settings?: Record<string, string> };
   projects?: TeamProjectSpec[];
   keys?: Record<string, TeamKeys>;
   updates?: { notify?: boolean };
@@ -69,8 +70,9 @@ export interface TeamFile {
   text?: string;
 }
 
-// A box step as the plan shows it, with Berth's own "github" step (the
-// box's own gh auth login) among them.
+// A box step as the plan shows it, with Berth's own steps among them:
+// "github" (the box's own gh auth login) and, when the keys are 1Password
+// references, "1password" (op signed in on the box).
 export interface PlanStep {
   id: string;
   title: string;
@@ -104,7 +106,7 @@ export interface ProjectView {
 
 export interface TeamChange {
   kind: "add" | "remove" | "change";
-  area: "step" | "project" | "key" | "file" | "setup";
+  area: "step" | "setting" | "project" | "key" | "file" | "setup";
   id: string;
   text: string;
   detail?: string;

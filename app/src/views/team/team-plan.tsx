@@ -167,7 +167,10 @@ export function Plan(p: PlanProps) {
                   {run && state === "waiting" && s.id !== "github" && (
                     <div className="space-y-2">
                       <p className="flex items-start gap-1.5 font-medium text-warning-foreground text-xs">
-                        <KeyRoundIcon className="mt-0.5 size-3.5 shrink-0" /> sudo on {run.box} is asking for your password. Type it in the terminal below; Berth doesn't see or keep it.
+                        <KeyRoundIcon className="mt-0.5 size-3.5 shrink-0" />
+                        {s.id === "1password"
+                          ? `op on ${run.box} is asking you to sign in to 1Password. Answer it in the terminal below: what you type stays on the box, and Berth keeps only op's session there, for the team's shared keys.`
+                          : `sudo on ${run.box} is asking for your password. Type it in the terminal below; Berth doesn't see or keep it.`}
                       </p>
                       {run.session && <Terminal box={run.box} session={run.session} />}
                     </div>
@@ -325,7 +328,7 @@ export function UpdateDiff({ update }: { update: TeamUpdate }) {
             </span>
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-center gap-2">
-                <span className={cn("font-medium text-[13px]", (c.area === "project" || c.area === "key" || c.area === "file") && "font-mono")}>{c.text}</span>
+                <span className={cn("font-medium text-[13px]", (c.area === "project" || c.area === "key" || c.area === "file" || c.area === "setting") && "font-mono")}>{c.text}</span>
                 <span className="text-[10.5px] text-muted-foreground uppercase tracking-wide">{c.area === "project" ? "repo" : c.area}</span>
                 {c.sudo && <SudoTag />}
               </p>

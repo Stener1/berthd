@@ -116,10 +116,11 @@ async function copy(text: string): Promise<boolean> {
 
 // RequirementsCard says what box is missing and how to install it. agent
 // is the agent about to start; label names the box ("this Mac").
-export function RequirementsCard({ box, agent, noAgent, className }: { box: string; agent?: string; noAgent?: boolean; className?: string }) {
+// team is the Team setup page's: its steps run in tmux, so only tmux counts.
+export function RequirementsCard({ box, agent, noAgent, team, className }: { box: string; agent?: string; noAgent?: boolean; team?: boolean; className?: string }) {
   const local = useIsLocalBox(box);
   const entry = useBoxRequirements(box);
-  const card = requirementsCard(entry.req, { agent, noAgent });
+  const card = team ? (entry.req?.tmux.found === false ? "tmux" : "hidden") : requirementsCard(entry.req, { agent, noAgent });
   const [opened, setOpened] = useState(false);
   const [checked, setChecked] = useState(false);
   // A new box or a new kind of card starts the steps over.
@@ -127,7 +128,7 @@ export function RequirementsCard({ box, agent, noAgent, className }: { box: stri
     setOpened(false);
     setChecked(false);
   }, [box, card]);
-  const copyText = requirementsCopy(card, entry.req, local ? "this Mac" : box, { local, agent });
+  const copyText = requirementsCopy(card, entry.req, local ? "this Mac" : box, { local, agent, team });
   if (card === "hidden" || !copyText) return null;
   const mac = entry.req?.os === "darwin";
   // The app can bring up Terminal; mock mode acts as the app does.

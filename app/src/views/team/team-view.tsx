@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { noteTmuxMissing, useBoxRequirements } from "@/components/requirements-card";
 import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
+import { ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { ago, errorMessage } from "@/lib/format";
 import { openUrl } from "@/lib/open-url";
@@ -267,6 +269,8 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   useEffect(() => void load(), [load, checks]);
 
   const run = useTeam((s) => (view?.setup ? runFor(s, view.setup.id, box) : runFor(s, org, box)));
+  // The steps run in a terminal on the box: without tmux, nothing can.
+  const noTmux = useBoxRequirements(box).req?.tmux.found === false;
   const updating = reviewUpdate && !!view?.update;
 
   if (error) {
@@ -327,6 +331,8 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       useStore.getState().setView({ kind: "team", org: key, box });
       void useStore.getState().refreshBox(box, ["sessions", "locations"]);
     } catch (err) {
+      // A box without tmux: the Box check says how to install it.
+      if (err instanceof ApiError && err.code === "tmux_missing") noteTmuxMissing(box);
       toastManager.add({ type: "error", title: `Couldn't start ${name}'s setup`, description: errorMessage(err) });
     } finally {
       setBusy(false);
@@ -349,7 +355,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const background = () => useStore.getState().setView({ kind: "workspace" });
 
   if (view.state === "none") {
-    return <NoBerth view={view} github={github} boxes={boxes} box={box} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} />;
+    return <NoBerth view={view} github={github} boxes={boxes} box={box} noTmux={noTmux} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} />;
   }
 
   const live = run && run.phase !== "done" && !updating ? run : undefined;
@@ -358,7 +364,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   }
 
   const picks = view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).length;
-  const blocked = !box ? "Pick or add the box to set up" : view.access.readable === 0 ? "You can't read any of its repos yet" : undefined;
+  const blocked = !box ? "Pick or add the box to set up" : noTmux ? `Install tmux on ${box} first` : view.access.readable === 0 ? "You can't read any of its repos yet" : undefined;
   const action = updating ? `Update ${box}` : `Set up for ${name}`;
   const sudo = updating ? (view.update?.sudo.length ?? 0) : sudoCount(view);
   const rail = (compact: boolean) =>
@@ -381,6 +387,8 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
         blocked={blocked}
         busy={busy}
         onRun={start}
+        noTmux={noTmux}
+        onePassword={view.steps?.some((s) => s.id === "1password")}
       />
     );
 
@@ -491,11 +499,13 @@ function NoBerth({
   onOpenTerminal,
   onStartOn,
   onBackground,
+  noTmux,
 }: {
   view: View;
   github: GitHubState;
   boxes: { name: string; detail: string }[];
   box?: string;
+  noTmux?: boolean;
   onBox(b: string): void;
   picked: Set<string>;
   onPick(id: string, on: boolean): void;
@@ -529,9 +539,10 @@ function NoBerth({
         picked={picked.size}
         sudo={0}
         action={picked.size ? `Set up ${picked.size} ${picked.size === 1 ? "repo" : "repos"}` : "Pick repos to set up"}
-        blocked={!box ? "Pick or add the box to set up" : !picked.size ? "Pick at least one repo" : undefined}
+        blocked={!box ? "Pick or add the box to set up" : noTmux ? `Install tmux on ${box} first` : !picked.size ? "Pick at least one repo" : undefined}
         busy={busy}
         onRun={onRun}
+        noTmux={noTmux}
       />
     );
   return (
