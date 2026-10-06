@@ -43,6 +43,7 @@ esac
 `
 
 const fakeSigninBerthd = `#!/bin/sh
+if [ "$1 $2" = "agents install" ]; then echo "$*" >"$MARKS/agents"; echo "Claude Code installed"; exit 0; fi
 [ "$1 $2" = "secret signin" ] || exit 2
 if [ "${3:-}" = --check ]; then [ -f "$MARKS/op-signed-in" ]; exit; fi
 printf 'Enter the password for dev@acme.test at my.1password.com: '
@@ -508,6 +509,35 @@ esac
 	tb.Settings = map[string]string{"BAD-NAME": "x"}
 	if _, err := f.b.StartTeam(context.Background(), tb); err == nil || !strings.Contains(err.Error(), "not a setting name") {
 		t.Fatalf("a bad setting: %v", err)
+	}
+}
+
+func TestTeamAgentsAreBerthsOwnStep(t *testing.T) {
+	f := newTeamFixture(t)
+	f.gh.SignIn("engineer")
+	tb := f.bundle()
+	tb.Steps = nil
+	tb.Script = ""
+	tb.Agents = []string{"claude", "codex"}
+	tb.Projects = tb.Projects[:1]
+	st, err := f.b.StartTeam(context.Background(), tb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Steps) != 2 || st.Steps[0].ID != "agents" || st.Steps[0].Title != "Claude Code and Codex on devbox" || st.Steps[1].ID != "github" {
+		t.Fatalf("steps %+v", st.Steps)
+	}
+	st = f.waitFor("done", func(st TeamStatus) bool { return st.Phase == "done" || st.Phase == "failed" })
+	if st.Phase != "done" || st.Steps[0].State != TeamDone {
+		t.Fatalf("%+v", st)
+	}
+	got, _ := os.ReadFile(filepath.Join(f.marks, "agents"))
+	if strings.TrimSpace(string(got)) != "agents install --integrations claude codex" {
+		t.Fatalf("berthd ran %q", got)
+	}
+	tb.Agents = []string{"gemini"}
+	if _, err := f.b.StartTeam(context.Background(), tb); err == nil || !strings.Contains(err.Error(), "Node.js") {
+		t.Fatalf("gemini: %v", err)
 	}
 }
 

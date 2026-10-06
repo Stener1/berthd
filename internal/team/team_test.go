@@ -33,6 +33,9 @@ func TestParseCalcomExample(t *testing.T) {
 	if !s.UsesOnePassword() {
 		t.Fatal("the example's shared keys are op:// references")
 	}
+	if strings.Join(s.Agents, " ") != "claude codex" {
+		t.Fatalf("agents = %v", s.Agents)
+	}
 	cal, ok := s.Project("cal")
 	if !ok || cal.Repo != "calcom/cal.com" || cal.ProjectPath() != "~/code/cal.com" {
 		t.Fatalf("project %+v", cal)
@@ -285,5 +288,35 @@ func TestParseSource(t *testing.T) {
 	}
 	if again, _ := ParseSource(s.String()); again != s {
 		t.Fatalf("round trip %+v", again)
+	}
+}
+
+func TestAgents(t *testing.T) {
+	doc := strings.Replace(minimal, `"name":"Acme"`, `"name":"Acme","agents":["claude","codex"]`, 1)
+	s, warnings, err := Parse([]byte(doc))
+	if err != nil || len(warnings) != 0 || strings.Join(s.Agents, ",") != "claude,codex" {
+		t.Fatalf("agents: %v %v %v", s, warnings, err)
+	}
+	for in, want := range map[string]string{
+		`["gemini"]`:       "Node.js",
+		`["vim"]`:          "not an agent",
+		`["claude,codex"]`: "not an agent",
+		`"claude"`:         "",
+	} {
+		doc := strings.Replace(minimal, `"name":"Acme"`, `"name":"Acme","agents":`+in, 1)
+		if _, _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("agents %s: %v", in, err)
+		}
+	}
+	// A team's own step can't take Berth's name for its step.
+	doc = strings.Replace(minimal, `{"id":"db","title":"Database"}`, `{"id":"agents","title":"Agents"}`, 1)
+	if _, _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Errorf("a step named agents: %v", err)
+	}
+	old, _, _ := Parse([]byte(minimal))
+	nw, _, _ := Parse([]byte(strings.Replace(minimal, `"name":"Acme"`, `"name":"Acme","agents":["codex"]`, 1)))
+	changes := Diff(old, nw, nil, nil)
+	if len(changes) != 1 || changes[0].Area != "agent" || changes[0].Text != "Codex" {
+		t.Errorf("diff = %+v", changes)
 	}
 }

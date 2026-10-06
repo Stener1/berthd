@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/sean-brydon/berthd/internal/agentcli"
 )
 
 // Change is one difference between two commits of a team setup, as an
 // engineer reviews an update.
 type Change struct {
-	// Kind is add, remove or change; Area is step, setting, project, key,
-	// file or setup.
+	// Kind is add, remove or change; Area is step, agent, setting,
+	// project, key, file or setup.
 	Kind   string `json:"kind"`
 	Area   string `json:"area"`
 	ID     string `json:"id"`
@@ -62,6 +64,23 @@ func Diff(old, new *Setup, oldFiles, newFiles map[string]string) []Change {
 	for _, s := range old.Box.Steps {
 		if !newSteps[s.ID] {
 			out = append(out, Change{Kind: "remove", Area: "step", ID: s.ID, Text: s.Title, Detail: "no longer run; what it installed stays"})
+		}
+	}
+
+	had := map[string]bool{}
+	for _, a := range old.Agents {
+		had[a] = true
+	}
+	has := map[string]bool{}
+	for _, a := range new.Agents {
+		has[a] = true
+		if !had[a] {
+			out = append(out, Change{Kind: "add", Area: "agent", ID: a, Text: agentcli.Names([]string{a}), Detail: "installed on the box by Berth, without sudo"})
+		}
+	}
+	for _, a := range old.Agents {
+		if !has[a] {
+			out = append(out, Change{Kind: "remove", Area: "agent", ID: a, Text: agentcli.Names([]string{a}), Detail: "no longer installed by the team setup; what is installed stays"})
 		}
 	}
 

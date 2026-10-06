@@ -23,6 +23,9 @@ type TeamBundle struct {
 	// OnePassword adds Berth's other step, after GitHub, when the keys are
 	// 1Password references: op signed in on the box, in its terminal.
 	OnePassword bool `json:"onepassword,omitempty"`
+	// Agents adds Berth's agents step, after the team's own: these agent
+	// CLIs installed on the box, with their hooks and skills.
+	Agents []string `json:"agents,omitempty"`
 	// Settings are team.json's box.settings, which the script (and each
 	// project's init) gets as BERTH_SETTING_<NAME>.
 	Settings map[string]string `json:"settings,omitempty"`
