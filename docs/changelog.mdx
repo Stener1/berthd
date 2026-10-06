@@ -30,7 +30,10 @@ again.
   pinned to a commit. Shared keys are 1Password references, your own are
   asked for once and stay on your box. A newer commit of `.berth` is an
   update to review, with a diff, never run by itself. An org without a
-  `.berth` gets a picker of its repos. `berth team show|setup|status|retry`
+  `.berth` gets a picker of its repos. A team setup also loads from a link
+  to any repo, branch and folder (`github.com/<owner>/<repo>/tree/<ref>/<folder>`,
+  or `berth://team?src=…`), to try one before the org publishes it; the page
+  then names the repo and branch it came from. `berth team show|setup|status|retry`
   does the same from the command line. Cal.com's is the worked example, in
   `examples/team/calcom-dot-berth`. See [team setup](/guides/team-setup).
 

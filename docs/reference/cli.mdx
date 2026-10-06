@@ -69,7 +69,9 @@ See [kits](/guides/kits).
 | `berth team status [--json]` | Each team setup you accepted, its box, commit, state and progress |
 | `berth team retry ORG [--from STEP\|PROJECT] [--box BOX]` | Start a failed setup again from a step or a repo |
 
-GitHub goes through `gh`: this laptop's reads the team setup, and the box
+`ORG` is a GitHub org, whose `<org>/.berth` holds the team setup, or a link
+to one anywhere: `github.com/OWNER/REPO[@REF]` or
+`github.com/OWNER/REPO/tree/REF/FOLDER`. GitHub goes through `gh`: this laptop's reads the team setup, and the box
 signs in with its own. See [team setup](/guides/team-setup).
 
 ## Reaching services

@@ -86,4 +86,11 @@ printf 'STRIPE_KEY=\nMAIL_KEY=\nPORT=3000\n' > "$w/.env.example"
 repo acme/web "$w"
 w=$(mktemp -d); echo "print('api')" > "$w/main.py"; repo acme/api "$w"
 w=$(mktemp -d); echo secret > "$w/x"; repo acme/secret "$w"; touch "$R/acme/secret.git/berth-noaccess"
+
+# A draft of the same team setup, in someone's own repository, on a branch,
+# in a folder: what a direct link loads before the org publishes .berth.
+mkdir -p "$R/draft"
+d=$(mktemp -d); echo kits > "$d/README.md"; repo draft/kits "$d" "Kits"
+mkdir -p "$d/team" && git clone -q "$R/acme/.berth.git" "$d/b" && cp -R "$d/b/team.json" "$d/b/box" "$d/b/kits" "$d/team/" && rm -rf "$d/b"
+(cd "$d" && git checkout -q -b team-setup && git add -A && git commit -q -m "Acme team setup, a draft" && git push -q "$R/draft/kits.git" team-setup)
 git --git-dir "$R/acme/.berth.git" rev-parse main

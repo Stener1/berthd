@@ -178,3 +178,37 @@ func TestDiff(t *testing.T) {
 		t.Fatal("a setup differs from itself")
 	}
 }
+
+func TestParseSource(t *testing.T) {
+	cases := map[string]Source{
+		"calcom":                        {Owner: "calcom", Repo: ".berth"},
+		"berth://team?org=calcom":       {Owner: "calcom", Repo: ".berth"},
+		"github.com/calcom/.berth":      {Owner: "calcom", Repo: ".berth"},
+		"github.com/calcom/.berth@main": {Owner: "calcom", Repo: ".berth", Ref: "main", Link: true},
+		"https://github.com/o/r":        {Owner: "o", Repo: "r", Link: true},
+		"github.com/o/r@team-setup":     {Owner: "o", Repo: "r", Ref: "team-setup", Link: true},
+		"o/r@4e1c9a2":                   {Owner: "o", Repo: "r", Ref: "4e1c9a2", Link: true},
+		"https://github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team":                         {Owner: "sean-brydon", Repo: "berth-kit-calcom", Ref: "team-setup", Path: "team", Link: true},
+		"berth://team?src=" + "github.com%2Fsean-brydon%2Fberth-kit-calcom%2Ftree%2Fteam-setup%2Fteam": {Owner: "sean-brydon", Repo: "berth-kit-calcom", Ref: "team-setup", Path: "team", Link: true},
+		"github.com/o/r/tree/main/a/b/": {Owner: "o", Repo: "r", Ref: "main", Path: "a/b", Link: true},
+	}
+	for in, want := range cases {
+		got, err := ParseSource(in)
+		if err != nil || got != want {
+			t.Errorf("%s: got %+v %v, want %+v", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "not an org!", "github.com/o/r/tree/main/../x", "https://gitlab.com/o/r", "berth://team", "o/r@--upload-pack=x"} {
+		if s, err := ParseSource(bad); err == nil {
+			t.Errorf("%q: no error (%+v)", bad, s)
+		}
+	}
+	s, _ := ParseSource("https://github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team")
+	if s.String() != "github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team" || s.File("team.json") != "team/team.json" ||
+		s.HTMLURL() != "https://github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team" || s.Key() != "github.com_sean-brydon_berth-kit-calcom_tree_team-setup_team" {
+		t.Fatalf("%s %s %s %s", s.String(), s.File("team.json"), s.HTMLURL(), s.Key())
+	}
+	if again, _ := ParseSource(s.String()); again != s {
+		t.Fatalf("round trip %+v", again)
+	}
+}

@@ -20,6 +20,9 @@ import (
 
 const teamUsage = `berth team — set a box up the way your team's are, from <org>/.berth on GitHub
 
+  ORG is a GitHub org, whose <org>/.berth holds the team setup, or a link to one
+  anywhere: github.com/OWNER/REPO[@REF] or github.com/OWNER/REPO/tree/REF/FOLDER.
+
   berth team show ORG [--box BOX] [--json]   What the team setup does: the org, the commit,
                                              each box step (and which need your password),
                                              each repo (and whether you can read it), the keys
@@ -149,7 +152,7 @@ func describeTeam(v agent.TeamView) {
 		fmt.Printf("There is no org or user called %s on GitHub.\n", v.Org.Login)
 		return
 	case "unreadable":
-		fmt.Printf("You can't read %s's team setup (%s/.berth). Ask an admin of %s for access.\n", v.Org.Name, v.Org.Login, v.Org.Login)
+		fmt.Printf("You can't read the team setup at %s. Ask an admin of %s for access.\n", v.Source.Label, v.Org.Login)
 		return
 	case "none":
 		fmt.Printf("%s has no team setup you can read (no %s/.berth).\n", v.Org.Name, v.Org.Login)
@@ -174,7 +177,12 @@ func describeTeam(v agent.TeamView) {
 	if v.Org.Verified {
 		verified = ", verified"
 	}
-	fmt.Printf("%s team setup\n  Published by %s on GitHub%s: %s (%s), updated %s by %s, commit %s\n", s.Name, v.Org.Name, verified, v.Repo.FullName, vis, v.Commit.Date, v.Commit.Author, v.Commit.Short)
+	if v.Source.Kind == "link" {
+		// Read from a link: say where, and don't say the org published it.
+		fmt.Printf("%s team setup, for %s\n  From %s on GitHub (%s; not %s/.berth), updated %s by %s, commit %s\n", s.Name, s.Org, v.Source.Label, vis, s.Org, v.Commit.Date, v.Commit.Author, v.Commit.Short)
+	} else {
+		fmt.Printf("%s team setup\n  Published by %s on GitHub%s: %s (%s), updated %s by %s, commit %s\n", s.Name, v.Org.Name, verified, v.Repo.FullName, vis, v.Commit.Date, v.Commit.Author, v.Commit.Short)
+	}
 	if s.Description != "" {
 		fmt.Printf("  %s\n", s.Description)
 	}
@@ -347,11 +355,20 @@ func followTeam(ctx context.Context, c *agent.Client, boxName string, st box.Tea
 			return nil
 		case <-time.After(time.Second):
 		}
-		if err := c.Call(ctx, "GET", "/v1/boxes/"+url.PathEscape(boxName)+"/api/team/"+url.PathEscape(st.ID), nil, &st); err != nil {
+		var rows []struct {
+			Box    string          `json:"box"`
+			Status *box.TeamStatus `json:"status"`
+		}
+		if err := c.Call(ctx, "GET", "/v1/team", nil, &rows); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			return err
+		}
+		for _, r := range rows {
+			if r.Box == boxName && r.Status != nil && r.Status.ID == st.ID {
+				st = *r.Status
+			}
 		}
 	}
 }

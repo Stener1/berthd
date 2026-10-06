@@ -164,6 +164,12 @@ def api(path):
         rest = parts[3:]
         if not rest:
             out(repo_json(owner, name, d))
+        if rest[0] == "branches" and len(rest) >= 2:
+            name = "/".join(rest[1:])
+            sha = git(d, "rev-parse", "--verify", "--quiet", "refs/heads/" + name)
+            if not sha:
+                not_found()
+            out({"name": name, "commit": {"sha": sha.strip()}})
         if rest[0] == "commits" and len(rest) == 2:
             out(commit_json(d, rest[1]))
         if rest[:2] == ["git", "trees"] and len(rest) == 3:

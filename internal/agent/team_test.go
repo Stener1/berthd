@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sean-brydon/berthd/internal/box"
+	"github.com/sean-brydon/berthd/internal/team"
 	"github.com/sean-brydon/berthd/internal/team/teamtest"
 )
 
@@ -229,14 +231,14 @@ func TestANewerCommitIsAnUpdateToReviewNeverRun(t *testing.T) {
 	a := testAgent(t)
 	ctx := context.Background()
 	gh, _ := newGH()
-	r, err := readTeam(ctx, gh, "acme", "")
+	r, err := readTeam(ctx, gh, acmeSrc, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := a.accept(r, "devbox"); err != nil {
 		t.Fatal(err)
 	}
-	acc, _ := a.accepted("acme")
+	acc, _ := a.accepted(acmeSrc)
 	if u, _, err := teamUpdate(ctx, gh, acc); err != nil || u != nil {
 		t.Fatalf("no update yet: %+v %v", u, err)
 	}
@@ -278,7 +280,7 @@ func TestANewerCommitIsAnUpdateToReviewNeverRun(t *testing.T) {
 		t.Fatalf("events: %+v", events)
 	}
 	// Nothing was accepted by itself.
-	if acc2, _ := a.accepted("acme"); acc2.Commit != acc.Commit {
+	if acc2, _ := a.accepted(acmeSrc); acc2.Commit != acc.Commit {
 		t.Fatal("the update was applied by itself")
 	}
 }
@@ -374,7 +376,7 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	if api.Kit == nil || api.Kit.Kit.ID != "acme-api" || api.Kit.Hash != v.Projects[1].Kit.Hash || api.Init != "box/init-api.sh" {
 		t.Fatalf("api: %+v", api)
 	}
-	if acc, _ := (&Agent{cfg: Config{Dir: a.dir}}).accepted("acme"); acc == nil || acc.Commit != v.Commit.SHA || acc.Box != boxName {
+	if acc, _ := (&Agent{cfg: Config{Dir: a.dir}}).accepted(acmeSrc); acc == nil || acc.Commit != v.Commit.SHA || acc.Box != boxName {
 		t.Fatalf("accepted: %+v", acc)
 	}
 	// A commit nobody reviewed is refused.
@@ -393,5 +395,106 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	code, body = uiPost(t, a, "/v1/team/northwind/setup", tok, TeamSetupRequest{Box: boxName, Repos: []string{"northwind/web"}})
 	if code != 200 || got.ID != "northwind" || len(got.Projects) != 1 || got.Projects[0].Source != "repo" || got.Projects[0].TrustHash == "" || len(got.Steps) != 0 || !got.GitHub {
 		t.Fatalf("picker: %d %s %+v", code, body, got)
+	}
+}
+
+var acmeSrc = team.Source{Owner: "acme", Repo: team.Repo}
+
+// A team setup read from a link: another repository, a branch and a
+// folder, before the org publishes its own .berth.
+func TestATeamSetupLoadsFromADirectLink(t *testing.T) {
+	g, _ := acmeGitHub(t)
+	g.Repo("sean/kits", map[string]string{"README.md": "kits\n"}, teamtest.Repo{})
+	draft := strings.Replace(acmeTeamJSON("./kits/web"), `"name":"Acme"`, `"name":"Acme (draft)"`, 1)
+	commit := g.Repo("sean/kits", map[string]string{
+		"team/team.json":         draft,
+		"team/box/setup.sh":      acmeSetupSh,
+		"team/box/init-api.sh":   "#!/bin/sh\n",
+		"team/kits/web/kit.json": `{"id":"acme-web","name":"Acme web","config":{}}`,
+		"team/kits/api/kit.json": `{"id":"acme-api","name":"Acme API","config":{}}`,
+	}, teamtest.Repo{Branch: "team-setup", Author: "sean@example.test"})
+	a := testAgent(t)
+	ctx := context.Background()
+	link := "https://github.com/sean/kits/tree/team-setup/team"
+	v, err := a.teamView(ctx, link, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.State != "found" || v.Source.Kind != "link" || v.Source.Repo != "sean/kits" || v.Source.RefKind != "branch" ||
+		v.Source.Label != "sean/kits · team-setup branch · team/" || v.Source.Key != "github.com/sean/kits/tree/team-setup/team" {
+		t.Fatalf("source: %+v", v.Source)
+	}
+	// The card names the repository it came from, not the org it is for.
+	if v.Org.Login != "sean" || v.Setup.Org != "acme" || v.Setup.Name != "Acme (draft)" || v.Commit.SHA != commit || v.Commit.Author != "sean" {
+		t.Fatalf("org %+v setup %s commit %+v", v.Org, v.Setup.Org, v.Commit)
+	}
+	if v.Access.Readable != 3 || v.Files[0].Path != "team.json" || v.Steps[0].ID != "tools" {
+		t.Fatalf("access %+v files %+v", v.Access, v.Files)
+	}
+	// Accepting it pins the branch's commit; a newer one is an update.
+	gh, _ := newGH()
+	src, _ := team.ParseSource(link)
+	r, err := readTeam(ctx, gh, src, commit[:7])
+	if err != nil || r.commit.SHA != commit {
+		t.Fatal(err)
+	}
+	if err := a.accept(r, "devbox"); err != nil {
+		t.Fatal(err)
+	}
+	g.Repo("sean/kits", map[string]string{"team/box/setup.sh": acmeSetupSh + "# newer\n"}, teamtest.Repo{Branch: "team-setup"})
+	acc, _ := a.accepted(src)
+	if acc == nil || acc.Source != src.String() {
+		t.Fatalf("accepted %+v", acc)
+	}
+	u, _, err := teamUpdate(ctx, gh, acc)
+	if err != nil || u == nil || len(u.Changes) != 1 || u.Changes[0].ID != "box/setup.sh" {
+		t.Fatalf("update %+v %v", u, err)
+	}
+	// Other forms of link, and one that can't be read.
+	for _, l := range []string{"github.com/sean/kits@team-setup", "berth://team?src=github.com%2Fsean%2Fkits%2Ftree%2Fteam-setup%2Fteam"} {
+		if _, err := team.ParseSource(l); err != nil {
+			t.Fatal(l, err)
+		}
+	}
+	v, err = a.teamView(ctx, "github.com/sean/nothing-here", "", false)
+	if err != nil || v.State != "unreadable" || len(v.Repos) != 0 {
+		t.Fatalf("unreadable link: %+v %v", v, err)
+	}
+	// The org's own .berth is still checked to be the org's.
+	v, _ = a.teamView(ctx, "acme", "", false)
+	if v.Source.Kind != "org" || v.Source.Label != "acme/.berth" {
+		t.Fatalf("org source %+v", v.Source)
+	}
+}
+
+func TestSetupFromALinkThroughTheRoutes(t *testing.T) {
+	g, _ := acmeGitHub(t)
+	g.Repo("sean/kits", map[string]string{"README.md": "x"}, teamtest.Repo{})
+	g.Repo("sean/kits", map[string]string{"team.json": acmeTeamJSON("./kits/web"), "box/setup.sh": acmeSetupSh, "box/init-api.sh": "#!/bin/sh\n",
+		"kits/web/kit.json": `{"id":"acme-web","name":"W","config":{}}`, "kits/api/kit.json": `{"id":"acme-api","name":"A","config":{}}`}, teamtest.Repo{Branch: "draft"})
+	b := newBox(t)
+	var got box.TeamBundle
+	b.server.Handle("POST /v1/team", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &got)
+		json.NewEncoder(w).Encode(box.TeamStatus{ID: got.ID, Phase: "steps"})
+	}))
+	a := startAgent(t, b.pairLaptop())
+	tok := uiToken(t, a)
+	eventually(t, "box online", func() bool { return stateOf(t, a) == StateOnline })
+	st, _ := a.client.Status(context.Background())
+	key := url.PathEscape("github.com/sean/kits@draft")
+	resp, body := uiCall(t, a, http.MethodGet, "/v1/team/"+key, tok)
+	var v TeamView
+	if json.Unmarshal([]byte(body), &v); resp.StatusCode != 200 || v.Source.Label != "sean/kits · draft branch" {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	code, body := uiPost(t, a, "/v1/team/"+key+"/setup", tok, TeamSetupRequest{Box: st.Boxes[0].Name, Commit: v.Commit.SHA})
+	if code != 200 || got.ID != "acme" || got.Org != "acme" || got.Commit != v.Commit.SHA {
+		t.Fatalf("%d %s %+v", code, body, got)
+	}
+	_, body = uiCall(t, a, http.MethodGet, "/v1/team", tok)
+	if !strings.Contains(body, `"key":"github.com/sean/kits@draft"`) {
+		t.Fatalf("accepted: %s", body)
 	}
 }

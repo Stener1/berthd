@@ -144,6 +144,28 @@ README.md                       for people reading it on GitHub
 
 Then share `berth://team?org=<org>` in your onboarding doc.
 
+### Trying one from a link
+
+A team setup also loads from a link to any repository, branch and folder,
+so you can try one before the org's `.berth` exists, or test a change on a
+branch:
+
+```text
+github.com/<owner>/<repo>                      team.json at the top of its default branch
+github.com/<owner>/<repo>@<ref>                at a branch, tag or commit
+github.com/<owner>/<repo>/tree/<ref>/<folder>  a folder holding team.json
+berth://team?src=<one of those, URL-encoded>   the same, as a link to share
+```
+
+Type one where Berth asks for an org, open the `berth://` link, or run
+`berth team show|setup <link>`. Everything else is the same: it is read with
+your `gh`, pinned to the commit you reviewed, and the access check covers
+each repository. The page names where it came from, for example
+**sean-brydon/berth-kit-calcom · team-setup branch · team/**, and does not
+say the org published it; `team.json`'s `org` is who it is for. Paths in it
+(the script, inits, kits) are relative to the folder. A newer commit on the
+branch is offered as an update, like the org's own.
+
 ### team.json
 
 ```json
@@ -185,7 +207,7 @@ Then share `berth://team?org=<org>` in your onboarding doc.
 | `schema` | `berth.team/v1` |
 | `id` | lowercase letters, digits and dashes; names the setup on the box |
 | `name` | the org as people say it: "Set up for **Cal.com**" |
-| `org` | the GitHub org (or user) that publishes it; must be the repository's owner |
+| `org` | the GitHub org (or user) it is for; in `<org>/.berth` it must be the repository's owner (a [link](#trying-one-from-a-link) may hold any org's) |
 | `description`, `contact`, `docs` | shown on the page; `contact` is where to ask for access |
 | `box.os` | the systems the script supports; shown, not enforced |
 | `box.script` | a path inside `.berth`; see below |

@@ -215,6 +215,19 @@ s_cli() {
 	detail "berth team show lists the plan, access and the update; berth team status: set up, 4/4 steps, 2/2 repos"
 }
 
+s_link() {
+	local link=github.com/draft/kits/tree/team-setup/team out
+	out=$(lp "berth team show $link") || fail "berth team show $link failed" || return 1
+	echo "$out"
+	echo "$out" | grep -q "From draft/kits · team-setup branch · team/ on GitHub" || fail "the card does not name the repo it came from" || return 1
+	echo "$out" | grep -q "Published by" && fail "a link's setup claims the org published it" && return 1
+	out=$(lp "berth team setup $link $BOX --yes" 2>&1) || fail "berth team setup $link failed: $out" || return 1
+	echo "$out"
+	echo "$out" | grep -q "is set up for Acme" || fail "setup from the link did not finish" || return 1
+	team_is 'j["commit"] == "'"$(lp "git --git-dir ~/.fake-gh/draft/kits.git rev-parse team-setup")"'"' >/dev/null || fail "the box is not at the branch's commit: $(team_json)" || return 1
+	detail "berth team show/setup with a link to a branch and folder of another repo: the card says where it came from, and the box ran it at that branch's commit"
+}
+
 RT_CRITICAL=1 step "Build berthd, berth and the Ubuntu image" s_build
 RT_CRITICAL=1 step "Start a box and a laptop" s_machines
 RT_CRITICAL=1 step "A synthetic GitHub, sudo with a password" s_github
@@ -230,4 +243,5 @@ step "Repos cloned and set up" s_projects
 step "A second run skips what is done" s_rerun
 step "A newer .berth is an update to review" s_update
 step "berth team show and status" s_cli
+step "A team setup from a direct link" s_link
 rt_finish

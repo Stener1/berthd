@@ -116,7 +116,10 @@ type TeamView struct {
 	// State is found; none (no .berth this account can read, from an org
 	// name typed in); unreadable (the same, opened from a team link, which
 	// says there is one); or no-org.
-	State    string            `json:"state"`
+	State string `json:"state"`
+	// Source says where it was read from, for the card: the org's own
+	// .berth, or a link to another repository, branch and folder.
+	Source   TeamSource        `json:"source"`
 	Repo     *ghRepo           `json:"repo,omitempty"`
 	Commit   *ghCommit         `json:"commit,omitempty"`
 	Setup    *team.Setup       `json:"setup,omitempty"`
@@ -129,6 +132,50 @@ type TeamView struct {
 	Accepted *TeamAcceptedRef  `json:"accepted,omitempty"`
 	Update   *TeamUpdate       `json:"update,omitempty"`
 	Warnings []string          `json:"warnings"`
+}
+
+// TeamSource is where a team setup was read from.
+type TeamSource struct {
+	// Kind is "org" (<org>/.berth) or "link".
+	Kind string `json:"kind"`
+	Repo string `json:"repo"`
+	Ref  string `json:"ref,omitempty"`
+	// RefKind is branch, tag or commit.
+	RefKind string `json:"ref_kind,omitempty"`
+	Path    string `json:"path,omitempty"`
+	HTMLURL string `json:"html_url"`
+	// Label names it: "sean-brydon/berth-kit-calcom · team-setup branch · team/".
+	Label string `json:"label"`
+	// Key is what the team routes take in place of an org name.
+	Key string `json:"key"`
+}
+
+var commitLike = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+func (r teamRead) sourceView(ctx context.Context, g ghCLI) TeamSource {
+	src := r.src
+	v := TeamSource{Kind: "org", Repo: src.Slug(), Ref: src.Ref, Path: src.Path, HTMLURL: src.HTMLURL(), Label: src.Slug(), Key: src.String()}
+	if !src.Link {
+		return v
+	}
+	v.Kind = "link"
+	if src.Ref != "" {
+		switch {
+		case commitLike.MatchString(src.Ref):
+			v.RefKind = "commit"
+			v.Label += " · " + shortSHA(src.Ref)
+		case g.api(ctx, "repos/"+src.Slug()+"/branches/"+url.PathEscape(src.Ref), nil) == nil:
+			v.RefKind = "branch"
+			v.Label += " · " + src.Ref + " branch"
+		default:
+			v.RefKind = "tag"
+			v.Label += " · " + src.Ref
+		}
+	}
+	if src.Path != "" {
+		v.Label += " · " + src.Path + "/"
+	}
+	return v
 }
 
 type TeamAccess struct {
@@ -171,6 +218,8 @@ type TeamUpdate struct {
 
 // teamRead is a team setup as read through gh at one commit.
 type teamRead struct {
+	src      team.Source
+	ref      string
 	org      TeamOrg
 	state    string
 	repo     *ghRepo
@@ -182,11 +231,10 @@ type teamRead struct {
 
 var errNoOrg = errors.New("no such org or user on GitHub")
 
-// readTeam reads org's team setup at ref ("" for its default branch).
-func readTeam(ctx context.Context, g ghCLI, org, ref string) (teamRead, error) {
-	if !team.ValidOrg(org) {
-		return teamRead{}, fmt.Errorf("%q is not a GitHub org name", org)
-	}
+// readTeam reads a team setup from src at ref ("" for the source's own
+// ref, else the repository's default branch).
+func readTeam(ctx context.Context, g ghCLI, src team.Source, ref string) (teamRead, error) {
+	org := src.Owner
 	var o struct {
 		Login      string `json:"login"`
 		Name       string `json:"name"`
@@ -200,7 +248,7 @@ func readTeam(ctx context.Context, g ghCLI, org, ref string) (teamRead, error) {
 		err = g.api(ctx, "users/"+org, &o)
 	}
 	if errors.Is(err, errGHNotFound) {
-		return teamRead{org: TeamOrg{Login: org, Name: org}, state: "no-org"}, nil
+		return teamRead{src: src, org: TeamOrg{Login: org, Name: org}, state: "no-org"}, nil
 	}
 	if err != nil {
 		return teamRead{}, err
@@ -208,11 +256,16 @@ func readTeam(ctx context.Context, g ghCLI, org, ref string) (teamRead, error) {
 	if o.Name == "" {
 		o.Name = o.Login
 	}
-	r := teamRead{org: TeamOrg{Login: o.Login, Name: o.Name, AvatarURL: o.AvatarURL, Verified: o.IsVerified, Type: o.Type, HTMLURL: o.HTMLURL}}
-	slug := o.Login + "/" + team.Repo
+	r := teamRead{src: src, org: TeamOrg{Login: o.Login, Name: o.Name, AvatarURL: o.AvatarURL, Verified: o.IsVerified, Type: o.Type, HTMLURL: o.HTMLURL}}
+	slug := o.Login + "/" + src.Repo
 	repo, err := g.repo(ctx, slug)
 	if errors.Is(err, errGHNotFound) {
+		// A link says there is a team setup there: one this account can't
+		// read is unreadable. An org name without .berth gets the picker.
 		r.state = "none"
+		if src.Link {
+			r.state = "unreadable"
+		}
 		return r, nil
 	}
 	if err != nil {
@@ -220,26 +273,32 @@ func readTeam(ctx context.Context, g ghCLI, org, ref string) (teamRead, error) {
 	}
 	r.repo = &repo
 	if ref == "" {
+		ref = src.Ref
+	}
+	if ref == "" {
 		ref = repo.DefaultBranch
 	}
+	r.ref = ref
 	c, err := g.commit(ctx, slug, ref)
 	if err != nil {
 		return teamRead{}, fmt.Errorf("reading %s at %s: %w", slug, ref, err)
 	}
 	r.commit = &c
-	r.files, err = g.tree(ctx, slug, c.tree, "")
+	r.files, err = g.tree(ctx, slug, c.tree, src.Path)
 	if err != nil {
 		return teamRead{}, err
 	}
 	raw, ok := r.files[team.File]
 	if !ok {
-		return teamRead{}, fmt.Errorf("%s has no %s", slug, team.File)
+		return teamRead{}, fmt.Errorf("%s has no %s", src.String(), src.File(team.File))
 	}
 	s, warnings, err := team.Parse(raw)
 	if err != nil {
 		return teamRead{}, err
 	}
-	if !strings.EqualFold(s.Org, o.Login) {
+	// An org's own .berth must be its own team setup. A link may hold any
+	// org's (a draft, before the org publishes it), and says where it is.
+	if !src.Link && !strings.EqualFold(s.Org, o.Login) {
 		return teamRead{}, fmt.Errorf("%s says it is %q's team setup, not %s's", slug, s.Org, o.Login)
 	}
 	if s.Box.Script != "" {
@@ -566,7 +625,9 @@ func sortedNames(m map[string]string) []string {
 // the commit reviewed, where it ran, and that commit's setup and text
 // files, so a newer commit can be shown as a diff.
 type teamAccepted struct {
-	Org    string            `json:"org"`
+	Org string `json:"org"`
+	// Source is the org's name, or the link it was read from.
+	Source string            `json:"source,omitempty"`
 	ID     string            `json:"id"`
 	Name   string            `json:"name"`
 	Commit string            `json:"commit"`
@@ -579,14 +640,27 @@ type teamAccepted struct {
 	Notified string `json:"notified,omitempty"`
 }
 
-func (a *Agent) teamDir() string { return filepath.Join(a.cfg.Dir, "team") }
-
-func (a *Agent) acceptedPath(org string) string {
-	return filepath.Join(a.teamDir(), "accepted", strings.ToLower(org)+".json")
+// source is where the accepted team setup is read from.
+func (t teamAccepted) source() team.Source {
+	key := t.Source
+	if key == "" {
+		key = t.Org
+	}
+	src, err := team.ParseSource(key)
+	if err != nil {
+		return team.Source{Owner: t.Org, Repo: team.Repo}
+	}
+	return src
 }
 
-func (a *Agent) accepted(org string) (*teamAccepted, error) {
-	b, err := os.ReadFile(a.acceptedPath(org))
+func (a *Agent) teamDir() string { return filepath.Join(a.cfg.Dir, "team") }
+
+func (a *Agent) acceptedPath(src team.Source) string {
+	return filepath.Join(a.teamDir(), "accepted", src.Key()+".json")
+}
+
+func (a *Agent) accepted(src team.Source) (*teamAccepted, error) {
+	b, err := os.ReadFile(a.acceptedPath(src))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -595,7 +669,7 @@ func (a *Agent) accepted(org string) (*teamAccepted, error) {
 	}
 	var t teamAccepted
 	if err := json.Unmarshal(b, &t); err != nil {
-		return nil, fmt.Errorf("%s is unreadable: %w", a.acceptedPath(org), err)
+		return nil, fmt.Errorf("%s is unreadable: %w", a.acceptedPath(src), err)
 	}
 	return &t, nil
 }
@@ -604,16 +678,20 @@ func (a *Agent) allAccepted() []teamAccepted {
 	paths, _ := filepath.Glob(filepath.Join(a.teamDir(), "accepted", "*.json"))
 	out := []teamAccepted{}
 	for _, p := range paths {
-		org := strings.TrimSuffix(filepath.Base(p), ".json")
-		if t, err := a.accepted(org); err == nil && t != nil {
-			out = append(out, *t)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var t teamAccepted
+		if json.Unmarshal(b, &t) == nil {
+			out = append(out, t)
 		}
 	}
 	return out
 }
 
 func (a *Agent) saveAccepted(t teamAccepted) error {
-	p := a.acceptedPath(t.Org)
+	p := a.acceptedPath(t.source())
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
@@ -626,9 +704,9 @@ func (a *Agent) saveAccepted(t teamAccepted) error {
 
 // accept records that r was accepted on boxName.
 func (a *Agent) accept(r teamRead, boxName string) error {
-	prev, _ := a.accepted(r.org.Login)
+	prev, _ := a.accepted(r.src)
 	raw, _ := json.Marshal(r.setup)
-	t := teamAccepted{Org: r.org.Login, ID: r.setup.ID, Name: r.setup.Name, Commit: r.commit.SHA, Box: boxName, At: time.Now().UTC(), Setup: raw, Files: textFiles(r.files)}
+	t := teamAccepted{Org: r.org.Login, Source: r.src.String(), ID: r.setup.ID, Name: r.setup.Name, Commit: r.commit.SHA, Box: boxName, At: time.Now().UTC(), Setup: raw, Files: textFiles(r.files)}
 	if prev != nil {
 		t.Boxes, t.Notified = prev.Boxes, prev.Notified
 	}
@@ -663,7 +741,7 @@ func textFiles(files map[string][]byte) map[string]string {
 // teamUpdate compares the accepted commit with the newest one of .berth.
 // Nothing runs: the update is shown for review, and applied by the person.
 func teamUpdate(ctx context.Context, g ghCLI, acc *teamAccepted) (*TeamUpdate, *teamRead, error) {
-	r, err := readTeam(ctx, g, acc.Org, "")
+	r, err := readTeam(ctx, g, acc.source(), "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -692,7 +770,7 @@ func diffUpdate(ctx context.Context, g ghCLI, acc *teamAccepted, r teamRead) (*T
 	var cmp struct {
 		TotalCommits int `json:"total_commits"`
 	}
-	if g.api(ctx, "repos/"+acc.Org+"/"+team.Repo+"/compare/"+acc.Commit+"..."+r.commit.SHA, &cmp) == nil {
+	if g.api(ctx, "repos/"+acc.source().Slug()+"/compare/"+acc.Commit+"..."+r.commit.SHA, &cmp) == nil {
 		u.Commits = cmp.TotalCommits
 	}
 	return u, nil
@@ -701,18 +779,22 @@ func diffUpdate(ctx context.Context, g ghCLI, acc *teamAccepted, r teamRead) (*T
 // teamView builds the Team setup page's data for org. fromLink says it was
 // opened from a berth://team link, which says a setup exists, so one that
 // can't be read is "unreadable" rather than "none".
-func (a *Agent) teamView(ctx context.Context, org, boxName string, fromLink bool) (TeamView, error) {
+func (a *Agent) teamView(ctx context.Context, key, boxName string, fromLink bool) (TeamView, error) {
+	src, err := team.ParseSource(key)
+	if err != nil {
+		return TeamView{}, err
+	}
 	g, err := newGH()
 	if err != nil {
 		return TeamView{}, err
 	}
-	r, err := readTeam(ctx, g, org, "")
+	r, err := readTeam(ctx, g, src, "")
 	if err != nil {
 		return TeamView{}, err
 	}
-	v := TeamView{Org: r.org, State: r.state, Projects: []TeamProjectView{}, Warnings: append([]string{}, r.warnings...), Keys: TeamKeysView{Ask: []TeamAsk{}}, Access: TeamAccess{Missing: []string{}}}
+	v := TeamView{Org: r.org, State: r.state, Source: r.sourceView(ctx, g), Projects: []TeamProjectView{}, Warnings: append([]string{}, r.warnings...), Keys: TeamKeysView{Ask: []TeamAsk{}}, Access: TeamAccess{Missing: []string{}}}
 	switch r.state {
-	case "no-org":
+	case "no-org", "unreadable":
 		return v, nil
 	case "none":
 		if fromLink {
@@ -742,7 +824,7 @@ func (a *Agent) teamView(ctx context.Context, org, boxName string, fromLink bool
 			}
 		}
 	}
-	if acc, _ := a.accepted(org); acc != nil {
+	if acc, _ := a.accepted(src); acc != nil {
 		v.Accepted = &TeamAcceptedRef{Commit: acc.Commit, Box: acc.Box, At: acc.At}
 		if acc.Commit != r.commit.SHA {
 			v.Update, _ = diffUpdate(ctx, g, acc, r)
@@ -840,7 +922,7 @@ func (a *Agent) checkTeamUpdates(ctx context.Context) {
 		}
 		acc.Notified = r.commit.SHA
 		a.saveAccepted(acc)
-		a.publish(Event{Type: "team.update", Data: map[string]any{"org": acc.Org, "name": acc.Name, "from": u.From, "to": u.To, "changes": len(u.Changes), "sudo": u.Sudo}})
+		a.publish(Event{Type: "team.update", Data: map[string]any{"org": acc.Org, "key": acc.source().String(), "name": acc.Name, "from": u.From, "to": u.To, "changes": len(u.Changes), "sudo": u.Sudo}})
 	}
 }
 
@@ -866,7 +948,7 @@ func (a *Agent) teamRoutes(mux *http.ServeMux) {
 		a.sync()
 		out := []map[string]any{}
 		for _, t := range a.allAccepted() {
-			row := map[string]any{"org": t.Org, "id": t.ID, "name": t.Name, "commit": t.Commit, "box": t.Box, "boxes": t.Boxes, "at": t.At}
+			row := map[string]any{"org": t.Org, "key": t.source().String(), "source": t.source().String(), "id": t.ID, "name": t.Name, "commit": t.Commit, "box": t.Box, "boxes": t.Boxes, "at": t.At}
 			var st box.TeamStatus
 			if a.postToBox(r.Context(), t.Box, http.MethodGet, "/v1/team/"+url.PathEscape(t.ID), nil, &st) == nil {
 				row["status"] = st
@@ -892,7 +974,12 @@ func (a *Agent) teamRoutes(mux *http.ServeMux) {
 		if !a.githubReady(w, r) {
 			return
 		}
-		acc, err := a.accepted(r.PathValue("org"))
+		src, err := team.ParseSource(r.PathValue("org"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		acc, err := a.accepted(src)
 		if err != nil || acc == nil {
 			writeError(w, http.StatusNotFound, "this laptop has not set up "+r.PathValue("org")+"'s team setup")
 			return

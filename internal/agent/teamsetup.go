@@ -35,21 +35,24 @@ var errTeamChanged = errors.New("the team setup changed since you reviewed it; r
 // teamBundle builds what the box runs, from the commit the engineer
 // reviewed: the box gets .berth's files as read here, each project's kit as
 // reviewed, and the hash of each repository's own config to trust.
-func (a *Agent) teamBundle(ctx context.Context, g ghCLI, org string, req TeamSetupRequest) (box.TeamBundle, *teamRead, func(), error) {
+func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req TeamSetupRequest) (box.TeamBundle, *teamRead, func(), error) {
 	cleanup := func() {}
 	if len(req.Repos) > 0 {
-		tb, err := a.repoBundle(ctx, g, org, req.Repos)
+		if src.Link {
+			return box.TeamBundle{}, nil, cleanup, errors.New("pick repos from an org's name, not a link")
+		}
+		tb, err := a.repoBundle(ctx, g, src.Owner, req.Repos)
 		return tb, nil, cleanup, err
 	}
 	if req.Commit == "" {
 		return box.TeamBundle{}, nil, cleanup, errors.New("say which commit of the team setup you reviewed")
 	}
-	r, err := readTeam(ctx, g, org, req.Commit)
+	r, err := readTeam(ctx, g, src, req.Commit)
 	if err != nil {
 		return box.TeamBundle{}, nil, cleanup, err
 	}
 	if r.state != "found" {
-		return box.TeamBundle{}, nil, cleanup, fmt.Errorf("%s has no team setup this account can read", org)
+		return box.TeamBundle{}, nil, cleanup, fmt.Errorf("%s has no team setup this account can read", src.String())
 	}
 	if !strings.HasPrefix(r.commit.SHA, req.Commit) {
 		return box.TeamBundle{}, nil, cleanup, errTeamChanged
@@ -61,7 +64,7 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, org string, req TeamSet
 			os.RemoveAll(d)
 		}
 	}
-	tb := box.TeamBundle{ID: r.setup.ID, Name: r.setup.Name, Org: r.org.Login, Commit: r.commit.SHA, Script: r.setup.Box.Script,
+	tb := box.TeamBundle{ID: r.setup.ID, Name: r.setup.Name, Org: r.setup.Org, Commit: r.commit.SHA, Script: r.setup.Box.Script,
 		Steps: r.setup.Box.Steps, Files: map[string]string{}, Projects: []box.TeamProjectPlan{}}
 	if tb.Steps == nil {
 		tb.Steps = []team.Step{}
@@ -185,7 +188,12 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 		a.sync()
 		g, _ := newGH()
 		org := r.PathValue("org")
-		tb, read, cleanup, err := a.teamBundle(r.Context(), g, org, req)
+		src, err := team.ParseSource(org)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		tb, read, cleanup, err := a.teamBundle(r.Context(), g, src, req)
 		defer cleanup()
 		if errors.Is(err, errTeamChanged) {
 			writeCoded(w, http.StatusConflict, err.Error(), "team_changed")
@@ -218,8 +226,13 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 			return
 		}
 		org := r.PathValue("org")
-		id := strings.Trim(nonTeamID.ReplaceAllString(strings.ToLower(org), "-"), "-")
-		if acc, _ := a.accepted(org); acc != nil {
+		src, err := team.ParseSource(org)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		id := strings.Trim(nonTeamID.ReplaceAllString(strings.ToLower(src.Owner), "-"), "-")
+		if acc, _ := a.accepted(src); acc != nil {
 			id = acc.ID
 			if req.Box == "" {
 				req.Box = acc.Box

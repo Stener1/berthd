@@ -80,6 +80,8 @@ type Repo struct {
 	NoAccess bool
 	// Author is the commit author's email ("keith@acme.test" shows as keith).
 	Author string
+	// Branch is where the commit goes; default main.
+	Branch string
 }
 
 // Repo creates owner/name with files committed on main and returns the
@@ -93,6 +95,9 @@ func (g *GitHub) Repo(slug string, files map[string]string, o Repo) string {
 		g.git("", "init", "-q", "--bare", "-b", "main", bare)
 	} else if g.try("--git-dir", bare, "rev-parse", "--verify", "-q", "main") {
 		g.git("", "clone", "-q", bare, work)
+		if o.Branch != "" && g.try("--git-dir", bare, "rev-parse", "--verify", "-q", o.Branch) {
+			g.git(work, "checkout", "-q", o.Branch)
+		}
 		// Start from what is there; files given replace or add, "" removes.
 	}
 	if _, err := os.Stat(filepath.Join(work, ".git")); err != nil {
@@ -123,7 +128,11 @@ func (g *GitHub) Repo(slug string, files map[string]string, o Repo) string {
 	}
 	g.git(work, "add", "-A")
 	g.git(work, "-c", "user.name="+strings.Split(author, "@")[0], "-c", "user.email="+author, "commit", "-q", "--allow-empty", "-m", "Update "+slug)
-	g.git(work, "push", "-q", "origin", "HEAD:main")
+	branch := o.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	g.git(work, "push", "-q", "origin", "HEAD:refs/heads/"+branch)
 	mark := func(name string, on bool) {
 		p := filepath.Join(bare, name)
 		if on {
