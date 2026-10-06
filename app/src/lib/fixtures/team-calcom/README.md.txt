@@ -179,7 +179,7 @@ pressing **Update** runs it, and steps whose checks pass are skipped.
 - **The project's id** is `cal`, not `cal.com`: it names the project on the
   box and is part of every worktree's URL (`<worktree>.cal.<box>.localhost`),
   so Berth refuses an id with a dot. `path` keeps the folder `~/code/cal.com`.
-- **1Password names.** The vault (`Engineering`) and item names in `keys` are
+- **1Password names.** The vault (`dev`) and item names in `keys` are
   placeholders, as is the `contact` channel.
 - **Which keys are shared and which are each engineer's own.** The split in
   `keys` is a first guess from `.env.example` and `.env.appStore.example`.

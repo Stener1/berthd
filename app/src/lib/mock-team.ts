@@ -88,14 +88,14 @@ const calSetup: TeamSetup = {
     cal: {
       from: ".env.example",
       shared: {
-        STRIPE_PRIVATE_KEY: "op://Engineering/Cal.com Stripe test/secret key",
-        NEXT_PUBLIC_STRIPE_PUBLIC_KEY: "op://Engineering/Cal.com Stripe test/publishable key",
-        STRIPE_WEBHOOK_SECRET: "op://Engineering/Cal.com Stripe test/webhook secret",
-        DAILY_API_KEY: "op://Engineering/Daily dev/credential",
+        STRIPE_PRIVATE_KEY: "op://dev/dev_cal_stripe/secret_key",
+        NEXT_PUBLIC_STRIPE_PUBLIC_KEY: "op://dev/dev_cal_stripe/publishable_key",
+        STRIPE_WEBHOOK_SECRET: "op://dev/dev_cal_stripe/webhook_secret",
+        DAILY_API_KEY: "op://dev/dev_cal_daily/api_key",
       },
       ask: ["SENDGRID_API_KEY"],
     },
-    "private-api": { from: ".env.example", shared: { CAL_API_KEY: "op://Engineering/Cal.com API dev/credential" } },
+    "private-api": { from: ".env.example", shared: { CAL_API_KEY: "op://dev/dev_private_api_cal/api_key" } },
   },
   updates: { notify: true },
 };
