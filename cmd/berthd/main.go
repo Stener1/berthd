@@ -44,10 +44,12 @@ const (
 const usage = `berthd — the berth daemon for a development box
 
   berthd serve [--listen ADDR]            Serve paired laptops (default: tailnet address only)
-  berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--dry-run]
+  berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--no-tools] [--dry-run]
                                           Run serve as a user service (systemd/launchd), and install
                                           hooks and skills for the agent CLIs found here; --keep-listen
-                                          keeps an installed non-tailnet address, --dry-run only checks
+                                          keeps an installed non-tailnet address, --dry-run only checks.
+                                          Installs tmux and git first if they are missing and that needs
+                                          no password, else says the command to run (--no-tools skips it)
   berthd uninstall                        Remove that service
   berthd pair [--address HOST[:PORT]] [--ttl 10m] [--json]
                                           Print a single-use pairing link
@@ -60,6 +62,8 @@ const usage = `berthd — the berth daemon for a development box
   berthd secret exec [--socket PATH] -- PROGRAM [ARGS...]
                                           Resolve secret references, then run PROGRAM (sessions and
                                           services use it)
+  berthd secret signin [--check]          Sign op in to 1Password here, for berthd's op:// reads
+                                          (--check: only say whether it can read now)
   berthd mcp                              A stdio MCP server of berth's tools for agents on this box
                                           (integrations install adds it to Claude, Codex and Gemini)
   berthd browser install                  Download a Chromium (Playwright's headless shell) for agents' browsers
@@ -80,6 +84,11 @@ func helpText() string {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		// A command that already said why ends with its own status.
+		var code exitCode
+		if errors.As(err, &code) {
+			os.Exit(int(code))
+		}
 		fmt.Fprintln(os.Stderr, "berthd:", err)
 		os.Exit(1)
 	}
@@ -201,6 +210,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 2 && args[0] == "secret" && args[1] == "exec" {
 		return secretExec(b, args[2:])
+	}
+	if len(args) >= 2 && args[0] == "secret" && args[1] == "signin" {
+		return secretSignin(b, args[2:])
 	}
 	if _, ok := boxcmd.Commands[args[0]]; ok {
 		return runLocal(b, args)
@@ -331,7 +343,7 @@ func serve(b boxHome, args []string) error {
 		KitsDir:      filepath.Join(b.dir, "kits"),
 		EnvFile:      filepath.Join(userDir, "env.json"),
 		Paused:       &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
-		Secrets:      &box.Secrets{},
+		Secrets:      b.boxSecrets(),
 		Socket:       b.socket(),
 		Phone:        &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
 		Guard:        &box.Guard{Path: filepath.Join(userDir, "guard.json")},

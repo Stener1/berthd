@@ -51,11 +51,12 @@ func install(b boxHome, args []string) error {
 	keep := fs.Bool("keep-listen", false, "keep the address an installed berthd listens on, unless it was a tailnet address (for upgrades in place)")
 	dryRun := fs.Bool("dry-run", false, "check this box can run berthd as a service and print what install would do")
 	noIntegrations := fs.Bool("no-integrations", false, "don't install hooks and skills for the agent CLIs on this box")
+	noTools := fs.Bool("no-tools", false, "don't install tmux and git when they are missing (the app's own box on a Mac says how instead)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return errors.New("usage: berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--dry-run]")
+		return errors.New("usage: berthd install [--listen ADDR] [--keep-listen] [--no-integrations] [--no-tools] [--dry-run]")
 	}
 	if err := service.Preflight(); err != nil {
 		return err
@@ -68,10 +69,23 @@ func install(b boxHome, args []string) error {
 	}
 	addr, err := chooseListen(*listen, *keep, current, interfaceIPs())
 	if *dryRun {
-		return printPlan(os.Stdout, b, addr, current, err)
+		if err := printPlan(os.Stdout, b, addr, current, err); err != nil {
+			return err
+		}
+		if !*noTools {
+			printTools(os.Stdout, systemTools())
+		}
+		return nil
 	}
 	if err != nil {
 		return err
+	}
+	// tmux and git first: without them berthd would run, but nothing on
+	// the box could start.
+	if !*noTools {
+		if err := installTools(os.Stdout); err != nil {
+			return err
+		}
 	}
 	spec := daemonService(b, addr)
 	if runtime.GOOS == "darwin" {
@@ -185,6 +199,19 @@ func printPlan(w io.Writer, b boxHome, addr, current string, listenErr error) er
 		fmt.Fprintf(w, "listen %s\n", addr)
 	}
 	return nil
+}
+
+// printTools adds what the dry run found of tmux and git: "tools missing
+// tmux git" and "tools install <command>", which the install script asks
+// about where it can ask.
+func printTools(w io.Writer, p toolsPlan) {
+	if len(p.Missing) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "tools missing %s\n", strings.Join(p.Missing, " "))
+	if c := p.command(); c != "" {
+		fmt.Fprintf(w, "tools install %s\n", c)
+	}
 }
 
 // waitServing waits for the service to answer on its local socket, started

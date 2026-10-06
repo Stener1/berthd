@@ -29,10 +29,12 @@
 #   BERTH_DOWNLOAD_BASE  fetch the archives from this URL instead of GitHub
 #
 # Questions: without a tailnet address it asks before listening on every
-# interface, and on Linux it offers to turn on lingering so berthd keeps
-# running after you log out. With --yes (or no terminal to ask on) it never
-# listens on every interface unless --listen says so, and turns lingering on
-# only when sudo needs no password.
+# interface; without tmux or git (a fresh Ubuntu has neither) it offers to
+# install them with sudo; and on Linux it offers to turn on lingering so
+# berthd keeps running after you log out. With --yes (or no terminal to ask
+# on) it never listens on every interface unless --listen says so, installs
+# tmux and git and turns lingering on only when sudo needs no password, and
+# otherwise stops, saying the command to run.
 set -eu
 
 repo="sean-brydon/berthd"
@@ -271,6 +273,38 @@ run_install() { # run_install BERTHD [ARGS…]
 	fi
 }
 plan=$(run_install "$new" --dry-run) || die "berthd cannot run as a service here (above says why); nothing was installed"
+
+# tmux and git: every terminal, agent and team setup step runs in tmux, and
+# worktrees are git's, so a box without them can't start anything. berthd
+# install gets them itself when that needs no password (root, sudo without
+# one, Homebrew); here, where a person can type sudo's password, it asks.
+tools=$(printf '%s\n' "$plan" | sed -n 's/^tools missing //p')
+if [ -n "$tools" ]; then
+	tools_cmd=$(printf '%s\n' "$plan" | sed -n 's/^tools install //p')
+	tools_say=$(printf '%s' "$tools" | sed 's/ / and /')
+	them=them
+	case $tools in *" "*) ;; *) them=it ;; esac
+	case $tools_cmd in
+	"") die "Berth needs $tools_say on this box, and there is no package manager this knows: install $them, then run this again" ;;
+	sudo\ *)
+		if [ "$uid" = 0 ] || { command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; }; then
+			say "  $tools_say: not installed; installing $them with the service"
+		elif can_ask; then
+			say ""
+			say "Berth needs $tools_say on this box: every terminal and agent runs in tmux, and"
+			say "worktrees are git's. Installing $them needs root, so sudo asks for your password."
+			if ask "Install $them now? (runs: $tools_cmd)" y; then
+				sh -c "$tools_cmd" </dev/tty || die "could not install $tools_say. Run this, then run the install again: $tools_cmd"
+			else
+				die "stopped before installing. Berth needs $tools_say; run this, then run the install again: $tools_cmd"
+			fi
+		else
+			die "Berth needs $tools_say on this box, and installing $them needs sudo's password, which this can't ask for (--yes, or no terminal). Run this, then run the install again: $tools_cmd"
+		fi
+		;;
+	*) say "  $tools_say: not installed; installing $them with the service ($tools_cmd)" ;;
+	esac
+fi
 planned=$(printf '%s\n' "$plan" | sed -n 's/^listen //p')
 case $planned in
 none*)

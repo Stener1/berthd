@@ -361,12 +361,12 @@ func (a *Agent) setUpLocalBox(ctx context.Context, say sayFunc) (string, error) 
 			}
 		}
 		say("Installing the berthd service, listening on %s: this computer only…", listen)
-		if err := runBerthd(ctx, say, prog, home, "install", "--listen", listen); err != nil {
+		if err := runBerthd(ctx, say, prog, home, "install", "--listen", listen, "--no-tools"); err != nil {
 			return "", err
 		}
 	case !owned && (updated || !running):
 		say("Restarting berthd…")
-		if err := runBerthd(ctx, say, prog, home, "install", "--keep-listen"); err != nil {
+		if err := runBerthd(ctx, say, prog, home, "install", "--keep-listen", "--no-tools"); err != nil {
 			return "", err
 		}
 	default:
@@ -796,7 +796,13 @@ func (a *Agent) refreshLocalBox(ctx context.Context) {
 		say("berthd's service has no PATH, so it can't find tools such as Homebrew's tmux; installing it again with yours")
 	}
 	if updated || heal {
-		if err := runBerthd(ctx, say, unit.Program, home, "install", "--keep-listen"); err != nil {
+		// This Mac's own box says how to get tmux in the app, rather than
+		// install it unasked. A berthd healed in place may predate --no-tools.
+		args := []string{"install", "--keep-listen"}
+		if updated {
+			args = []string{"install", "--keep-listen", "--no-tools"}
+		}
+		if err := runBerthd(ctx, say, unit.Program, home, args...); err != nil {
 			say("reinstalling berthd: %v", err)
 			return
 		}

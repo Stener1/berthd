@@ -201,7 +201,7 @@ func TestUseThisMacSetsUpPairsReconnectsAndUninstalls(t *testing.T) {
 	listen := unit.Arg("--listen")
 	berthdRuns := e.log(e.berthd)
 	for _, want := range []string{
-		e.root + "|install --listen " + listen,
+		e.root + "|install --listen " + listen + " --no-tools",
 		e.root + "|id",
 		e.root + "|pair --json --ttl 2m --address " + listen,
 	} {
