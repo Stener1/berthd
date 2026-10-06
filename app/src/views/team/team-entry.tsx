@@ -7,7 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
 import { isTauri } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { activeRun, loadTeams, onRepoReady, orgFromInput, recentlyDone, type TeamStatus, useTeam, validOrg } from "@/lib/team";
+import { activeRun, keyOf, loadTeams, onRepoReady, recentlyDone, teamRef, type TeamStatus, useTeam } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { GitHubMark } from "@/views/team/team-parts";
 import { runSummary } from "@/views/team/team-rail";
@@ -23,25 +23,25 @@ export function openTeam(org?: string, from?: "onboarding" | "addbox" | "link" |
 }
 
 // JoinTeamCard is first run's way in for someone whose company publishes a
-// team setup: the org's name, and the page.
+// team setup: the org's name (or a link to a setup), and the page.
 export function JoinTeamCard() {
   const [v, setV] = useState("");
-  const org = orgFromInput(v);
+  const ref = teamRef(v);
   return (
     <section aria-label="Joining a team?" className="mt-2 rounded-xl border bg-card/40 px-4 py-3.5">
       <h2 className="flex items-center gap-2 font-medium text-sm">
         <GitHubMark className="size-3.5" /> Joining a team?
       </h2>
-      <p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">Type your company's GitHub org. If it publishes a team setup, Berth sets your box up the way the team's are: tools, services and repos.</p>
+      <p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">Type your company's GitHub org, or paste a link to a team setup. Berth sets your box up the way the team's are: tools, services and repos.</p>
       <form
         className="mt-3 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (validOrg(org)) openTeam(org, "onboarding");
+          if (ref) openTeam(ref, "onboarding");
         }}
       >
         <OrgField value={v} onChange={setV} />
-        <Button type="submit" variant="outline" disabled={!validOrg(org)}>
+        <Button type="submit" variant="outline" disabled={!ref}>
           Continue <ArrowRightIcon />
         </Button>
       </form>
@@ -82,7 +82,7 @@ export function TeamSidebarCard() {
       <button
         type="button"
         data-testid="team-sidebar"
-        onClick={() => useStore.getState().setView({ kind: "team", org: run.org, box: run.box, from: "sidebar" })}
+        onClick={() => useStore.getState().setView({ kind: "team", org: keyOf(useTeam.getState(), run), box: run.box, from: "sidebar" })}
         className={cn("mx-2 mt-3 block w-[calc(100%-16px)] rounded-lg border bg-card px-2.5 py-2 text-left hover:bg-accent/40", view.kind === "team" && "border-foreground/20")}
       >
         <span className="flex items-center gap-1.5 font-medium text-[12px]">
@@ -112,7 +112,7 @@ export function TeamSidebarCard() {
   }
   if (update) {
     const [org, u] = update;
-    const name = useTeam.getState().accepted.find((a) => a.org === org)?.name ?? org;
+    const name = useTeam.getState().accepted.find((a) => (a.key ?? a.org) === org)?.name ?? org;
     return (
       <div data-testid="team-update-card" className="mx-2 mt-3 rounded-lg border bg-card px-2.5 py-2">
         <p className="flex items-center gap-1.5 font-medium text-[12px]">
@@ -142,7 +142,7 @@ export function TeamStatusItem() {
       <button
         type="button"
         data-testid="team-status"
-        onClick={() => useStore.getState().setView({ kind: "team", org: run.org, box: run.box })}
+        onClick={() => useStore.getState().setView({ kind: "team", org: keyOf(useTeam.getState(), run), box: run.box })}
         className={cn("-mx-1 flex min-w-0 max-w-[50%] shrink items-center gap-1.5 whitespace-nowrap rounded px-1 hover:bg-accent hover:text-foreground", sum.tone === "failed" && "text-destructive-foreground", sum.tone === "waiting" && "text-warning-foreground dark:text-warning")}
       >
         {sum.tone === "failed" ? <CircleAlertIcon className="size-3" /> : sum.tone === "waiting" ? <KeyRoundIcon className="size-3" /> : <Spinner className="size-3" />}
@@ -179,32 +179,35 @@ export function useTeamWatch() {
   );
 }
 
-// A team link someone shares, berth://team?org=calcom, opens the page. In
-// the browser build, ?team-link=calcom does the same, for trying it out.
+// A team link someone shares opens the page: berth://team?org=calcom for
+// an org's .berth, berth://team?src=<link> for a setup anywhere else. In the
+// browser build ?team-link=calcom and ?team-link-src=<link> do the same, for
+// trying them out, and ?team-page= opens the page as the sidebar would.
 function openLink(url: string) {
   if (!/^berth:\/\/team\b/i.test(url)) return;
-  const org = orgFromInput(url);
-  if (validOrg(org)) openTeam(org, "link");
+  const ref = teamRef(url);
+  if (ref) openTeam(ref, "link");
+}
+
+function takeParam(name: string): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get(name);
+  if (v === null) return null;
+  params.delete(name);
+  const rest = params.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+  return v;
 }
 
 export function useTeamDeepLinks() {
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const link = params.get("team-link");
-    // ?team-page=calcom opens the page itself, as the sidebar would.
-    const page = params.get("team-page");
-    if (page) {
-      params.delete("team-page");
-      const rest = params.toString();
-      window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
-      if (validOrg(page)) openTeam(page);
-    }
-    if (link) {
-      params.delete("team-link");
-      const rest = params.toString();
-      window.history.replaceState(null, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
-      openLink(link.startsWith("berth://") ? link : `berth://team?org=${encodeURIComponent(link)}`);
-    }
+    const page = takeParam("team-page");
+    const ref = page && teamRef(page);
+    if (ref) openTeam(ref);
+    const org = takeParam("team-link");
+    if (org) openLink(org.startsWith("berth://") ? org : `berth://team?org=${encodeURIComponent(org)}`);
+    const src = takeParam("team-link-src");
+    if (src) openLink(`berth://team?src=${encodeURIComponent(src)}`);
     if (!isTauri()) return;
     let stop: (() => void) | undefined;
     let cancelled = false;

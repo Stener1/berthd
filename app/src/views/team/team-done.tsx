@@ -33,7 +33,13 @@ export function TeamDone({ view, run, onShowPlan, onReviewUpdate }: { view: Team
             <div className="min-w-0">
               <h1 className="font-semibold text-2xl tracking-tight">You're set up for {name}</h1>
               <p className="mt-0.5 text-muted-foreground text-sm">
-                {run.box} matches {name}'s team setup at <span className="font-mono">{run.commit}</span>. Its repos are in the sidebar.
+                {run.box} matches {name}'s team setup at <span className="font-mono">{run.commit}</span>
+                {view.source?.kind === "link" && (
+                  <>
+                    , loaded from <span className="font-mono">{view.source.label}</span>
+                  </>
+                )}
+                . Its repos are in the sidebar.
               </p>
             </div>
           </div>

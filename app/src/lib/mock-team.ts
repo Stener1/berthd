@@ -4,7 +4,7 @@ import initCal from "@/lib/fixtures/team-calcom/init-cal.sh.txt?raw";
 import privateApiKit from "@/lib/fixtures/team-calcom/kit.json.txt?raw";
 import readme from "@/lib/fixtures/team-calcom/README.md.txt?raw";
 import setupSh from "@/lib/fixtures/team-calcom/setup.sh.txt?raw";
-import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
+import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
 
 // Mock mode's Team setup, behaving like the laptop agent (internal/agent
 // team.go, reading <org>/.berth with gh) and the box's runner (internal/box
@@ -19,6 +19,10 @@ import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupReques
 //   fail              the run stops at Postgres (port taken); Retry passes
 //   update            set up at 4e1c9a2 on sean-dev; 9d03f17 is newer
 //   done              set up already
+// A link (?team-page= or ?team-link-src=) to
+// github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team is the same
+// Cal.com setup, read from a user's repo on a branch; any other link can't
+// be read.
 // &teamhold=github,repos keeps the run at those points until
 // window.__teamMock.advance(name), for screenshots; the sudo prompt always
 // waits for a password typed in its terminal (or advance("sudo")).
@@ -172,6 +176,25 @@ function calProjects(): ProjectView[] {
   ];
 }
 
+// A setup read from a link: a user's repo, a branch, a folder in it.
+export const TEAM_LINK = "github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team";
+const SEAN_AVATAR = svg(`<rect width="64" height="64" rx="32" fill="#7c3aed"/><text x="32" y="42" font-family="Inter,Helvetica,Arial,sans-serif" font-size="28" font-weight="600" fill="#fff" text-anchor="middle">S</text>`);
+const LINK_COMMIT = "b81d0e4a6c2f9e1d3b5a7c9e0f2a4b6c8d0e1f23";
+const orgSource: TeamSource = { kind: "org", repo: "calcom/.berth", html_url: "https://github.com/calcom/.berth", label: "calcom/.berth", key: "calcom" };
+const linkSource: TeamSource = {
+  kind: "link",
+  repo: "sean-brydon/berth-kit-calcom",
+  ref: "team-setup",
+  ref_kind: "branch",
+  path: "team",
+  html_url: "https://github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team",
+  label: "sean-brydon/berth-kit-calcom · team-setup branch · team/",
+  key: TEAM_LINK,
+};
+const isMockLink = (key: string) => key.toLowerCase().startsWith("github.com/");
+// The run id for a key: a link's setup is Cal.com's.
+const idOf = (key: string) => (isMockLink(key) ? "calcom" : key.toLowerCase());
+
 const calOrg = { login: "calcom", name: "Cal.com", avatar_url: CAL_AVATAR, verified: true, type: "Organization" as const, html_url: "https://github.com/calcom" };
 
 function calFiles() {
@@ -200,7 +223,7 @@ const UPDATE: TeamUpdate = {
 
 let ghLoginAt = 0;
 const accepted: Accepted[] = [];
-if (teamScenario === "update" || teamScenario === "done") accepted.push({ org: "calcom", id: "calcom", name: "Cal.com", commit: COMMIT.slice(0, 7), box: TEAM_BOX, at: ago(60 * 24 * 9) });
+if (teamScenario === "update" || teamScenario === "done") accepted.push({ org: "calcom", id: "calcom", name: "Cal.com", commit: COMMIT.slice(0, 7), box: TEAM_BOX, at: ago(60 * 24 * 9), key: "calcom" });
 
 const runs: Record<string, TeamStatus> = {};
 const logs: Record<string, string[]> = {};
@@ -232,10 +255,24 @@ function calView(box?: string): TeamView {
     keys: { shared: teamScenario === "partial" ? 4 : 5, ask: [{ project: "cal.com", key: "SENDGRID_API_KEY", set: !!run?.keys_set.includes("cal.com/SENDGRID_API_KEY") }] },
     warnings: [],
   };
+  view.source = orgSource;
   const acc = accepted.find((a) => a.org === "calcom");
   if (acc) view.accepted = { commit: acc.commit, box: acc.box, at: acc.at };
   if (teamScenario === "update" && acc?.commit === COMMIT.slice(0, 7)) view.update = UPDATE;
   return view;
+}
+
+// linkView is the same setup read from the link: its owner is a user, and
+// the commit is the branch's.
+function linkView(box?: string): TeamView {
+  const v = calView(box);
+  v.org = { login: "sean-brydon", name: "Sean Brydon", avatar_url: SEAN_AVATAR, verified: false, type: "User", html_url: "https://github.com/sean-brydon" };
+  v.source = linkSource;
+  v.repo = { full_name: "sean-brydon/berth-kit-calcom", private: false, default_branch: "main", html_url: "https://github.com/sean-brydon/berth-kit-calcom" };
+  v.commit = { sha: LINK_COMMIT, short: LINK_COMMIT.slice(0, 7), author: "sean-brydon", author_avatar: SEAN_AVATAR, date: ago(50), message: "team: Postgres on 5450" };
+  v.files = v.files?.map((f) => ({ ...f, path: `team/${f.path}` }));
+  v.update = undefined;
+  return v;
 }
 
 const northwindRepos: OrgRepo[] = [
@@ -249,6 +286,20 @@ const northwindRepos: OrgRepo[] = [
 function view(org: string, q: URLSearchParams): TeamView {
   const o = org.toLowerCase();
   const box = q.get("box") ?? undefined;
+  if (isMockLink(o)) {
+    if (o === TEAM_LINK) return linkView(box);
+    // Any other link: GitHub won't show it to this account.
+    const [, owner = "someone", repo = "repo"] = org.split("/");
+    return {
+      org: { login: owner, name: owner, avatar_url: "", verified: false, type: "User", html_url: `https://github.com/${owner}` },
+      state: "unreadable",
+      source: { kind: "link", repo: `${owner}/${repo}`, html_url: `https://${org}`, label: org.replace(/^github\.com\//, ""), key: org },
+      projects: [],
+      access: { readable: 0, total: 0, missing: [] },
+      keys: { shared: 0, ask: [] },
+      warnings: [],
+    };
+  }
   if (o === "calcom") {
     if (teamScenario === "unreadable") {
       return { org: calOrg, state: "unreadable", projects: [], access: { readable: 0, total: 0, missing: [] }, keys: { shared: 0, ask: [] }, warnings: [] };
@@ -442,13 +493,14 @@ function setup(org: string, req: SetupRequest): Promise<TeamStatus> {
   const o = org.toLowerCase();
   let r: TeamStatus;
   let again = false;
+  const link = isMockLink(o);
   if (o === "northwind") {
     const repos = req.repos ?? [];
     r = newRun(box, "northwind", "Northwind Labs", "", [GITHUB_STEP], repos.map((repo) => ({ id: repo.split("/")[1], repo })), []);
   } else {
-    const v = calView(box);
+    const v = link ? linkView(box) : calView(box);
     const picked = req.projects ?? v.projects.filter((p) => p.access).map((p) => p.id);
-    const commit = (req.commit ?? COMMIT).slice(0, 7);
+    const commit = (req.commit ?? (link ? LINK_COMMIT : COMMIT)).slice(0, 7);
     again = !!accepted.find((a) => a.org === "calcom" && a.box === box) && commit === NEXT.slice(0, 7);
     const projects = v.projects.filter((p) => picked.includes(p.id)).map((p) => ({ id: p.id, repo: p.repo }));
     if (again) projects.push({ id: "cal-video", repo: "calcom/cal-video" });
@@ -459,9 +511,10 @@ function setup(org: string, req: SetupRequest): Promise<TeamStatus> {
       // Repos already there stay ready; only the new one is cloned.
       for (const p of r.projects) if (p.id !== "cal-video") Object.assign(p, { state: "ready", location: p.id });
     }
+    const source = link ? linkSource : orgSource;
     const acc = accepted.find((a) => a.org === "calcom");
-    if (acc) Object.assign(acc, { commit, box, at: iso() });
-    else accepted.push({ org: "calcom", id: "calcom", name: "Cal.com", commit, box, at: iso() });
+    if (acc) Object.assign(acc, { commit, box, at: iso(), key: source.key, source });
+    else accepted.push({ org: "calcom", id: "calcom", name: "Cal.com", commit, box, at: iso(), key: source.key, source });
   }
   const key = `${box}/${r.id}`;
   runs[key] = r;
@@ -505,7 +558,7 @@ function seedDone() {
 export function initTeamMock(c: TeamMockCtx) {
   ctx = c;
   // A box of the new engineer's own, set up for nothing yet.
-  if (params.has("team") || params.has("team-link")) c.addBox(TEAM_BOX, "100.64.0.22:7444");
+  if (params.has("team") || [...params.keys()].some((k) => k.startsWith("team-"))) c.addBox(TEAM_BOX, "100.64.0.22:7444");
   seedDone();
   (window as unknown as Record<string, unknown>).__teamMock = {
     advance(name: string) {
@@ -536,10 +589,10 @@ export function teamLaptopCall(method: string, path: string, body: unknown, dela
   if (method === "POST" && m[2] === "setup") return setup(org, body as SetupRequest);
   if (method === "POST" && m[2] === "retry") {
     const r = body as { box: string; from: string };
-    return retry(r.box, org.toLowerCase(), r.from);
+    return retry(r.box, idOf(org), r.from);
   }
   if (method === "GET" && m[2] === "update") {
-    const acc = accepted.find((a) => a.org === org.toLowerCase());
+    const acc = accepted.find((a) => (a.key ?? a.org) === org.toLowerCase());
     return delay(teamScenario === "update" && acc?.commit === COMMIT.slice(0, 7) ? UPDATE : { update: null });
   }
   return undefined;

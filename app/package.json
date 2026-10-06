@@ -17,7 +17,7 @@
     "check:themes": "node --experimental-strip-types --test src/themes/contrast.test.ts",
     "test:e2e": "tsc --noEmit -p e2e && pnpm -s build && playwright test",
     "smoke:live": "node e2e/live.mjs",
-    "test": "node --experimental-strip-types --test src/lib/layout.test.ts src/lib/groups.test.ts src/lib/screen.test.ts src/lib/removing.test.ts src/lib/conversation-store.test.ts src/lib/wheel.test.ts src/lib/browser-url.test.ts src/lib/terminal.test.ts src/lib/browser-sandbox.test.ts src/lib/requirements.test.ts src/lib/diagnostics.test.ts src/lib/preview-frames.test.ts src/lib/home-layout.test.ts src/lib/file-match.test.ts src/lib/file-marks.test.ts src/lib/syntax-colors.test.ts src/lib/draft-text.test.ts src/lib/derive.test.ts src/lib/tree-model.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/layout.test.ts src/lib/groups.test.ts src/lib/screen.test.ts src/lib/removing.test.ts src/lib/conversation-store.test.ts src/lib/wheel.test.ts src/lib/browser-url.test.ts src/lib/terminal.test.ts src/lib/browser-sandbox.test.ts src/lib/requirements.test.ts src/lib/diagnostics.test.ts src/lib/preview-frames.test.ts src/lib/home-layout.test.ts src/lib/file-match.test.ts src/lib/file-marks.test.ts src/lib/syntax-colors.test.ts src/lib/draft-text.test.ts src/lib/derive.test.ts src/lib/tree-model.test.ts src/lib/team-ref.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

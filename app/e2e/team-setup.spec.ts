@@ -229,3 +229,58 @@ test("the page fits 900px: the plan starts above the fold", async ({ app }) => {
   const first = await step(page, "packages").boundingBox();
   expect(first && first.y + first.height).toBeLessThan(720 - 26);
 });
+
+// A setup can also load from a link to any repo, branch or folder, to try
+// one before <org>/.berth exists. The card names where it came from and
+// claims nothing for the team it is for.
+const LINK = "https://github.com/sean-brydon/berth-kit-calcom/tree/team-setup/team";
+
+async function expectFromLink(page: Page) {
+  await expect(page.getByRole("heading", { name: "Cal.com team setup" })).toBeVisible();
+  await expect(page.getByTestId("team-source")).toContainText("sean-brydon/berth-kit-calcom · team-setup branch · team/");
+  const provenance = page.getByTestId("team-provenance");
+  await expect(provenance).toContainText("A team setup for Cal.com, loaded from sean-brydon's repo, not from calcom/.berth");
+  await expect(page.getByTestId("team-page")).not.toContainText("Published by");
+  await expect(page.getByTestId("team-page").getByText("Verified")).toHaveCount(0);
+  await expect(page.getByTestId("team-commit")).toHaveText("b81d0e4");
+  await expect(checklist(page).getByTestId("team-run")).toHaveText("Set up for Cal.com");
+}
+
+test("a berth://team?src= link opens a setup from a repo's branch, and sets the box up from it", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "calcom", "team-link-src": LINK } });
+  await expect(page.getByTestId("team-page")).toContainText("Opened from a link");
+  await expectFromLink(page);
+  await page.getByTestId("read-every-command").click();
+  await expect(page.getByRole("tab", { name: "team/team.json" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await startRun(page);
+  await expect(page.getByTestId("team-sidebar")).toContainText("Cal.com on sean-dev");
+  await advance(page, "sudo");
+  await expect(repo(page, "cal.com")).toHaveAttribute("data-state", "ready", { timeout: 20_000 });
+});
+
+test("a setup link typed where an org goes opens it too", async ({ app }) => {
+  const { page } = app;
+  await page.goto("/?mock=1&fresh=1");
+  await page.getByLabel("GitHub org").fill(LINK);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expectFromLink(page);
+});
+
+test("a setup link pasted in the command palette opens it", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "calcom" } });
+  await page.getByRole("button", { name: /Search/ }).first().click();
+  await page.keyboard.type("sean-brydon/berth-kit-calcom/tree/team-setup/team");
+  await page.getByRole("option", { name: /Open team setup from link/ }).click();
+  await expectFromLink(page);
+});
+
+test("a link that can't be read says so, and never offers the repo picker", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "calcom", "team-link-src": "github.com/someone/private-setup@main" } });
+  await expect(page.getByRole("heading", { name: "You can't read this setup" })).toBeVisible();
+  await expect(page.getByTestId("team-unreadable")).toContainText("someone/private-setup@main");
+  await expect(page.getByTestId("team-none")).toHaveCount(0);
+});

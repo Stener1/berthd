@@ -138,8 +138,25 @@ export interface OrgRepo {
   has_berth: boolean;
 }
 
+// Where a setup was read: the org's <org>/.berth, or a link to any repo,
+// branch or folder (to try one before <org>/.berth exists). key is what
+// the routes take for it: the org name, or the link.
+export interface TeamSource {
+  kind: "org" | "link";
+  repo: string;
+  ref?: string;
+  ref_kind?: "branch" | "tag" | "commit";
+  path?: string;
+  html_url: string;
+  label: string;
+  key: string;
+}
+
 export interface TeamView {
+  // For a link, the owner of the repo read, not the team the setup is for
+  // (that is setup.org).
   org: TeamOrg;
+  source?: TeamSource;
   state: "found" | "none" | "unreadable" | "no-org";
   repo?: { full_name: string; private: boolean; default_branch: string; html_url: string };
   commit?: { sha: string; short: string; author: string; author_avatar?: string; date: string; message: string };
@@ -176,6 +193,9 @@ export interface TeamStatus {
 
 export interface Accepted {
   org: string;
+  // What the routes take for it again, and where it was read.
+  key?: string;
+  source?: TeamSource;
   id: string;
   name: string;
   commit: string;
@@ -212,19 +232,7 @@ export const teamApi = {
   status: (c: Client, box: string, id: string) => c.box<TeamStatus>(box, "GET", `team/${enc(id)}`),
 };
 
-// An org name as GitHub spells them: letters, digits and single dashes.
-export const validOrg = (s: string) => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(s);
-
-// orgFromInput takes what someone typed or pasted: calcom, @calcom,
-// github.com/calcom, https://github.com/calcom/.berth, berth://team?org=calcom.
-export function orgFromInput(raw: string): string {
-  const s = raw.trim();
-  const link = /^berth:\/\/team\b.*[?&]org=([^&#]+)/i.exec(s);
-  if (link) return decodeURIComponent(link[1]);
-  const gh = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/?#]+)/i.exec(s);
-  if (gh) return gh[1];
-  return s.replace(/^@/, "").replace(/\/.*$/, "");
-}
+export { isLink, teamRef, validOrg } from "@/lib/team-ref";
 
 // ——— live state ———
 
@@ -236,7 +244,7 @@ interface TeamState {
   // What the boxes report, by "box/id".
   runs: Record<string, TeamStatus>;
   accepted: Accepted[];
-  // Newer commits of accepted setups, by org.
+  // Newer commits of accepted setups, by key (the org, or the link).
   updates: Record<string, TeamUpdate>;
   // Repos announced ready, so each says so once.
   announced: Record<string, true>;
@@ -254,6 +262,13 @@ export function putRun(s: TeamStatus) {
 export function runFor(t: Pick<TeamState, "runs">, org: string, box?: string): TeamStatus | undefined {
   const all = Object.values(t.runs).filter((r) => r.org.toLowerCase() === org.toLowerCase() && (!box || r.box === box));
   return all.sort((a, b) => (a.updated < b.updated ? 1 : -1))[0];
+}
+
+// keyOf is what opens a run's page again: the link it was set up from, or
+// its org.
+export function keyOf(t: Pick<TeamState, "accepted">, run: Pick<TeamStatus, "id" | "org" | "box">): string {
+  const a = t.accepted.find((x) => x.id === run.id && x.box === run.box) ?? t.accepted.find((x) => x.id === run.id);
+  return a?.key ?? run.org;
 }
 
 // The run in progress anywhere, for the sidebar and the status bar.
@@ -288,8 +303,9 @@ export function loadTeams(): Promise<void> {
     // Updates of accepted setups, shown in the sidebar until reviewed.
     await Promise.all(
       accepted.map(async (a) => {
-        const u = await teamApi.update(client, a.org).catch(() => null);
-        if (u && "changes" in u) useTeam.setState((t) => ({ updates: { ...t.updates, [a.org]: u } }));
+        const key = a.key ?? a.org;
+        const u = await teamApi.update(client, key).catch(() => null);
+        if (u && "changes" in u) useTeam.setState((t) => ({ updates: { ...t.updates, [key]: u } }));
       }),
     );
   })().finally(() => {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Sheet, SheetDescription, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "@/components/ui/sheet";
 import { bytes } from "@/lib/format";
 import type { TeamView } from "@/lib/team";
+import { whereFrom } from "@/views/team/team-parts";
 import { cn } from "@/lib/utils";
 
 // TeamFiles is "Read every command": the .berth repo's own files at the
@@ -20,7 +21,7 @@ export function TeamFiles({ view, open, onOpenChange }: { view: TeamView; open: 
         <SheetHeader>
           <SheetTitle>Every command, as {view.org.name} wrote it</SheetTitle>
           <SheetDescription>
-            <span className="font-mono">{view.org.login}/.berth</span> at <span className="font-mono">{view.commit?.short}</span>, read only. This is exactly what runs on your box.
+            <span className="font-mono">{whereFrom(view)}</span> at <span className="font-mono">{view.commit?.short}</span>, read only. This is exactly what runs on your box.
           </SheetDescription>
         </SheetHeader>
         <SheetPanel className="flex min-h-0 flex-col gap-3">

@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { Tip } from "@/components/tip";
 import { Spinner } from "@/components/ui/spinner";
 import { ago } from "@/lib/format";
+import { openUrl } from "@/lib/open-url";
 import { type ProjectSource, type RepoState, SOURCE_LABEL, type StepState, type TeamOrg, type TeamView } from "@/lib/team";
 import { cn } from "@/lib/utils";
 
@@ -170,35 +171,61 @@ export function Section({ title, aside, children, className, id }: { title: Reac
   );
 }
 
+// whereFrom names where a setup was read: <org>/.berth, or the link's label.
+export const whereFrom = (view: Pick<TeamView, "org" | "source">) => (view.source?.kind === "link" ? view.source.label : `${view.org.login}/.berth`);
+
 export const card = "divide-y overflow-hidden rounded-xl border bg-card";
 
 // OrgHeader reads like the org's repo on GitHub, so the page is GitHub
 // continued: who publishes this setup, which repo, who changed it last and
-// when, and the commit Berth will use.
+// when, and the commit Berth will use. A setup loaded from a link names the
+// repo and branch it came from instead, and claims nothing for the team it
+// is for: it isn't that team's own .berth.
 export function OrgHeader({ view, compact, badge, from }: { view: TeamView; compact?: boolean; badge?: ReactNode; from?: string }) {
-  const { org, repo, commit } = view;
+  const { org, repo, commit, source } = view;
+  const link = source?.kind === "link";
+  const name = view.setup?.name ?? org.name;
   return (
     <div className="border-b bg-gradient-to-b from-muted/50 to-transparent">
       <div className={cn("mx-auto max-w-6xl px-8 @max-[819px]:px-5", compact ? "py-4" : "pt-6 pb-5")}>
         {from === "link" && (
-          <p className="mb-3 inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-muted-foreground text-xs">
-            Opened from a link · <span className="font-mono">berth://team?org={org.login}</span>
+          <p className="mb-3 inline-flex max-w-full items-center gap-1.5 truncate rounded-full border bg-card px-2.5 py-0.5 text-muted-foreground text-xs">
+            Opened from a link · <span className="truncate font-mono">{link ? `berth://team?src=${source.key}` : `berth://team?org=${org.login}`}</span>
           </p>
         )}
         <div className="flex items-start gap-4 @max-[819px]:gap-3">
           <OrgAvatar org={org} size={compact ? 40 : 52} className="@max-[819px]:size-10!" />
           <div className="min-w-0 flex-1">
-            <p className="flex flex-wrap items-center gap-x-1.5 font-mono text-muted-foreground text-sm">
-              <GitHubMark className="size-3.5 text-foreground/80" />
-              <span>{org.login}</span>
-              <span>/</span>
-              <span className="font-semibold text-foreground">.berth</span>
-              {repo && <span className="ml-1 rounded-full border px-1.5 py-px font-sans text-[10.5px]">{repo.private ? "Private" : "Public"}</span>}
-            </p>
-            <h1 className="mt-1 font-semibold text-2xl tracking-tight @max-[819px]:text-xl">{view.setup?.name ?? org.name} team setup</h1>
+            {link ? (
+              <button
+                type="button"
+                data-testid="team-source"
+                onClick={() => void openUrl(source.html_url)}
+                className="flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 rounded text-left font-mono text-muted-foreground text-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <GitHubMark className="size-3.5 text-foreground/80" />
+                <span className="min-w-0 truncate">{source.label}</span>
+                {repo && <span className="ml-1 rounded-full border px-1.5 py-px font-sans text-[10.5px]">{repo.private ? "Private" : "Public"}</span>}
+              </button>
+            ) : (
+              <p className="flex flex-wrap items-center gap-x-1.5 font-mono text-muted-foreground text-sm">
+                <GitHubMark className="size-3.5 text-foreground/80" />
+                <span>{org.login}</span>
+                <span>/</span>
+                <span className="font-semibold text-foreground">.berth</span>
+                {repo && <span className="ml-1 rounded-full border px-1.5 py-px font-sans text-[10.5px]">{repo.private ? "Private" : "Public"}</span>}
+              </p>
+            )}
+            <h1 className="mt-1 font-semibold text-2xl tracking-tight @max-[819px]:text-xl">{name} team setup</h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-              <span>Published by {org.name} on GitHub</span>
-              {org.verified && (
+              {link ? (
+                <span data-testid="team-provenance">
+                  A team setup for {name}, loaded from {org.login}'s repo, not from <span className="font-mono">{view.setup?.org ?? "its org"}/.berth</span>
+                </span>
+              ) : (
+                <span data-testid="team-provenance">Published by {org.name} on GitHub</span>
+              )}
+              {!link && org.verified && (
                 <Tip label="GitHub has verified a domain this org owns">
                   <span className="inline-flex items-center gap-1">
                     <BadgeCheckIcon className="size-3 text-info" /> Verified

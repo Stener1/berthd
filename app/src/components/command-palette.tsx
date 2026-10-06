@@ -57,6 +57,7 @@ import { openBroadcast, openPromptPicker } from "@/lib/prompts";
 import { setNotificationsOpen } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
+import { isLink, teamRef } from "@/lib/team-ref";
 import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useWorkspaces } from "@/lib/workspaces";
 import { openShortcuts } from "@/components/shortcuts-sheet";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
@@ -175,6 +176,10 @@ export function CommandPalette() {
       { value: "settings", label: "Settings", icon: slot(<SettingsIcon />), run: go(() => st.setView({ kind: "settings" })) },
       { value: "add-box", label: "Add a box…", icon: slot(<ServerIcon />), run: go(openAddBox) },
       { value: "team setup github org berth workspace kit onboarding", label: "Team setup…", icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", from: "palette" })) },
+      // A link to a team setup pasted here opens it.
+      ...(q.includes("/") && teamRef(q) && isLink(teamRef(q)!)
+        ? [{ value: `team setup link ${q}`, label: "Open team setup from link", detail: teamRef(q), search: q, icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", org: teamRef(q), from: "palette" })) }]
+        : []),
       { value: "settings-developer", label: "Developer settings", icon: slot(<CodeIcon />), run: go(() => st.setView({ kind: "settings", section: "developer" })) },
       { value: "customize-sidebar", label: "Customize sidebar…", icon: slot(<SlidersHorizontalIcon />), run: go(() => openCustomize()) },
       { value: "refresh", label: "Refresh everything", icon: slot(<RefreshCwIcon />), run: go(() => void st.refreshAll()) },

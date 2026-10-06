@@ -10,7 +10,7 @@ import { openUrl } from "@/lib/open-url";
 import { durationOf, plural, type PlanStep, type ProjectView, type TeamStatus, type TeamUpdate, type TeamView } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { shortTitle } from "@/views/team/team-rail";
-import { BerthTag, card, Cmds, PrivateTag, Row, Section, SourceTag, StateIcon, SudoTag } from "@/views/team/team-parts";
+import { BerthTag, whereFrom, card, Cmds, PrivateTag, Row, Section, SourceTag, StateIcon, SudoTag } from "@/views/team/team-parts";
 
 // The plan is what you'll get, and while it runs, the progress: the same
 // rows, so what you read is what runs.
@@ -291,10 +291,10 @@ export function Plan(p: PlanProps) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         <button type="button" data-testid="read-every-command" onClick={p.onFiles} className="inline-flex items-center gap-1.5 rounded text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
           <FileCodeIcon className="size-3.5 text-muted-foreground" /> Read every command
-          <span className="text-muted-foreground">· the {view.files?.length ?? 0} files in {view.org.login}/.berth</span>
+          <span className="text-muted-foreground">· the {view.files?.length ?? 0} files in {whereFrom(view)}</span>
         </button>
         {view.repo && (
-          <button type="button" onClick={() => void openUrl(`${view.repo!.html_url}${view.commit ? `/tree/${view.commit.sha}` : ""}`)} className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+          <button type="button" onClick={() => void openUrl(view.source?.kind === "link" ? view.source.html_url : `${view.repo!.html_url}${view.commit ? `/tree/${view.commit.sha}` : ""}`)} className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
             View on GitHub <ExternalLinkIcon className="size-3" />
           </button>
         )}

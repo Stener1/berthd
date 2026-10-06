@@ -12,7 +12,7 @@ import { copyText } from "@/lib/clipboard";
 import { ago, errorMessage } from "@/lib/format";
 import { openUrl } from "@/lib/open-url";
 import { useStore } from "@/lib/store";
-import { type GitHubState, loadTeams, orgFromInput, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, useTeam, validOrg } from "@/lib/team";
+import { type GitHubState, isLink, loadTeams, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, teamRef, useTeam } from "@/lib/team";
 import { focusSession } from "@/lib/workspaces";
 import { finishOnboarding } from "@/views/onboarding/onboarding-state";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
@@ -54,7 +54,7 @@ export function TeamSetupView({ org: initial, from, box: wantBox, update, onBack
       {!firstRun && (
         <ViewHeader
           title="Team setup"
-          description={org ? <span className="font-mono">github.com/{org}</span> : "Set a box up the way your team's are, from your GitHub org"}
+          description={org ? <span className="font-mono">{isLink(org) ? org : `github.com/${org}`}</span> : "Set a box up the way your team's are, from your GitHub org"}
           actions={
             onBack ? (
               <Button size="sm" variant="ghost" onClick={onBack}>
@@ -129,7 +129,7 @@ function ConnectGitHub({ github, org }: { github: GitHubState; org: string }) {
         </span>
         <h1 className="mt-5 font-semibold text-2xl tracking-tight">{missing ? "Install GitHub's CLI first" : "Connect GitHub"}</h1>
         <p className="mt-2 text-muted-foreground leading-relaxed">
-          Berth reads {org ? <span className="font-mono text-foreground">{org}/.berth</span> : "your org's team setup"} and the repos it lists with <span className="font-mono text-foreground">gh</span>, GitHub's own CLI, signed in as you. Private setups and private repos need it. Berth has no GitHub app of its own and keeps no token.
+          Berth reads {org ? <span className="font-mono text-foreground">{isLink(org) ? org : `${org}/.berth`}</span> : "your org's team setup"} and the repos it lists with <span className="font-mono text-foreground">gh</span>, GitHub's own CLI, signed in as you. Private setups and private repos need it. Berth has no GitHub app of its own and keeps no token.
         </p>
         {missing ? (
           <div className="mt-6 rounded-xl border bg-card p-4">
@@ -185,21 +185,23 @@ function ConnectGitHub({ github, org }: { github: GitHubState; org: string }) {
 
 function AskOrg({ onOrg, initial = "", note }: { onOrg(org: string): void; initial?: string; note?: ReactNode }) {
   const [v, setV] = useState(initial);
-  const org = orgFromInput(v);
+  const ref = teamRef(v);
   return (
     <Centered>
       {note}
       <h1 className="font-semibold text-2xl tracking-tight">Which GitHub org?</h1>
-      <p className="mt-2 text-muted-foreground leading-relaxed">If your team publishes a team setup (a repo called .berth), Berth sets your box up the same way the team's are. If not, you pick its repos.</p>
+      <p className="mt-2 text-muted-foreground leading-relaxed">
+        If your team publishes a team setup (a repo called .berth), Berth sets your box up the same way the team's are. If not, you pick its repos. A link to a setup in any repo, branch or folder works too.
+      </p>
       <form
         className="mt-5 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (validOrg(org)) onOrg(org);
+          if (ref) onOrg(ref);
         }}
       >
         <OrgField value={v} onChange={setV} autoFocus />
-        <Button type="submit" disabled={!validOrg(org)}>
+        <Button type="submit" disabled={!ref}>
           Continue <ArrowRightIcon />
         </Button>
       </form>
@@ -207,11 +209,14 @@ function AskOrg({ onOrg, initial = "", note }: { onOrg(org: string): void; initi
   );
 }
 
+// OrgField takes an org, or a link to a setup (owner/repo/tree/branch/folder
+// after the github.com/ it shows, or a whole URL pasted, which hides it).
 export function OrgField({ value, onChange, autoFocus }: { value: string; onChange(v: string): void; autoFocus?: boolean }) {
+  const whole = /github\.com|:\/\//i.test(value);
   return (
     <label className="flex min-w-0 flex-1 items-center rounded-lg border bg-background pl-3 font-mono text-sm shadow-xs/5 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/24 dark:bg-input/32">
-      <span className="text-muted-foreground">github.com/</span>
-      <Input unstyled aria-label="GitHub org" autoFocus={autoFocus} spellCheck={false} autoCapitalize="off" placeholder="your-org" value={value} onChange={(e) => onChange(e.target.value)} className="font-mono [&_input]:pl-0.5" />
+      {!whole && <span className="shrink-0 text-muted-foreground">github.com/</span>}
+      <Input unstyled aria-label="GitHub org or link" autoFocus={autoFocus} spellCheck={false} autoCapitalize="off" placeholder="your-org" value={value} onChange={(e) => onChange(e.target.value)} className="font-mono [&_input]:pl-0.5" />
     </label>
   );
 }
@@ -278,7 +283,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   if (view.state === "no-org") {
     return <AskOrg onOrg={onOrg} note={<p className="mb-5 rounded-lg border bg-muted/40 px-3 py-2 text-sm">GitHub has no org or user called <span className="font-mono">{org}</span> that {github.login} can see.</p>} />;
   }
-  if (view.state === "unreadable") return <Unreadable view={view} github={github} onCheck={() => setChecks((n) => n + 1)} onOrg={onOrg} />;
+  if (view.state === "unreadable") return <Unreadable view={view} link={isLink(org) ? org : undefined} github={github} onCheck={() => setChecks((n) => n + 1)} onOrg={onOrg} />;
 
   const boxes = online.map((b) => {
     const n = boxData[b.name]?.locations?.length ?? 0;
@@ -286,6 +291,8 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
     return { name: b.name, detail: [os, n ? `${n} ${n === 1 ? "project" : "projects"}` : "new"].filter(Boolean).join(" · ") };
   });
   const sel = picked ?? new Set<string>();
+  // What the routes take for this setup again: the org, or the link.
+  const key = view.source?.key ?? org;
   const name = view.setup?.name ?? view.org.name;
 
   const start = async () => {
@@ -302,12 +309,12 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
         view.state === "none"
           ? { box, repos: [...sel] }
           : { box, commit: updating ? view.update!.to : view.commit?.sha, projects: view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).map((x) => x.id), keys: byProject };
-      const s = await teamApi.setup(client, org, req);
+      const s = await teamApi.setup(client, key, req);
       putRun(s);
       if (updating) {
         useTeam.setState((t) => {
           const updates = { ...t.updates };
-          delete updates[org];
+          delete updates[key];
           return { updates };
         });
       }
@@ -317,7 +324,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       // From the first run, the app around it comes now: the sidebar and the
       // status bar show the setup as it goes.
       finishOnboarding();
-      useStore.getState().setView({ kind: "team", org, box });
+      useStore.getState().setView({ kind: "team", org: key, box });
       void useStore.getState().refreshBox(box, ["sessions", "locations"]);
     } catch (err) {
       toastManager.add({ type: "error", title: `Couldn't start ${name}'s setup`, description: errorMessage(err) });
@@ -328,7 +335,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const retry = async (fromStep: string) => {
     if (!client || !run) return;
     try {
-      putRun(await teamApi.retry(client, org, run.box, fromStep));
+      putRun(await teamApi.retry(client, key, run.box, fromStep));
     } catch (err) {
       toastManager.add({ type: "error", title: "Couldn't retry", description: errorMessage(err) });
     }
@@ -401,25 +408,26 @@ function toggled(p: Set<string> | undefined, id: string, on: boolean) {
   return n;
 }
 
-// Unreadable: a link named this org's setup, but GitHub won't show this
-// account its .berth repo. Access is the check: there is no separate
-// membership step.
-function Unreadable({ view, github, onCheck, onOrg }: { view: View; github: GitHubState; onCheck(): void; onOrg(org: string): void }) {
+// Unreadable: a link named this org's setup (or a setup in another repo),
+// but GitHub won't show it to this account. Access is the check: there is
+// no separate membership step, and never a repo picker for a link.
+function Unreadable({ view, link, github, onCheck, onOrg }: { view: View; link?: string; github: GitHubState; onCheck(): void; onOrg(org: string): void }) {
   const [other, setOther] = useState(false);
+  const where = view.source?.kind === "link" ? view.source.label : (link ?? `${view.org.login}/.berth`);
   return (
     <Centered>
       <div data-testid="team-unreadable" className="flex items-center gap-3">
         <OrgAvatar org={view.org} size={44} />
         <div>
-          <p className="flex items-center gap-1.5 font-mono text-muted-foreground text-sm">
-            <GitHubMark className="size-3.5" /> {view.org.login} / <span className="font-semibold text-foreground">.berth</span>
+          <p className="flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground text-sm">
+            <GitHubMark className="size-3.5 shrink-0" /> <span className="truncate">{where}</span>
           </p>
           <p className="font-medium">{view.org.name}</p>
         </div>
       </div>
       <h1 className="mt-6 font-semibold text-2xl tracking-tight">You can't read this setup</h1>
       <p className="mt-2 text-muted-foreground leading-relaxed">
-        GitHub doesn't show <span className="font-mono text-foreground">{view.org.login}/.berth</span> to <span className="text-foreground">{github.login}</span>. It's private, and this account hasn't been given access, or it isn't there.
+        GitHub doesn't show <span className="break-all font-mono text-foreground">{where}</span> to <span className="text-foreground">{github.login}</span>. It's private, and this account hasn't been given access, or it isn't there{link ? ": check the branch and folder in the link" : ""}.
       </p>
       <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm">
         <li>Ask an admin of {view.org.name} on GitHub for access to its repos (your team's onboarding channel is the place).</li>
@@ -434,7 +442,7 @@ function Unreadable({ view, github, onCheck, onOrg }: { view: View; github: GitH
           {view.org.login} on GitHub <ExternalLinkIcon />
         </Button>
         <Button variant="ghost" onClick={() => setOther(true)}>
-          Another org
+          Another org or link
         </Button>
       </div>
       <p className="mt-4 text-muted-foreground text-xs">Signed in to gh as {github.login}. To use another account, run gh auth login again in a terminal.</p>
@@ -449,17 +457,17 @@ function Unreadable({ view, github, onCheck, onOrg }: { view: View; github: GitH
 
 function OrgSwitch({ onOrg }: { onOrg(org: string): void }) {
   const [v, setV] = useState("");
-  const org = orgFromInput(v);
+  const ref = teamRef(v);
   return (
     <form
       className="flex gap-2"
       onSubmit={(e) => {
         e.preventDefault();
-        if (validOrg(org)) onOrg(org);
+        if (ref) onOrg(ref);
       }}
     >
       <OrgField value={v} onChange={setV} autoFocus />
-      <Button type="submit" disabled={!validOrg(org)}>
+      <Button type="submit" disabled={!ref}>
         Continue
       </Button>
     </form>
