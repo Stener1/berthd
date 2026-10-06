@@ -169,6 +169,9 @@ type sessTrack struct {
 	// Reconcile marks a turn left open across a restart, for the screen to
 	// settle if no hook does.
 	Reconcile bool `json:"reconcile,omitempty"`
+	// SoftWait marks a wait turn check read into a finished turn: it shows
+	// as waiting, but the agent takes prompts as if finished.
+	SoftWait bool `json:"soft_wait,omitempty"`
 
 	inbox []inboxItem
 	// screen polling, owned by the poller
@@ -390,7 +393,7 @@ func (t *Turns) newTurn(s *sessTrack, state, origin string) *Turn {
 }
 
 func (s *sessTrack) set(state string, e events.Event) {
-	s.State, s.Since, s.Seq = state, e.Time, e.Seq
+	s.State, s.Since, s.Seq, s.SoftWait = state, e.Time, e.Seq, false
 }
 
 func (s *sessTrack) end(tr *Turn, state string, e events.Event) {
@@ -642,6 +645,11 @@ func (t *Turns) agentEvent(e events.Event) {
 	cur := s.current()
 	switch e.Type {
 	case adapters.Ready:
+		// Turn check's "unfinished, not yours": only on the turn end it was
+		// about, as for its waits below.
+		if source == "turncheck" && (s.State != "finished" || s.Seq != seqOf(e.Data["seq"])) {
+			return
+		}
 		if cur == nil {
 			s.set("idle", e)
 		}
@@ -690,6 +698,16 @@ func (t *Turns) agentEvent(e events.Event) {
 		}
 		s.set("running", e)
 	case adapters.Waiting:
+		if source == "turncheck" {
+			// A verdict on a finished turn counts only while that turn's
+			// end is still the last thing the session did.
+			if cur != nil || s.State != "finished" || s.Seq != seqOf(e.Data["seq"]) {
+				return
+			}
+			s.set("waiting", e)
+			s.SoftWait = true
+			break
+		}
 		if cur != nil {
 			if cur.State != "waiting" {
 				cur.Waits = append(cur.Waits, Span{Start: e.Time, Reason: str(e.Data, "reason")})
@@ -730,6 +748,18 @@ func (t *Turns) agentEvent(e events.Event) {
 		t.kickInbox()
 	}
 	t.bump()
+}
+
+// seqOf reads a Seq from event data, as published (int64) or read back
+// from the journal (float64).
+func seqOf(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return -1
 }
 
 // FirstPrompt says whether this is the first prompt the ledger has seen for
@@ -826,6 +856,16 @@ func (s *sessTrack) snapshot() SessionState {
 		out.Turn = s.Turns[n-1].ID
 	}
 	return out
+}
+
+// SoftWait says whether a session waits only by turn check's reading, so a
+// prompt typed now starts a turn rather than answering a question.
+func (t *Turns) SoftWait(name string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.init()
+	s := t.sess[name]
+	return s != nil && s.State == "waiting" && s.SoftWait
 }
 
 // State is a session's state, if the ledger knows it.
@@ -1207,10 +1247,10 @@ func (t *Turns) Ready(name string) bool {
 	return s.State == "" || s.idle()
 }
 
-// idle says whether the agent can take a prompt: idle or finished, with no
-// turn open.
+// idle says whether the agent can take a prompt: idle or finished (or
+// waiting only by turn check's reading), with no turn open.
 func (s *sessTrack) idle() bool {
-	if s.State != "idle" && s.State != "finished" {
+	if s.State != "idle" && s.State != "finished" && !(s.State == "waiting" && s.SoftWait) {
 		return false
 	}
 	for _, tr := range s.Turns {
