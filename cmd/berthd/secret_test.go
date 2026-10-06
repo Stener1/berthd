@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -99,4 +100,61 @@ esac
 	if strings.Contains(string(raw), "wrapped-secret-value") {
 		t.Fatalf("the report carries a value: %s", raw)
 	}
+}
+
+// berthd secret signin runs op signin in the terminal and keeps the
+// session for berthd's reads; --check only says whether it can read now.
+func TestSecretSigninKeepsOpsSession(t *testing.T) {
+	dir := t.TempDir()
+	op := filepath.Join(dir, "op")
+	os.WriteFile(op, []byte(`#!/bin/sh
+case "$1" in
+whoami) [ "$OP_SESSION_abc" = tok-123 ] && { echo dev@acme.test; exit 0; }
+  echo '[ERROR] 2024/01/01 00:00:00 account is not signed in' >&2; exit 1 ;;
+signin)
+  printf 'Enter the password for dev@acme.test at my.1password.com: ' >&2
+  read -r pw
+  [ "$pw" = op-pass ] || { echo '[ERROR] incorrect password' >&2; exit 1; }
+  echo 'export OP_SESSION_abc="tok-123"'
+  echo "# This command is meant to be used with your shell's eval function." ;;
+esac
+`), 0o755)
+	t.Setenv("BERTH_OP", op)
+	t.Setenv("BERTH_USER_DIR", t.TempDir())
+	b := boxHome{dir: t.TempDir()}
+	var code exitCode
+	if err := secretSignin(b, []string{"--check"}); !errors.As(err, &code) || code != 1 {
+		t.Fatalf("check before: %v", err)
+	}
+	withStdin(t, "op-pass\n", func() {
+		if err := secretSignin(b, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	got, _ := os.ReadFile(b.opSessionFile())
+	if !strings.Contains(string(got), "\nOP_SESSION_abc=tok-123\n") {
+		t.Fatalf("session file: %q", got)
+	}
+	if err := secretSignin(b, []string{"--check"}); err != nil {
+		t.Fatalf("check after: %v", err)
+	}
+	// Without op, it says how to get it.
+	t.Setenv("BERTH_OP", filepath.Join(dir, "nope"))
+	if err := secretSignin(b, nil); !errors.As(err, &code) || code != 127 {
+		t.Fatalf("no op: %v", err)
+	}
+}
+
+func withStdin(t *testing.T, input string, f func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteString(input)
+	w.Close()
+	old := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = old; r.Close() }()
+	f()
 }

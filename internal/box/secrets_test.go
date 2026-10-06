@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -277,7 +278,7 @@ func TestARecoveredSecretIsAnnounced(t *testing.T) {
 	ch, stop := b.Events.Subscribe()
 	defer stop()
 	b.WorktreeEnv(ctx, "cal", wt)
-	if e := waitEvent(t, ch, "secret.failed", "FLAKY"); !strings.Contains(e.Error, "not currently signed in") {
+	if e := waitEvent(t, ch, "secret.failed", "FLAKY"); !strings.Contains(e.Error, "1Password isn't signed in on") || !strings.Contains(e.Error, "berthd secret signin") {
 		t.Fatalf("event = %+v", e)
 	}
 	os.WriteFile(filepath.Join(filepath.Dir(calls), "flaky-ok"), nil, 0o600)
@@ -559,5 +560,68 @@ func TestSessionsWithoutSecretsStartAsTheyAlwaysDid(t *testing.T) {
 	}
 	if got, err := readCommand(b.Sessions.commandPath("plain")); err != nil || got != "sleep 30" {
 		t.Fatalf("command file = %q, %v", got, err)
+	}
+}
+
+// op asks at its own terminal (it opens /dev/tty) when it isn't signed in:
+// "add an account? [Y/n]". berthd runs it with no terminal at all, so a
+// read fails at once, saying how to sign in, and never waits for a person.
+func TestOpNeverAsksAndSaysHowToSignIn(t *testing.T) {
+	dir := t.TempDir()
+	op := filepath.Join(dir, "op")
+	os.WriteFile(op, []byte(`#!/bin/sh
+if [ -n "$OP_SESSION_abc" ]; then
+  [ "$1 $2" = "read op://dev/db/password" ] && { printf 'from-the-session'; exit 0; }
+  [ "$1" = whoami ] && { echo "dev@acme.test"; exit 0; }
+fi
+if (exec 3<>/dev/tty) 2>/dev/null; then
+  echo "asked" >> "`+dir+`/asked"
+  printf 'No accounts configured for use with 1Password CLI. Do you want to add an account manually now? [Y/n] ' >/dev/tty
+  read -r answer </dev/tty
+fi
+echo '[ERROR] 2024/01/01 00:00:00 no accounts configured for use with 1Password CLI' >&2
+exit 1
+`), 0o755)
+	session := filepath.Join(dir, "box", "op-session")
+	s := &Secrets{Op: op, SessionFile: session, Box: "devbox", Timeout: 5 * time.Second}
+	start := time.Now()
+	_, err := s.Resolve(context.Background(), "op://dev/db/password", nil, true)
+	if err == nil || !errors.Is(err, ErrOpSignedOut) || err.Error() != "1Password isn't signed in on devbox: sign in from Team setup or run `berthd secret signin` on the box" {
+		t.Fatalf("got %v", err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("op waited %s", time.Since(start))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "asked")); err == nil {
+		t.Fatal("op had a terminal to ask on")
+	}
+	// Whatever terminal berthd's caller has (a service's, through berthd
+	// secret exec), op runs in a session of its own, without it.
+	if c := s.opCommand(context.Background(), op, nil, "read", "x"); c.SysProcAttr == nil || !c.SysProcAttr.Setsid || c.Stdin != nil {
+		t.Fatalf("op could reach a terminal: %+v", c.SysProcAttr)
+	}
+	if _, err := s.OpWhoami(context.Background(), nil); !errors.Is(err, ErrOpSignedOut) {
+		t.Fatalf("whoami: %v", err)
+	}
+	// berthd secret signin keeps op signin's session; every read then
+	// passes it to op.
+	vars := ParseOpSignin("export OP_SESSION_abc=\"tok-123\"\n# This command is meant to be used with your shell's eval function.\n")
+	if len(vars) != 1 || vars[0] != "OP_SESSION_abc=tok-123" {
+		t.Fatalf("parsed %v", vars)
+	}
+	if err := SaveOpSession(session, append(vars, "PATH=/evil")); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(session); st.Mode().Perm() != 0o600 {
+		t.Fatalf("session file mode %v", st.Mode())
+	}
+	if got := ReadOpSession(session); len(got) != 1 || got[0] != "OP_SESSION_abc=tok-123" {
+		t.Fatalf("read %v", got)
+	}
+	if v, err := s.Resolve(context.Background(), "op://dev/db/password", nil, true); err != nil || v != "from-the-session" {
+		t.Fatalf("with the session: %q %v", v, err)
+	}
+	if who, err := s.OpWhoami(context.Background(), nil); err != nil || who != "dev@acme.test" {
+		t.Fatalf("whoami: %q %v", who, err)
 	}
 }

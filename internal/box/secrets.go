@@ -13,10 +13,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/statefile"
 	"github.com/sean-brydon/berthd/internal/wire"
 )
 
@@ -92,6 +94,23 @@ var opFolders = []string{"~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"}
 
 var errNoOp = errors.New("the 1Password CLI (op) is not installed on this box")
 
+// ErrOpSignedOut is a read that failed because op is not signed in on the
+// box: no account added yet, or a sign-in that ended.
+var ErrOpSignedOut = errors.New("1Password isn't signed in")
+
+// opSignedOut matches what op says when it has no account or session to
+// read with, rather than prompting (it can't: berthd runs it without a
+// terminal).
+var opSignedOut = regexp.MustCompile(`(?i)(not (currently )?signed in|no accounts? (configured|found)|add an account|sign ?in to (your|an) account|session (has )?expired|authentication required|account is not signed|you are not signed in|(op|1password) signin|could not connect to the 1password app|connecting to desktop app)`)
+
+// signedOutError says what to do, naming the box.
+func signedOutError(box string) error {
+	if box == "" {
+		box, _ = os.Hostname()
+	}
+	return fmt.Errorf("%w on %s: sign in from Team setup or run `berthd secret signin` on the box", ErrOpSignedOut, box)
+}
+
 // Secrets resolves references and keeps what it resolved, briefly.
 type Secrets struct {
 	// Op is the 1Password CLI to run; empty uses $BERTH_OP, or finds op on
@@ -101,6 +120,12 @@ type Secrets struct {
 	// is, so a broken reference does not run op for every hook. Timeout
 	// bounds one op read.
 	TTL, FailTTL, Timeout time.Duration
+	// SessionFile keeps the op session `berthd secret signin` made
+	// (OP_SESSION_<account>=<token>), which every read passes to op. Empty
+	// reads none.
+	SessionFile string
+	// Box names the box in errors; empty is the hostname.
+	Box string
 
 	mu       sync.Mutex
 	cache    map[string]*secretEntry
@@ -230,6 +255,9 @@ func (s *Secrets) lookup(ctx context.Context, ref string, opEnv []string) (strin
 	return "", fmt.Errorf("no provider for %s:// references", scheme)
 }
 
+// OpBinary is the 1Password CLI these secrets run.
+func (s *Secrets) OpBinary() (string, error) { return s.opBinary() }
+
 func (s *Secrets) opBinary() (string, error) {
 	op := s.Op
 	if op == "" {
@@ -261,7 +289,8 @@ func (s *Secrets) opBinary() (string, error) {
 }
 
 // opRead runs `op read REF`. op signs in with OP_SERVICE_ACCOUNT_TOKEN when
-// it is set, or the box user's own op session otherwise.
+// it is set, or the session `berthd secret signin` kept, or the box user's
+// own op otherwise. It never asks: see opCommand.
 func (s *Secrets) opRead(ctx context.Context, ref string, opEnv []string) (string, error) {
 	bin, err := s.opBinary()
 	if err != nil {
@@ -270,9 +299,7 @@ func (s *Secrets) opRead(ctx context.Context, ref string, opEnv []string) (strin
 	timeout := orDefault(s.Timeout, secretTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "read", ref)
-	cmd.Env = append(os.Environ(), opEnv...)
-	cmd.WaitDelay = time.Second
+	cmd := s.opCommand(ctx, bin, opEnv, "read", ref)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -281,6 +308,9 @@ func (s *Secrets) opRead(ctx context.Context, ref string, opEnv []string) (strin
 		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
+		}
+		if opSignedOut.MatchString(stderr.String()) {
+			return "", signedOutError(s.Box)
 		}
 		msg := opMessage(stderr.String())
 		if out := strings.TrimSpace(stdout.String()); out != "" && strings.Contains(msg, out) {
@@ -299,6 +329,107 @@ func (s *Secrets) opRead(ctx context.Context, ref string, opEnv []string) (strin
 	v = strings.TrimSuffix(v, "\n")
 	v = strings.TrimSuffix(v, "\r")
 	return v, nil
+}
+
+// opCommand runs op with no terminal to ask on. Without one it can't sit at
+// "add an account? [Y/n]" or a password prompt in a service's terminal, as
+// it did when it inherited the terminal it ran in: it opens /dev/tty itself,
+// so stdin alone is not enough. In a session of its own it has no
+// controlling terminal, and says it isn't signed in instead.
+func (s *Secrets) opCommand(ctx context.Context, bin string, opEnv []string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(append(os.Environ(), opEnv...), ReadOpSession(s.SessionFile)...)
+	cmd.Stdin = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.WaitDelay = time.Second
+	return cmd
+}
+
+// OpWhoami checks op can read with what berthd gives it, without asking:
+// nil when it is signed in (a service account, a kept session, the
+// desktop app), ErrOpSignedOut when not, or why it couldn't tell.
+func (s *Secrets) OpWhoami(ctx context.Context, opEnv []string) (string, error) {
+	bin, err := s.opBinary()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, orDefault(s.Timeout, secretTimeout))
+	defer cancel()
+	cmd := s.opCommand(ctx, bin, opEnv, "whoami")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("op whoami timed out")
+		}
+		if msg := stderr.String(); opSignedOut.MatchString(msg) || msg == "" {
+			return "", signedOutError(s.Box)
+		}
+		return "", fmt.Errorf("op: %s", opMessage(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+var opSessionVar = regexp.MustCompile(`^OP_SESSION_[A-Za-z0-9_]{1,64}$`)
+
+// ReadOpSession is the session variables kept in file, as KEY=VALUE.
+func ReadOpSession(file string) []string {
+	if file == "" {
+		return nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && opSessionVar.MatchString(k) && v != "" {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
+}
+
+// opExport reads `op signin`'s output: export OP_SESSION_<id>="<token>".
+var opExport = regexp.MustCompile(`(?m)^\s*(?:export\s+)?(OP_SESSION_[A-Za-z0-9_]{1,64})="?([^"\s]+)"?\s*;?\s*$`)
+
+// ParseOpSignin finds the session variables in `op signin`'s output.
+func ParseOpSignin(out string) []string {
+	var vars []string
+	for _, m := range opExport.FindAllStringSubmatch(out, -1) {
+		vars = append(vars, m[1]+"="+m[2])
+	}
+	return vars
+}
+
+// SaveOpSession keeps session variables for berthd's reads, readable by
+// the box's user only.
+func SaveOpSession(file string, vars []string) error {
+	var b strings.Builder
+	b.WriteString("# 1Password CLI sessions from `berthd secret signin`; op ends one after 30 minutes unused.\n")
+	for _, kv := range vars {
+		if k, _, ok := strings.Cut(kv, "="); ok && opSessionVar.MatchString(k) {
+			b.WriteString(kv + "\n")
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return err
+	}
+	return statefile.Write(file, []byte(b.String()))
+}
+
+// LoadOpEnv is the 1Password CLI's settings from the box's environment
+// file (OP_SERVICE_ACCOUNT_TOKEN, OP_ACCOUNT).
+func LoadOpEnv(envFile string) []string {
+	if envFile == "" {
+		return nil
+	}
+	e, err := loadBoxEnv(envFile)
+	if err != nil {
+		return nil
+	}
+	return opEnvOf(e.Env)
 }
 
 var opLogPrefix = regexp.MustCompile(`^\[ERROR\]\s+\d{4}/\d\d/\d\d \d\d:\d\d:\d\d\s*`)

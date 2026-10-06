@@ -28,7 +28,8 @@ type Kit struct {
 	// Match suggests the projects a kit is for.
 	Match KitMatch `json:"match,omitempty"`
 	// Requires lists tools the box needs; missing ones are reported, not
-	// fatal, since a setup script may install them.
+	// fatal, since a setup script may install them. They are looked for as
+	// the box user's login shell finds them (logintools.go).
 	Requires []KitRequirement `json:"requires,omitempty"`
 	Config   RepoConfig       `json:"config"`
 	// Files are small files carried in kit.json itself, path → content, so
@@ -151,12 +152,8 @@ func (b *Box) InstallKit(ctx context.Context, location string, in KitInstall) (K
 	}
 	res := KitResult{Kit: installed, Warnings: []string{}}
 	for _, r := range k.Requires {
-		if _, err := toolPath(r.Tool); err != nil {
-			w := r.Tool + " is not installed on this box"
-			if r.Hint != "" {
-				w += ": " + r.Hint
-			}
-			res.Warnings = append(res.Warnings, w)
+		if _, ok := findTool(ctx, r.Tool); !ok {
+			res.Warnings = append(res.Warnings, toolWarning(r.Tool, r.Hint))
 		}
 	}
 	return res, nil

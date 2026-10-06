@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ const webConfig = `{"setup":"pnpm install","services":[{"name":"web","run":"pnpm
 
 func acmeTeamJSON(kitLink string) string {
 	return `{"schema":"berth.team/v1","id":"acme","name":"Acme","org":"acme","contact":"#onboarding",
- "box":{"script":"box/setup.sh","steps":[{"id":"tools","title":"Tools","detail":"jq","sudo":true},{"id":"db","title":"Database"}]},
+ "box":{"script":"box/setup.sh","settings":{"PG_VERSION":"16","$why":"a comment"},"steps":[{"id":"tools","title":"Tools","detail":"jq","sudo":true},{"id":"db","title":"Database"}]},
  "projects":[
   {"id":"web","repo":"acme/web","required":true,"kit":"./kits/web","first_task":"Fix a bug"},
   {"id":"api","repo":"acme/api","kit":"./kits/api","init":"box/init-api.sh"},
@@ -165,8 +166,10 @@ func TestTeamViewReadsTheSetupAndChecksAccessPerRepo(t *testing.T) {
 		t.Fatalf("keys: %+v", v.Keys)
 	}
 	// The plan has the team's steps, then Berth's own GitHub sign-in on the
-	// box, each with its exact commands.
-	if len(v.Steps) != 3 || v.Steps[0].ID != "tools" || !v.Steps[0].Sudo || v.Steps[2].ID != "github" || !v.Steps[2].Berth {
+	// box and, since the shared keys are op:// references, its 1Password
+	// sign-in, each with its exact commands.
+	if len(v.Steps) != 4 || v.Steps[0].ID != "tools" || !v.Steps[0].Sudo || v.Steps[2].ID != "github" || !v.Steps[2].Berth ||
+		v.Steps[3].ID != "1password" || !v.Steps[3].Berth || !strings.Contains(strings.Join(v.Steps[3].Commands, " "), "berthd secret signin") {
 		t.Fatalf("steps: %+v", v.Steps)
 	}
 	if !strings.Contains(strings.Join(v.Steps[0].Commands, "\n"), "sudo apt-get install -y jq") {
@@ -329,11 +332,18 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	var got box.TeamBundle
 	b.server.Handle("POST /v1/team", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
+		got = box.TeamBundle{}
 		json.Unmarshal(raw, &got)
 		json.NewEncoder(w).Encode(box.TeamStatus{ID: got.ID, Phase: "steps", Steps: []box.TeamStepStatus{}, Projects: []box.TeamProjectStatus{}, KeysSet: []string{}})
 	}))
 	var retried string
+	var noTmux atomic.Bool
 	b.server.Handle("POST /v1/team/{id}/retry", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if noTmux.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tmux is not installed on this box, and Berth runs the team setup's steps in a terminal there (tmux): install it with `sudo apt install tmux`, then set up again", "code": "tmux_missing"})
+			return
+		}
 		raw, _ := io.ReadAll(r.Body)
 		retried = r.PathValue("id") + " " + string(raw)
 		json.NewEncoder(w).Encode(box.TeamStatus{ID: r.PathValue("id"), Phase: "steps"})
@@ -354,8 +364,12 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("setup: %d %s", code, body)
 	}
-	if got.ID != "acme" || got.Commit != v.Commit.SHA || got.Script != "box/setup.sh" || len(got.Steps) != 2 || !got.GitHub || len(got.Files) != 6 {
+	if got.ID != "acme" || got.Commit != v.Commit.SHA || got.Script != "box/setup.sh" || len(got.Steps) != 2 || !got.GitHub || !got.OnePassword || len(got.Files) != 6 {
 		t.Fatalf("bundle: %+v", got)
+	}
+	// box.settings go to the box (its comments don't).
+	if len(got.Settings) != 1 || got.Settings["PG_VERSION"] != "16" {
+		t.Fatalf("settings: %v", got.Settings)
 	}
 	plans := map[string]box.TeamProjectPlan{}
 	for _, p := range got.Projects {
@@ -392,9 +406,22 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	// The picker: an org without .berth sets up the repos chosen.
 	g.Org("northwind", "Northwind", false)
 	g.Repo("northwind/web", map[string]string{".berth/config.json": `{"ports":2}`}, teamtest.Repo{})
-	code, body = uiPost(t, a, "/v1/team/northwind/setup", tok, TeamSetupRequest{Box: boxName, Repos: []string{"northwind/web"}})
-	if code != 200 || got.ID != "northwind" || len(got.Projects) != 1 || got.Projects[0].Source != "repo" || got.Projects[0].TrustHash == "" || len(got.Steps) != 0 || !got.GitHub {
+	g.Repo("northwind/shop.app", map[string]string{"README.md": "shop\n"}, teamtest.Repo{})
+	code, body = uiPost(t, a, "/v1/team/northwind/setup", tok, TeamSetupRequest{Box: boxName, Repos: []string{"northwind/web", "northwind/shop.app"}})
+	if code != 200 || got.ID != "northwind" || len(got.Projects) != 2 || got.Projects[0].Source != "repo" || got.Projects[0].TrustHash == "" || len(got.Steps) != 0 || !got.GitHub || got.OnePassword {
 		t.Fatalf("picker: %d %s %+v", code, body, got)
+	}
+	// A repository whose name can't be part of a URL gets a project id
+	// that can, and keeps its folder's name.
+	if p := got.Projects[1]; p.ID != "shop-app" || p.Path != "~/code/shop.app" || p.Repo != "northwind/shop.app" {
+		t.Fatalf("shop.app: %+v", p)
+	}
+	// A box without tmux says so with its code, so the app can say how to
+	// install it.
+	noTmux.Store(true)
+	code, body = uiPost(t, a, "/v1/team/acme/retry", tok, map[string]string{"from": "db"})
+	if code != http.StatusServiceUnavailable || !strings.Contains(body, `"code":"tmux_missing"`) || !strings.Contains(body, "sudo apt install tmux") {
+		t.Fatalf("tmux missing: %d %s", code, body)
 	}
 }
 
@@ -476,6 +503,7 @@ func TestSetupFromALinkThroughTheRoutes(t *testing.T) {
 	var got box.TeamBundle
 	b.server.Handle("POST /v1/team", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
+		got = box.TeamBundle{}
 		json.Unmarshal(raw, &got)
 		json.NewEncoder(w).Encode(box.TeamStatus{ID: got.ID, Phase: "steps"})
 	}))

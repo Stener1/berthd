@@ -65,7 +65,7 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 		}
 	}
 	tb := box.TeamBundle{ID: r.setup.ID, Name: r.setup.Name, Org: r.setup.Org, Commit: r.commit.SHA, Script: r.setup.Box.Script,
-		Steps: r.setup.Box.Steps, Files: map[string]string{}, Projects: []box.TeamProjectPlan{}}
+		Steps: r.setup.Box.Steps, Settings: r.setup.Box.Settings, Files: map[string]string{}, Projects: []box.TeamProjectPlan{}}
 	if tb.Steps == nil {
 		tb.Steps = []team.Step{}
 	}
@@ -115,6 +115,10 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 		tb.Projects = append(tb.Projects, plan)
 	}
 	tb.GitHub = len(tb.Projects) > 0
+	// The box reads the shared keys' op:// references with its own op,
+	// which Berth signs in as a step, so nothing asks in a service's
+	// terminal later.
+	tb.OnePassword = tb.GitHub && r.setup.UsesOnePassword()
 	return tb, &r, cleanup, nil
 }
 
@@ -148,11 +152,14 @@ func (a *Agent) repoBundle(ctx context.Context, g ghCLI, org string, repos []str
 			return tb, err
 		}
 		name := strings.SplitN(r.FullName, "/", 2)[1]
-		if seen[name] {
+		// The project's id names it on the box, in every worktree's URL:
+		// cal.com is cal-com there, cloned to ~/code/cal.com all the same.
+		id := team.URLSafeName(name)
+		if id == "" || seen[id] {
 			continue
 		}
-		seen[name] = true
-		plan := box.TeamProjectPlan{ID: name, Repo: r.FullName, URL: "https://github.com/" + r.FullName + ".git", Path: "~/code/" + name, Source: "none"}
+		seen[id] = true
+		plan := box.TeamProjectPlan{ID: id, Repo: r.FullName, URL: "https://github.com/" + r.FullName + ".git", Path: "~/code/" + name, Source: "none"}
 		if raw, _, err := g.file(ctx, r.FullName, box.RepoConfigFile, ""); err == nil {
 			plan.Source, plan.TrustHash = "repo", sha256Hex(raw)
 		}
@@ -205,7 +212,7 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 		}
 		var st box.TeamStatus
 		if err := a.postToBox(r.Context(), req.Box, http.MethodPost, "/v1/team", tb, &st); err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
+			writeBoxError(w, err)
 			return
 		}
 		if read != nil {
@@ -241,11 +248,21 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 		a.sync()
 		var st box.TeamStatus
 		if err := a.postToBox(r.Context(), req.Box, http.MethodPost, "/v1/team/"+url.PathEscape(id)+"/retry", map[string]string{"from": req.From}, &st); err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
+			writeBoxError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, st)
 	})
+}
+
+// writeBoxError passes on a box's refusal. A box without tmux keeps its
+// code, so the app shows how to install it rather than the bare error.
+func writeBoxError(w http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "tmux is not installed") {
+		writeCoded(w, http.StatusServiceUnavailable, err.Error(), box.CodeTmuxMissing)
+		return
+	}
+	writeError(w, http.StatusBadGateway, err.Error())
 }
 
 func sha256Hex(b []byte) string {

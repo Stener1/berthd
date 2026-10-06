@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/statefile"
 	"github.com/sean-brydon/berthd/internal/team"
 )
@@ -52,6 +53,9 @@ type TeamRunner struct {
 	// GH is the gh the steps' terminal runs; empty is the one on its PATH.
 	// Tests give a fake, since a login shell's PATH may put another first.
 	GH string
+	// Berthd is the berthd the 1Password step signs op in with; empty is
+	// this one. Tests give a fake.
+	Berthd string
 
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -141,9 +145,12 @@ func validateBundle(tb *TeamBundle) error {
 		}
 		tb.Script = c
 	}
+	if err := team.Settings(tb.Settings).Validate(); err != nil {
+		return badRequest("%v", err)
+	}
 	seen := map[string]bool{}
 	for _, s := range tb.Steps {
-		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(s.ID) || s.ID == team.GitHubStep || seen[s.ID] {
+		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(s.ID) || s.ID == team.GitHubStep || s.ID == team.OnePasswordStep || seen[s.ID] {
 			return badRequest("step %q is not a step name", s.ID)
 		}
 		seen[s.ID] = true
@@ -193,7 +200,7 @@ func validateBundle(tb *TeamBundle) error {
 			}
 		}
 	}
-	if tb.Start != "" && tb.Start != team.GitHubStep && !seen[tb.Start] {
+	if tb.Start != "" && tb.Start != team.GitHubStep && tb.Start != team.OnePasswordStep && !seen[tb.Start] {
 		return badRequest("no step %q to start from", tb.Start)
 	}
 	return nil
@@ -257,6 +264,9 @@ func (b *Box) StartTeam(ctx context.Context, tb TeamBundle) (TeamStatus, error) 
 	if tb.GitHub {
 		st.Steps = append(st.Steps, TeamStepStatus{ID: team.GitHubStep, Title: "GitHub on " + b.Name, State: TeamTodo})
 	}
+	if tb.OnePassword {
+		st.Steps = append(st.Steps, TeamStepStatus{ID: team.OnePasswordStep, Title: "1Password on " + b.Name, State: TeamTodo})
+	}
 	if st.Steps == nil {
 		st.Steps = []TeamStepStatus{}
 	}
@@ -319,7 +329,19 @@ func (b *Box) runSteps(st TeamStatus, from int) (TeamStatus, error) {
 	if t.GH != "" {
 		env = append(env, "BERTH_TEAM_GH="+t.GH)
 	}
+	// The 1Password step signs op in with this berthd's own command.
+	if t.Berthd != "" {
+		env = append(env, "BERTH_TEAM_BERTHD="+t.Berthd)
+	} else if self, err := b.self(); err == nil {
+		env = append(env, "BERTH_TEAM_BERTHD="+self)
+	}
+	if tb, err := t.readBundle(st.ID); err == nil {
+		env = append(env, team.Settings(tb.Settings).Env()...)
+	}
 	sess, err := b.Sessions.Create(ctx, name, "", home, command, env)
+	if errors.Is(err, errTmuxMissing) {
+		return st, fmt.Errorf("%w, and Berth runs the team setup's steps in a terminal there (tmux): install it with `%s`, then set up again", errTmuxMissing, tmuxInstallHint())
+	}
 	if err != nil {
 		return st, err
 	}
@@ -336,7 +358,11 @@ func (b *Box) runSteps(st TeamStatus, from int) (TeamStatus, error) {
 
 // teamRunScript is the script the team's terminal runs: each step through
 // the team's script, its state appended to the progress file berthd
-// follows, then the box's own GitHub sign-in.
+// follows, then the box's own GitHub sign-in and, when the keys need it,
+// 1Password's. A step that adds the user to a group (docker) leaves this
+// terminal without it, as any running process is; the steps left then run
+// through sg, which gives a group the user is in without a password, as a
+// new login would.
 func teamRunScript(tb TeamBundle) string {
 	short := tb.Commit
 	if len(short) > 7 {
@@ -350,11 +376,38 @@ T=$(cd "$(dirname "$0")" && pwd)
 P="$T/progress"
 SCRIPT=%[4]s
 GH=${BERTH_TEAM_GH:-gh}
+BERTHD=${BERTH_TEAM_BERTHD:-berthd}
 mark() { printf '%%s %%s %%s %%s\n' "$1" "$2" "$(date +%%s)" "${3:-}" >>"$P"; }
 stop() {
   printf '\n\033[31mBerth stopped at %%s (exit %%s).\033[0m Fix it, then press Retry from it in Berth; the steps before it are kept.\n' "$1" "$2"
   mark - end fail
   exit "$2"
+}
+q() { printf "'%%s'" "$(printf '%%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# newgroups: groups the group database gives you that this terminal lacks,
+# since a step added you to them after it started.
+newgroups() {
+  have=" $(id -nG) "
+  for g in $(id -nG "$(id -un)" 2>/dev/null); do
+    case "$have" in *" $g "*) continue ;; esac
+    case " ${BERTH_TEAM_REGROUPED:-} " in *" $g "*) continue ;; esac
+    printf '%%s ' "$g"
+  done
+}
+# regroup carries on with the steps left (its arguments) in a shell that
+# has those groups: sg gives each, then gives back your own group.
+regroup() {
+  command -v sg >/dev/null 2>&1 || return 0
+  new=$(newgroups)
+  [ -n "$new" ] || return 0
+  printf '    \033[2mYou are in %%s now: the steps left run with it, as a new login would.\033[0m\n' "${new%% }"
+  cmd="exec sh $(q "$T/run.sh")"
+  for a in "$@"; do cmd="$cmd $(q "$a")"; done
+  cmd="exec sg $(q "$(id -gn)") -c $(q "$cmd")"
+  for g in $new; do cmd="exec sg $(q "$g") -c $(q "$cmd")"; done
+  BERTH_TEAM_REGROUPED="${BERTH_TEAM_REGROUPED:-}$new"
+  export BERTH_TEAM_REGROUPED
+  eval "$cmd"
 }
 if [ "$(id -u)" -eq 0 ]; then
   echo "Berth runs team setups as you, not as root; steps that need root ask for your password with sudo."
@@ -362,8 +415,10 @@ if [ "$(id -u)" -eq 0 ]; then
   exit 1
 fi
 cd "$T/files" || exit 1
-printf '\033[1mBerth: %[1]s team setup\033[0m (%[2]s/.berth at %[3]s)\n'
-for s in "$@"; do
+[ -n "${BERTH_TEAM_REGROUPED:-}" ] || printf '\033[1mBerth: %[1]s team setup\033[0m (%[2]s/.berth at %[3]s)\n'
+while [ $# -gt 0 ]; do
+  s=$1
+  shift
   if [ "$s" = github ]; then
     if command -v "$GH" >/dev/null 2>&1 && "$GH" auth status --hostname github.com >/dev/null 2>&1; then
       "$GH" auth setup-git --hostname github.com >/dev/null 2>&1
@@ -390,6 +445,25 @@ for s in "$@"; do
     fi
     continue
   fi
+  if [ "$s" = 1password ]; then
+    if "$BERTHD" secret signin --check >/dev/null 2>&1; then
+      mark 1password skipped
+      printf '    1Password: this box is already signed in\n'
+      continue
+    fi
+    mark 1password running
+    printf '\n\033[1m==> 1Password on this box\033[0m\n'
+    printf "    The team's shared keys are 1Password references (op://...). Sign op in\n"
+    printf '    here, once, so Berth can read them when a worktree needs them.\n\n'
+    if "$BERTHD" secret signin; then
+      mark 1password done
+    else
+      c=$?
+      mark 1password failed "$c"
+      stop 1password "$c"
+    fi
+    continue
+  fi
   if "./$SCRIPT" check "$s" >/dev/null 2>&1; then
     mark "$s" skipped
     printf '    %%s (already done)\n' "$s"
@@ -398,6 +472,7 @@ for s in "$@"; do
   mark "$s" running
   if "./$SCRIPT" "$s"; then
     mark "$s" done
+    regroup "$@"
   else
     c=$?
     mark "$s" failed "$c"
@@ -446,8 +521,11 @@ func (t *TeamRunner) Stop() {
 
 var (
 	// A step waits for its person at a password prompt, a yes/no question
-	// (gh asks one before its device code), or gh's "Press Enter to open".
-	sudoPrompt  = regexp.MustCompile(`(?i)(\[sudo\] password for [^:]*:|^password:|\(y/n\)|press enter to open.*)\s*$`)
+	// (gh asks one before its device code, op "[Y/n]" before adding an
+	// account), gh's "Press Enter to open", or op's sign-in questions
+	// ("Enter your sign-in address (example.1password.com):", "Enter the
+	// Secret Key for …:", "Enter the password for … at …:").
+	sudoPrompt  = regexp.MustCompile(`(?i)(\[sudo\] password for [^:]*:|^password:|\(y/n\)|\[y/n\]|press enter to open.*|^enter (your|the) [^\n]*:)\s*$`)
 	deviceCode  = regexp.MustCompile(`one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})`)
 	deviceURL   = "https://github.com/login/device"
 	progressRow = regexp.MustCompile(`^(\S+) (\S+) (\d+) ?(\S*)$`)
@@ -581,6 +659,11 @@ func (b *Box) stepTick(id string) bool {
 	case ended != "" && ok:
 		st.Phase = "projects"
 		changed, done = true, true
+		// The steps may have installed tools (node, yarn) and added the
+		// user to groups (docker): look again, rather than trust what was
+		// found before they ran.
+		groups.Forget()
+		forgetLoginTools()
 	case ended != "":
 		st.Phase = "failed"
 		st.Error = "stopped at " + failedStep(st)
@@ -680,6 +763,13 @@ func (b *Box) runProjects(ctx context.Context, id string) {
 	if err != nil {
 		return
 	}
+	// Tools a kit asked for may be there now (the steps install them): a
+	// project set up before keeps only the warnings still true.
+	for _, p := range st.Projects {
+		if len(p.Warnings) > 0 {
+			b.updateProject(id, p.ID, func(s *TeamProjectStatus) { s.Warnings = recheckToolWarnings(s.Warnings) })
+		}
+	}
 	for _, p := range tb.Projects {
 		var cur TeamProjectStatus
 		for _, s := range st.Projects {
@@ -757,7 +847,14 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 		}
 	}
 	if name == "" {
-		name = b.freeLocationName(ctx, p.ID)
+		// The location's name is part of every worktree's URL
+		// (<worktree>.<project>.<box>.localhost), so it is one URL label
+		// even when an older laptop sent a project id with a dot.
+		base := team.URLSafeName(p.ID)
+		if base == "" {
+			base = "project"
+		}
+		name = b.freeLocationName(ctx, base)
 		if _, err := b.Locations.Add(ctx, name, dest); err != nil {
 			return err
 		}
@@ -912,7 +1009,7 @@ func (b *Box) runInit(ctx context.Context, tb TeamBundle, p TeamProjectPlan, loc
 		os.Remove(status)
 		script := filepath.Join(t.dir(tb.ID), "files", filepath.FromSlash(p.Init))
 		command := fmt.Sprintf("cd %s && %s; c=$?; echo $c > %s; [ $c = 0 ] && echo && echo 'Berth: %s is set up.'", shellQuote(dest), shellQuote(script), shellQuote(status), p.ID)
-		env := []string{"BERTH_LOCATION_PATH=" + dest, "BERTH_TEAM=" + tb.ID, "BERTH_TEAM_DIR=" + filepath.Join(t.dir(tb.ID), "files")}
+		env := initEnv(ctx, b, tb, location, dest, filepath.Join(t.dir(tb.ID), "files"))
 		if _, err := b.Sessions.Create(ctx, name, location, dest, command, env); err != nil {
 			return fmt.Errorf("init: %w", err)
 		}
@@ -938,6 +1035,23 @@ func (b *Box) runInit(ctx context.Context, tb TeamBundle, p TeamProjectPlan, loc
 		case <-time.After(t.poll()):
 		}
 	}
+}
+
+// initEnv is what a project's init gets, as a kit's scripts get it: the
+// box and the project (BERTH_BOX, BERTH_LOCATION, BERTH_ROOT_PATH and
+// BERTH_LOCATION_PATH), the project's kit when it has one (BERTH_KIT_DIR),
+// the team setup's files (BERTH_TEAM_DIR) and its box.settings.
+func initEnv(ctx context.Context, b *Box, tb TeamBundle, location, dest, files string) []string {
+	// The location's path, as kit scripts get it (symlinks resolved).
+	if loc, err := b.Locations.Get(ctx, location); err == nil && loc.Path != "" {
+		dest = loc.Path
+	}
+	env := []string{"BERTH_BOX=" + b.Name, "BERTH_LOCATION=" + location, "BERTH_ROOT_PATH=" + dest, "BERTH_LOCATION_PATH=" + dest,
+		"BERTH_TEAM=" + tb.ID, "BERTH_TEAM_DIR=" + files}
+	if cfg, err := b.Locations.Config(ctx, location); err == nil && cfg.Kit != nil && cfg.Kit.Dir != "" {
+		env = append(env, "BERTH_KIT_DIR="+cfg.Kit.Dir)
+	}
+	return append(env, team.Settings(tb.Settings).Env()...)
 }
 
 var unsafeSession = regexp.MustCompile(`[^A-Za-z0-9_-]`)

@@ -42,6 +42,15 @@ case "$1" in
 esac
 `
 
+const fakeSigninBerthd = `#!/bin/sh
+[ "$1 $2" = "secret signin" ] || exit 2
+if [ "${3:-}" = --check ]; then [ -f "$MARKS/op-signed-in" ]; exit; fi
+printf 'Enter the password for dev@acme.test at my.1password.com: '
+read -r pw
+[ "$pw" = op-pass ] || { echo "op signin did not finish" >&2; exit 1; }
+touch "$MARKS/op-signed-in"
+`
+
 type teamFixture struct {
 	t     *testing.T
 	b     *Box
@@ -68,13 +77,17 @@ func newTeamFixture(t *testing.T) *teamFixture {
 	t.Cleanup(func() { GitProtocols = old })
 	state := t.TempDir()
 	bus := &events.Bus{}
+	// berthd secret signin, as the 1Password step runs it: --check passes
+	// once signed in; signing in asks op's password question.
+	berthd := filepath.Join(t.TempDir(), "berthd")
+	os.WriteFile(berthd, []byte(fakeSigninBerthd), 0o755)
 	b := &Box{
 		Name:      "devbox",
 		Locations: NewLocations(filepath.Join(state, "locations.json")),
 		Sessions:  sessions,
 		Events:    bus,
 		KitsDir:   filepath.Join(state, "kits"),
-		Team:      &TeamRunner{Dir: filepath.Join(state, "team"), Poll: 30 * time.Millisecond, GH: filepath.Join(gh.Bin, "gh")},
+		Team:      &TeamRunner{Dir: filepath.Join(state, "team"), Poll: 30 * time.Millisecond, GH: filepath.Join(gh.Bin, "gh"), Berthd: berthd},
 	}
 	t.Cleanup(b.Team.Stop)
 	return &teamFixture{t: t, b: b, gh: gh, marks: marks, home: home, bus: bus}
@@ -102,7 +115,7 @@ func (f *teamFixture) bundle() TeamBundle {
 		Files: map[string]string{
 			"team.json":       b64("{}"),
 			"box/setup.sh":    b64(testSetupSh),
-			"box/init-api.sh": b64("#!/bin/sh\necho init > \"$MARKS/init-api\"\npwd >> \"$MARKS/init-api\"\n"),
+			"box/init-api.sh": b64("#!/bin/sh\necho init > \"$MARKS/init-api\"\npwd >> \"$MARKS/init-api\"\nenv | grep -E '^BERTH_(KIT_DIR|LOCATION|LOCATION_PATH|ROOT_PATH|BOX|SETTING_[A-Z_]*)=' | sort > \"$MARKS/init-env\"\n"),
 		},
 		Projects: []TeamProjectPlan{
 			{ID: "web", Repo: "acme/web", Source: "repo", TrustHash: sha(teamRepoConfig), Env: map[string]string{"STRIPE_KEY": "op://Dev/Stripe/key", "MAIL_KEY": "SG.mine"}},
@@ -215,6 +228,14 @@ func TestTeamSetupRunsItsStepsInATerminalThenSetsUpEachRepo(t *testing.T) {
 	init, _ := os.ReadFile(filepath.Join(f.marks, "init-api"))
 	if !strings.Contains(string(init), "src/api") {
 		t.Fatalf("init ran: %q", init)
+	}
+	// The init gets what a kit's scripts get: the kit's folder, so it can
+	// reuse the kit's code, and the project's name and path.
+	initEnv, _ := os.ReadFile(filepath.Join(f.marks, "init-env"))
+	for _, want := range []string{"BERTH_KIT_DIR=" + api.Kit.Dir, "BERTH_LOCATION=api", "BERTH_LOCATION_PATH=" + api.Path, "BERTH_ROOT_PATH=" + api.Path, "BERTH_BOX=devbox"} {
+		if !strings.Contains(string(initEnv), want+"\n") {
+			t.Errorf("init's environment lacks %s:\n%s", want, initEnv)
+		}
 	}
 	for _, p := range st.Projects {
 		if p.State != TeamReady || p.Location == "" {
@@ -422,13 +443,142 @@ func TestWaitingPrompts(t *testing.T) {
 	for line, want := range map[string]bool{
 		"[sudo] password for dev:": true,
 		"Password:":                true,
-		"? Authenticate Git with your GitHub credentials? (Y/n)":                  true,
-		"Press Enter to open https://github.com/login/device in your browser... ": true,
+		"? Authenticate Git with your GitHub credentials? (Y/n)":                                               true,
+		"Press Enter to open https://github.com/login/device in your browser... ":                              true,
+		"No accounts configured for use with 1Password CLI. Do you want to add an account manually now? [Y/n]": true,
+		"Enter your sign-in address (example.1password.com):":                                                  true,
+		"Enter the email address for your account on my.1password.com:":                                        true,
+		"Enter the Secret Key for dev@acme.test on my.1password.com:":                                          true,
+		"Enter the password for dev@acme.test at my.1password.com:":                                            true,
 		"==> Docker":                    false,
+		"Enter the dragon":              false,
 		"Reading package lists... Done": false,
 	} {
 		if got := sudoPrompt.MatchString(strings.TrimSpace(line)); got != want {
 			t.Errorf("%q: %v", line, got)
 		}
+	}
+}
+
+func TestTeamStepsGetTheSettingsAndSignOpIn(t *testing.T) {
+	f := newTeamFixture(t)
+	f.gh.SignIn("engineer")
+	tb := f.bundle()
+	tb.Steps = []team.Step{{ID: "settings", Title: "Settings"}}
+	tb.Files["box/setup.sh"] = b64(`#!/bin/sh
+case "$1" in
+  check) exit 1 ;;
+  settings) env | grep '^BERTH_SETTING_' | sort > "$MARKS/settings" ;;
+esac
+`)
+	tb.Settings = map[string]string{"CAL_POSTGRES_VERSION": "18", "NOTE": "it's a $HOME"}
+	tb.OnePassword = true
+	tb.Projects = tb.Projects[:1]
+	st, err := f.b.StartTeam(context.Background(), tb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Steps) != 3 || st.Steps[1].ID != "github" || st.Steps[2].ID != "1password" || st.Steps[2].Title != "1Password on devbox" {
+		t.Fatalf("steps %+v", st.Steps)
+	}
+	// op asks its sign-in question in the box's terminal: the step waits
+	// for its person, as sudo's does.
+	f.waitFor("op's password question", func(st TeamStatus) bool { return st.Steps[2].State == TeamWaiting })
+	got, _ := os.ReadFile(filepath.Join(f.marks, "settings"))
+	if string(got) != "BERTH_SETTING_CAL_POSTGRES_VERSION=18\nBERTH_SETTING_NOTE=it's a $HOME\n" {
+		t.Fatalf("the script's settings: %q", got)
+	}
+	if f.step("github").State != TeamSkipped {
+		t.Fatalf("github: %+v", f.step("github"))
+	}
+	f.typeIn("op-pass")
+	st = f.waitFor("done", func(st TeamStatus) bool { return st.Phase == "done" || st.Phase == "failed" })
+	if st.Phase != "done" || st.Steps[2].State != TeamDone {
+		t.Fatalf("%+v", st)
+	}
+	// Signed in, a second run skips it.
+	if _, err := f.b.StartTeam(context.Background(), tb); err != nil {
+		t.Fatal(err)
+	}
+	st = f.waitFor("done again", func(st TeamStatus) bool { return st.Phase == "done" || st.Phase == "failed" })
+	if st.Steps[2].State != TeamSkipped {
+		t.Fatalf("1password again: %+v", st.Steps[2])
+	}
+	// Settings are checked like team.json's.
+	tb.Settings = map[string]string{"BAD-NAME": "x"}
+	if _, err := f.b.StartTeam(context.Background(), tb); err == nil || !strings.Contains(err.Error(), "not a setting name") {
+		t.Fatalf("a bad setting: %v", err)
+	}
+}
+
+func TestAProjectIDWithADotGetsAURLSafeLocation(t *testing.T) {
+	f := newTeamFixture(t)
+	f.gh.Repo("acme/cal.com", map[string]string{"README.md": "cal"}, teamtest.Repo{})
+	tb := f.bundle()
+	tb.Steps, tb.GitHub = nil, false
+	// An older laptop could send an id with a dot: it still names the
+	// project with one URL label, and clones to the folder asked for.
+	tb.Projects = []TeamProjectPlan{{ID: "cal.com", Repo: "acme/cal.com", Source: "none"}}
+	if _, err := f.b.StartTeam(context.Background(), tb); err != nil {
+		t.Fatal(err)
+	}
+	st := f.waitFor("done", func(st TeamStatus) bool { return st.Phase == "done" || st.Phase == "failed" })
+	if st.Phase != "done" || st.Projects[0].Location != "cal-com" {
+		t.Fatalf("%+v", st.Projects)
+	}
+	loc, err := f.b.Locations.saved("cal-com")
+	if err != nil || !strings.HasSuffix(loc.Path, "/code/cal.com") {
+		t.Fatalf("%+v %v", loc, err)
+	}
+}
+
+func TestKitRequirementsAreLookedForAsALoginShellFindsThem(t *testing.T) {
+	var asked []string
+	found := map[string]string{}
+	old := loginLookup
+	loginLookup = func(_ context.Context, name string) string { asked = append(asked, name); return found[name] }
+	t.Cleanup(func() { loginLookup = old; forgetLoginTools() })
+	forgetLoginTools()
+	w := []string{toolWarning("berth-no-such-tool-node", "fnm install"), "it has a .berth/config.json of its own"}
+	if got := recheckToolWarnings(w); len(got) != 2 {
+		t.Fatalf("nothing is installed yet: %v", got)
+	}
+	// The team's steps install it on the login shell's PATH; berthd's own
+	// PATH, from when it started, still lacks it. Until the steps end, the
+	// answer is the one kept.
+	found["berth-no-such-tool-node"] = "/home/dev/.local/share/fnm/aliases/default/bin/node"
+	if got := recheckToolWarnings(w); len(got) != 2 {
+		t.Fatalf("the kept answer: %v", got)
+	}
+	forgetLoginTools()
+	if got := recheckToolWarnings(w); len(got) != 1 || got[0] != w[1] {
+		t.Fatalf("after the steps: %v", got)
+	}
+	if p, ok := findTool(context.Background(), "berth-no-such-tool-node"); !ok || !strings.Contains(p, "fnm") {
+		t.Fatal(p, ok)
+	}
+	if strings.Count(strings.Join(asked, " "), "berth-no-such-tool-node") != 2 {
+		t.Fatalf("asked the login shell %v", asked)
+	}
+}
+
+// The real lookup runs the user's login shell with the tool's name as an
+// argument, never as part of the script.
+func TestLoginLookupFindsAToolOnTheLoginShellsPath(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "berth-login-only-tool"), []byte("#!/bin/sh\n"), 0o755)
+	home := t.TempDir()
+	os.WriteFile(filepath.Join(home, ".profile"), []byte("PATH=\""+dir+":$PATH\"\n"), 0o644)
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/sh")
+	t.Setenv("ENV", "")
+	if p := loginLookup(context.Background(), "berth-login-only-tool"); p != filepath.Join(dir, "berth-login-only-tool") {
+		t.Fatalf("got %q", p)
+	}
+	if p := loginLookup(context.Background(), "x; touch "+filepath.Join(home, "pwned")); p != "" {
+		t.Fatalf("got %q", p)
+	}
+	if _, err := os.Stat(filepath.Join(home, "pwned")); err == nil {
+		t.Fatal("the name ran as a command")
 	}
 }

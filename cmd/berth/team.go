@@ -16,6 +16,7 @@ import (
 
 	"github.com/sean-brydon/berthd/internal/agent"
 	"github.com/sean-brydon/berthd/internal/box"
+	"github.com/sean-brydon/berthd/internal/team"
 )
 
 const teamUsage = `berth team — set a box up the way your team's are, from <org>/.berth on GitHub
@@ -314,6 +315,8 @@ func followTeam(ctx context.Context, c *agent.Client, boxName string, st box.Tea
 			switch {
 			case s.State == box.TeamWaiting && s.Code != "":
 				fmt.Printf("  … %s: open %s and enter %s, then press Enter in the box's terminal (berth attach %s/%s)\n", s.Title, s.URL, s.Code, boxName, st.Session)
+			case s.State == box.TeamWaiting && s.ID == team.OnePasswordStep:
+				fmt.Printf("  … %s: op asks you to sign in on %s; answer it there: berth attach %s/%s\n", s.Title, boxName, boxName, st.Session)
 			case s.State == box.TeamWaiting:
 				fmt.Printf("  … %s: sudo asks for your password on %s; type it there: berth attach %s/%s\n", s.Title, boxName, boxName, st.Session)
 			case s.State == box.TeamRunning:
