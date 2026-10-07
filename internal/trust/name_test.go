@@ -15,6 +15,11 @@ func TestNameFromHostname(t *testing.T) {
 		"...":                          "laptop",
 		strings.Repeat("a", 80):        strings.Repeat("a", 63),
 		strings.Repeat("a", 62) + "-b": strings.Repeat("a", 62),
+		"devbox.europe-north1-a.c.sales-moitoring.internal": "devbox",
+		"DevBox.example.com.":                               "devbox",
+		".devbox":                                           "devbox",
+		"my_box.lan":                                        "my-box",
+		"-.example.com":                                     "laptop",
 	} {
 		if got := NameFromHostname(in, "laptop"); got != want {
 			t.Errorf("NameFromHostname(%q) = %q, want %q", in, got, want)

@@ -108,6 +108,12 @@ again.
   is part of every worktree's URL, so `team.json` refuses one with a dot
   (`cal.com`; use `cal`, with `path` keeping the folder). Repos picked from
   an org without a `.berth` get one (`cal.com` → `cal-com`).
+- **A box with a full hostname has worktree URLs.** A cloud VM whose
+  hostname is `devbox.europe-north1-a.c.example.internal` called itself by
+  all of it, which can't be one label of a URL, so `$BERTH_URL` was empty
+  and `berthd browser open` refused every worktree. A box (and a box a
+  laptop pairs) is now named by its hostname's first label, `devbox`, with
+  `_` becoming `-`. Restart berthd on such a box to pick up the new name.
 - **The Cal.com example** is now the one a real run on a fresh Ubuntu 24.04
   box went through: 8 box steps, 4 with sudo, versions in `box.settings`,
   for the public `calcom/cal.com` (Cal.com's own setup lives privately).

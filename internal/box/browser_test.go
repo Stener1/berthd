@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sean-brydon/berthd/internal/events"
+	"github.com/sean-brydon/berthd/internal/trust"
 )
 
 // browserBox is a box with one repository, a worktree "billing", and a dev
@@ -175,6 +176,22 @@ func TestWorktreeURL(t *testing.T) {
 		t.Fatal(u)
 	}
 	if u := worktreeURL("devbox", "shop", Worktree{Name: "Fix_Login"}); u != "" {
+		t.Fatal(u)
+	}
+}
+
+// A box on a cloud VM has a fully qualified hostname; berthd names itself
+// by its first label, so its worktrees still have URLs.
+func TestWorktreeURLOnAnFQDNBox(t *testing.T) {
+	name := trust.NameFromHostname("devbox.europe-north1-a.c.sales-moitoring.internal", "box")
+	if u := worktreeURL(name, "shop", Worktree{Name: "checkout"}); u != "http://checkout.shop.devbox.localhost:1377" {
+		t.Fatal(u)
+	}
+	if u := worktreeURL(name, "shop", Worktree{Name: "shop", Main: true}); u != "http://shop.devbox.localhost:1377" {
+		t.Fatal(u)
+	}
+	// A name with dots, as berthd took from such a hostname before, has none.
+	if u := worktreeURL("devbox.europe-north1-a.c.sales-moitoring.internal", "shop", Worktree{Name: "checkout"}); u != "" {
 		t.Fatal(u)
 	}
 }
