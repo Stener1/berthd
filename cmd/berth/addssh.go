@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sean-brydon/berthd/internal/agentcli"
+	"github.com/sean-brydon/berthd/internal/guided"
 	"github.com/sean-brydon/berthd/internal/pairing"
 	"github.com/sean-brydon/berthd/internal/sshsetup"
 	"github.com/sean-brydon/berthd/internal/trust"
@@ -60,7 +62,7 @@ func addSSH(l laptop, args []string) error {
 	return err
 }
 
-const addSSHUsage = "usage: berth add ssh [user@]HOST [--name N] [--network NET] [--listen ADDR] [--address ADDR] [--identity FILE] [--trust-host-key SHA256:…] [--no-integrations] [-- SSH OPTIONS]"
+const addSSHUsage = "usage: berth add ssh [user@]HOST [--name N] [--agents claude,codex|none] [--yes] [--from STEP] [--network NET] [--listen ADDR] [--address ADDR] [--identity FILE] [--trust-host-key SHA256:…] [--no-integrations] [-- SSH OPTIONS]"
 
 func addSSHSteps(l laptop, args []string) error {
 	var sshArgs []string
@@ -79,6 +81,9 @@ func addSSHSteps(l laptop, args []string) error {
 	identity := fs.String("identity", "", "an SSH private key file to log in with (as ssh -i)")
 	trustKey := fs.String("trust-host-key", "", "trust the box's host key if its fingerprint is this SHA256:… (a new box only; a changed key is never trusted)")
 	noIntegrations := fs.Bool("no-integrations", false, "don't install hooks and skills for the agent CLIs on the box")
+	agentList := fs.String("agents", strings.Join(agentcli.Defaults(), ","), "agent CLIs to install on the box: claude, codex, cursor, opencode, or none")
+	yes := fs.Bool("yes", false, "ask nothing: don't wait for Enter, and stop with the command to run where sudo would ask for a password")
+	from := fs.String("from", "", "start from this step (connect, berthd, linger, tools, agents, integrations, pair); the ones before it are kept")
 	pos, err := parseAnywhere(fs, args)
 	if err != nil || len(pos) != 1 {
 		return errors.New(addSSHUsage)
@@ -89,6 +94,16 @@ func addSSHSteps(l laptop, args []string) error {
 	}
 	if err := checkNetwork(*via); err != nil {
 		return err
+	}
+	chosen, err := agentcli.ParseList(*agentList)
+	if err != nil {
+		return err
+	}
+	fromIdx := 0
+	if *from != "" {
+		if fromIdx = guided.Index(*from); fromIdx < 0 {
+			return fmt.Errorf("--from %s is not a step; the steps are %s", *from, strings.Join(guided.Order, ", "))
+		}
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -115,6 +130,14 @@ func addSSHSteps(l laptop, args []string) error {
 		sshArgs = append([]string{"-o", "ConnectTimeout=20"}, sshArgs...)
 	}
 
+	// The app runs this in a terminal of its own and reads the steps as
+	// markers; a person in their own terminal sees them drawn.
+	markers := os.Getenv(guided.StepsEnv) == "1"
+	interactive := isTerminal(os.Stdin) && !*yes
+	rep := newStepReporter(os.Stdout, markers)
+	opts := guided.Options{Target: target, Agents: chosen, Listen: *listen, Address: *address, NoIntegrations: *noIntegrations, Ask: interactive}
+	rep.setPlan(guided.Plan(opts, nil))
+
 	// What ssh will do, from ~/.ssh/config, and the agent berth hands it
 	// when this process has none of its own (started by launchd or the app).
 	finder := sshsetup.DefaultFinder()
@@ -127,22 +150,27 @@ func addSSHSteps(l laptop, args []string) error {
 	if plan.Inject != "" {
 		env = withEnv(env, "SSH_AUTH_SOCK", plan.Inject)
 	}
-	fmt.Println(plan.Summary)
+	rep.start(guided.StepConnect)
+	fmt.Fprintf(rep, "    %s\r\n", plan.Summary)
 	// Failures name the host as it was typed, the way the person knows it.
 	host := target[strings.LastIndex(target, "@")+1:]
-	interactive := isTerminal(os.Stdin)
+	connectFailed := func(err error) error {
+		rep.fail(guided.StepConnect, err.Error())
+		return err
+	}
 	if *trustKey != "" {
 		hk, err := sshsetup.FetchHostKey(context.Background(), sshsetup.Exec, env, sshArgs, target)
 		if err != nil {
-			return err
+			return connectFailed(err)
 		}
 		if err := sshsetup.TrustHostKey(hk, *trustKey, finder.KnownHostsFile(cfg)); err != nil {
-			return err
+			return connectFailed(err)
 		}
-		fmt.Printf("Trusted %s's host key (%s).\n", host, *trustKey)
-	} else if !interactive && cfg.StrictHostKeyChecking == "ask" {
-		// Without a terminal, an unknown host key comes back as a failure
-		// with its fingerprint, for the app to ask about, not a dialog.
+		fmt.Fprintf(rep, "    Trusted %s's host key (%s).\r\n", host, *trustKey)
+	} else if (!interactive || markers) && cfg.StrictHostKeyChecking == "ask" {
+		// Without a person at a terminal, and in the app, which asks about
+		// it with the fingerprint beside a button, an unknown host key comes
+		// back as a failure, not ssh's own question.
 		sshArgs = append([]string{"-o", "StrictHostKeyChecking=yes"}, sshArgs...)
 	}
 
@@ -160,16 +188,17 @@ func addSSHSteps(l laptop, args []string) error {
 			if hk, err := sshsetup.FetchHostKey(context.Background(), sshsetup.Exec, env, sshArgs, target); err == nil {
 				f.Fingerprint = hk.PickFingerprint(sshsetup.UnknownKeyType(stderr))
 			}
-			if f.Fingerprint != "" {
+			if f.Fingerprint != "" && !markers {
 				f.Message += " Its fingerprint is " + f.Fingerprint + "; to trust it, run again with --trust-host-key " + f.Fingerprint + "."
 			}
 		}
 		return f
 	}
-	if stderr, err := openMaster(sshArgs, target, env, control); err != nil {
+	approve := func(url string) { rep.event(guided.Event{Step: guided.StepConnect, State: guided.Open, Message: url}) }
+	if stderr, err := openMaster(sshArgs, target, env, control, approve); err != nil {
 		first := fail(stderr, plan.Agent)
 		if first.Kind != "auth" || hasOption(sshArgs, "IdentityAgent") {
-			return first
+			return connectFailed(first)
 		}
 		// Every key was refused. Keys kept in a key manager are only offered
 		// where something names its agent; try the others that are running.
@@ -180,9 +209,9 @@ func addSSHSteps(l laptop, args []string) error {
 		ok := false
 		offered := first.Tried
 		for _, other := range finder.Others(tried) {
-			fmt.Printf("Trying the keys in %s…\n", other.Name)
+			fmt.Fprintf(rep, "    Trying the keys in %s…\r\n", other.Name)
 			retry := append([]string{"-o", "IdentityAgent=" + other.Socket}, sshArgs...)
-			stderr, err := openMaster(retry, target, env, control)
+			stderr, err := openMaster(retry, target, env, control, approve)
 			if err == nil {
 				sshArgs, ok = retry, true
 				break
@@ -192,7 +221,7 @@ func addSSHSteps(l laptop, args []string) error {
 			}
 		}
 		if !ok {
-			return sshsetup.AuthFailure(host, cfg.Port, offered, first.Detail)
+			return connectFailed(sshsetup.AuthFailure(host, cfg.Port, offered, first.Detail))
 		}
 	}
 	defer exec.Command("ssh", append(append([]string{}, sshArgs...), "-O", "exit", target)...).Run()
@@ -216,72 +245,203 @@ func addSSHSteps(l laptop, args []string) error {
 		return out, nil
 	}
 
-	fmt.Printf("Checking %s…\n", target)
-	uname, err := ssh(nil, "uname -sm")
+	// What is on the box already decides the plan: tmux and git, the
+	// package manager, lingering, which agents.
+	out, err := ssh(nil, guided.ProbeScript)
 	if err != nil {
-		return err
+		return connectFailed(err)
 	}
-	daemon, err := daemonFor(string(uname))
+	probe, err := guided.ParseProbe(string(out))
 	if err != nil {
-		return err
+		return connectFailed(err)
 	}
-	binary, err := readDaemon(exe, daemon)
+	if probe.UID == 0 {
+		return connectFailed(fmt.Errorf("you logged in to %s as root. Berth installs as the user your agents will run as, never root: log in as that user (make one with: adduser me && usermod -aG sudo me) and set the box up again", host))
+	}
+	daemon, err := daemonFor(probe.OS + " " + map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[probe.Arch])
 	if err != nil {
-		return err
+		return connectFailed(err)
+	}
+	var tmux []byte
+	if probe.OS == "linux" && !probe.Tmux {
+		tmux, _ = readDaemon(exe, guided.TmuxName(probe.Arch))
+	}
+	opts.BundledTmux = tmux != nil
+	steps := guided.Plan(opts, &probe)
+	rep.setPlan(steps)
+	rep.done(guided.StepConnect, fmt.Sprintf("%s@%s, %s/%s", probe.User, host, probe.OS, probe.Arch))
+
+	// berthd listens on the box's tailnet address unless told where; a box
+	// without one needs a choice, which only a person can make.
+	if !probe.Tailnet && *listen == "" && probe.Listen == "" {
+		if !interactive {
+			return connectFailed(fmt.Errorf("%s has no tailnet (Tailscale) address, so Berth won't choose where berthd listens. Install Tailscale on it, or set it up again with --listen 0.0.0.0:7444 to listen on every interface (only laptops you pair can connect: both keys are pinned)", host))
+		}
+		printPlan(rep, steps, rep.color)
+		if !askListenEverywhere(os.Stdin, rep, host, rep.color) {
+			return errors.New("stopped before anything was installed. To listen on every interface, set it up again with --listen 0.0.0.0:7444; or install Tailscale on the box")
+		}
+		opts.Listen = "0.0.0.0:7444"
+		steps = guided.Plan(opts, &probe)
+		rep.setPlan(steps)
+	} else {
+		printPlan(rep, steps, rep.color)
+		if interactive && fromIdx == 0 && !waitForEnter(os.Stdin, rep, rep.color) {
+			return errors.New("stopped before anything was installed")
+		}
+	}
+	fmt.Fprint(rep, "\r\n")
+
+	pending := func(id string) bool { return guided.Index(id) >= fromIdx }
+	var run []string
+	for _, s := range steps {
+		switch {
+		case s.Where == "laptop":
+		case !pending(s.ID):
+			rep.skip(s.ID, "done before")
+		case s.Skip != "":
+			rep.skip(s.ID, s.Skip)
+		default:
+			run = append(run, s.ID)
+		}
+	}
+	has := func(id string) bool { return slices.Contains(run, id) }
+
+	// The files go up first, over the shared connection, with no terminal.
+	if has(guided.StepBerthd) {
+		rep.start(guided.StepBerthd)
+		binary, err := readDaemon(exe, daemon)
+		if err != nil {
+			rep.fail(guided.StepBerthd, err.Error())
+			return err
+		}
+		fmt.Fprintf(rep, "    Uploading %s (%d MB) to ~/.local/bin/berthd\r\n", daemon, len(binary)>>20)
+		if _, err := ssh(binary, upload("berthd")); err != nil {
+			rep.fail(guided.StepBerthd, err.Error())
+			return err
+		}
+	}
+	if has(guided.StepTools) && tmux != nil {
+		fmt.Fprintf(rep, "    Uploading Berth's tmux for %s/%s (%d MB) to ~/.local/bin/tmux\r\n", probe.OS, probe.Arch, max(1, len(tmux)>>20))
+		if _, err := ssh(tmux, upload("tmux")); err != nil {
+			rep.fail(guided.StepTools, err.Error())
+			return err
+		}
+	}
+	if len(run) > 0 {
+		script := guided.Script(opts, probe, run)
+		if _, err := ssh([]byte(script), "mkdir -p ~/.cache/berth && cat > ~/.cache/berth/guided-install.sh"); err != nil {
+			rep.fail(run[0], err.Error())
+			return err
+		}
+		if err := runSteps(rep, sshArgs, env, target, interactive); err != nil {
+			return err
+		}
 	}
 
-	fmt.Printf("Installing %s (%d MB)…\n", daemon, len(binary)>>20)
-	upload := "mkdir -p ~/.local/bin && cat > ~/.local/bin/berthd.new && chmod +x ~/.local/bin/berthd.new && mv ~/.local/bin/berthd.new ~/.local/bin/berthd"
-	if _, err := ssh(binary, upload); err != nil {
-		return err
+	if !pending(guided.StepPair) {
+		return nil
 	}
-	install := "~/.local/bin/berthd install"
-	if *listen != "" {
-		install += " --listen " + shellQuote(*listen)
-	}
-	if *noIntegrations {
-		install += " --no-integrations"
-	}
-	out, err := ssh(nil, install)
+	rep.start(guided.StepPair)
+	name2, addr, err := pairOverSSH(l, ssh, *address, *name, *via)
 	if err != nil {
+		rep.fail(guided.StepPair, err.Error())
 		return err
 	}
-	// berthd install ends with "Next: berthd pair", which this command does itself.
-	fmt.Print(indent(strings.Replace(string(out), "Next: berthd pair\n", "", 1)))
+	rep.done(guided.StepPair, name2)
+	fmt.Fprintf(rep, "\r\nReady: paired with %s at %s. SSH is no longer needed for this box.\r\n", name2, addr)
+	if !markers && len(chosen) == 1 {
+		fmt.Fprintf(rep, "%s asks you to sign in the first time you start it there.\r\n", agentcli.Names(chosen))
+	} else if !markers && len(chosen) > 1 {
+		fmt.Fprintf(rep, "%s each ask you to sign in the first time you start them there.\r\n", agentcli.Names(chosen))
+	}
+	return nil
+}
 
+// upload is the remote command that puts stdin in ~/.local/bin/NAME,
+// renamed into place, so a running copy keeps its file until it restarts.
+func upload(name string) string {
+	return "mkdir -p ~/.local/bin && cat > ~/.local/bin/" + name + ".new && chmod +x ~/.local/bin/" + name + ".new && mv ~/.local/bin/" + name + ".new ~/.local/bin/" + name
+}
+
+// runSteps runs the uploaded step script on the box: in a terminal (ssh -t)
+// when a person is at this one, so sudo can ask them for their password,
+// with its markers read on the way through. A failed step is the error.
+func runSteps(rep *stepReporter, sshArgs, env []string, target string, interactive bool) error {
+	// -q: ssh's own "Shared connection … closed" is not a step's output.
+	args := append([]string{"-q"}, sshArgs...)
+	if interactive {
+		args = append(args, "-t")
+	}
+	args = append(args, target, "sh ~/.cache/berth/guided-install.sh")
+	cmd := exec.Command("ssh", args...)
+	cmd.Env = env
+	if interactive {
+		cmd.Stdin = os.Stdin
+	}
+	filter := &guided.Filter{Out: rep, OnStep: rep.remote}
+	cmd.Stdout = filter
+	cmd.Stderr = filter
+	err := cmd.Run()
+	filter.Flush()
+	rep.mu.Lock()
+	failed, why, command := rep.failed, rep.why, rep.command
+	rep.mu.Unlock()
+	if failed != "" {
+		msg := why
+		if command != "" {
+			msg = strings.TrimRight(msg, ".") + ". Run this on the box, then set it up again:\n  " + command
+		}
+		return errors.New(msg)
+	}
+	if err != nil {
+		var ee *exec.ExitError
+		msg := "the connection to the box closed before the steps finished"
+		if errors.As(err, &ee) && ee.ExitCode() != 255 {
+			msg = fmt.Sprintf("the steps stopped (exit %d)", ee.ExitCode())
+		}
+		rep.failCurrent(msg)
+		return errors.New(msg)
+	}
+	return nil
+}
+
+// pairOverSSH has the box print a pairing link and pairs with it, saving
+// the box under name (or one made from its hostname).
+func pairOverSSH(l laptop, ssh func([]byte, string) ([]byte, error), address, name, via string) (string, string, error) {
 	pair := "sleep 1; ~/.local/bin/berthd pair"
-	if *address != "" {
-		pair += " --address " + shellQuote(*address)
+	if address != "" {
+		pair += " --address " + shellQuote(address)
 	}
-	out, err = ssh(nil, pair)
+	out, err := ssh(nil, pair)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	link, err := findLink(out)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	tok, err := pairing.ParseToken(link)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	id, err := l.identity()
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	hostname, _ := os.Hostname()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	dial, err := networkDialer(l, *via)
+	dial, err := networkDialer(l, via)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	reported, err := wire.PairVia(ctx, id, tok, trust.NameFromHostname(hostname, "laptop"), dial)
 	if err != nil {
-		return fmt.Errorf("berthd is installed but this laptop could not reach it at %s: %w\n"+
-			"If the box is only reachable another way, rerun with --address", tok.Address, err)
+		return "", "", fmt.Errorf("berthd is installed but this laptop could not reach it at %s: %w. "+
+			"If the box is only reachable another way, set it up again with --address", tok.Address, err)
 	}
-	peer := trust.Peer{Name: *name, Address: tok.Address, Network: *via, Fingerprint: tok.Fingerprint, PairedAt: time.Now().UTC()}
+	peer := trust.Peer{Name: name, Address: tok.Address, Network: via, Fingerprint: tok.Fingerprint, PairedAt: time.Now().UTC()}
 	if peer.Name == "" {
 		peer.Name = trust.NameFromHostname(reported, "box")
 		peer.Name, err = l.boxes().AddWithFreeName(peer)
@@ -289,13 +449,12 @@ func addSSHSteps(l laptop, args []string) error {
 		err = l.boxes().Add(peer)
 	}
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if c := agentIfRunning(l); c != nil {
 		c.Refresh(context.Background())
 	}
-	fmt.Printf("Paired with %s at %s. SSH is no longer needed for this box.\n", peer.Name, peer.Address)
-	return nil
+	return peer.Name, peer.Address, nil
 }
 
 // checkName refuses a --name that cannot be a hostname before any work is
@@ -327,7 +486,7 @@ func proxyCommand(exe, network string) string {
 // a pipe: the backgrounded ssh keeps it open, and waiting on a pipe would
 // wait for that process to exit. -v adds the keys ssh offered, which an
 // "every key was refused" failure names.
-func openMaster(sshArgs []string, target string, env []string, dir string) (string, error) {
+func openMaster(sshArgs []string, target string, env []string, dir string, approve func(url string)) (string, error) {
 	errFile, err := os.Create(filepath.Join(dir, "stderr"))
 	if err != nil {
 		return "", err
@@ -354,7 +513,7 @@ func openMaster(sshArgs []string, target string, env []string, dir string) (stri
 			}
 			if data, err := os.ReadFile(errFile.Name()); err == nil {
 				if u := checkURL(string(data)); u != "" {
-					fmt.Printf("Tailscale SSH asks you to approve this login in your browser: %s\n", u)
+					approve(u)
 					return
 				}
 			}

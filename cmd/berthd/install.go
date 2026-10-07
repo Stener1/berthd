@@ -88,12 +88,12 @@ func install(b boxHome, args []string) error {
 		}
 	}
 	spec := daemonService(b, addr)
-	if runtime.GOOS == "darwin" {
-		// launchd gives an agent /usr/bin:/bin:/usr/sbin:/sbin, without
-		// Homebrew's tmux or the user's node, gh and claude: the plist
-		// carries the user's own PATH, as their login shell sets it now.
-		spec.Env["PATH"] = service.ServicePATH()
-	}
+	// launchd gives an agent /usr/bin:/bin:/usr/sbin:/sbin, without
+	// Homebrew's tmux or the user's node, gh and claude, and systemd's user
+	// manager a PATH without ~/.local/bin, where the guided install puts
+	// Berth's tmux and the agent CLIs: the unit carries the user's own PATH,
+	// as their login shell sets it now, with those folders.
+	spec.Env["PATH"] = service.ServicePATH()
 	started := time.Now()
 	path, err := service.Install(spec)
 	if err != nil {

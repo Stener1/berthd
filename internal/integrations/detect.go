@@ -192,6 +192,28 @@ func InstallDetected(home, bin, command string, out io.Writer) error {
 	return nil
 }
 
+// InstallPresent installs integrations for every tool present in home, for
+// the binary at bin, saying what it did on out, and nothing about the
+// tools that aren't there.
+func InstallPresent(home, bin string, out io.Writer) error {
+	present, _ := Detect(home)
+	if len(present) == 0 {
+		fmt.Fprintln(out, "No agent CLIs on this box yet; Berth adds their hooks when you add one from the box's settings.")
+		return nil
+	}
+	var failed []string
+	for _, t := range present {
+		if err := InstallTool(home, t.ID, bin, out); err != nil {
+			fmt.Fprintf(out, "%s: not installed: %v\n", t.Name, err)
+			failed = append(failed, t.Name)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("integrations for %s did not install", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
 func indentLines(b []byte, prefix string) []byte {
 	if len(b) == 0 {
 		return b

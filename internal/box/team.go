@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sean-brydon/berthd/internal/agentcli"
 	"github.com/sean-brydon/berthd/internal/events"
 	"github.com/sean-brydon/berthd/internal/groups"
 	"github.com/sean-brydon/berthd/internal/statefile"
@@ -150,7 +151,7 @@ func validateBundle(tb *TeamBundle) error {
 	}
 	seen := map[string]bool{}
 	for _, s := range tb.Steps {
-		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(s.ID) || s.ID == team.GitHubStep || s.ID == team.OnePasswordStep || seen[s.ID] {
+		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(s.ID) || s.ID == team.GitHubStep || s.ID == team.OnePasswordStep || s.ID == team.AgentsStep || seen[s.ID] {
 			return badRequest("step %q is not a step name", s.ID)
 		}
 		seen[s.ID] = true
@@ -200,7 +201,10 @@ func validateBundle(tb *TeamBundle) error {
 			}
 		}
 	}
-	if tb.Start != "" && tb.Start != team.GitHubStep && tb.Start != team.OnePasswordStep && !seen[tb.Start] {
+	if _, err := agentcli.ParseList(strings.Join(tb.Agents, ",")); err != nil {
+		return badRequest("agents: %v", err)
+	}
+	if tb.Start != "" && tb.Start != team.GitHubStep && tb.Start != team.OnePasswordStep && tb.Start != team.AgentsStep && !seen[tb.Start] {
 		return badRequest("no step %q to start from", tb.Start)
 	}
 	return nil
@@ -260,6 +264,9 @@ func (b *Box) StartTeam(ctx context.Context, tb TeamBundle) (TeamStatus, error) 
 	st := TeamStatus{ID: tb.ID, Name: tb.Name, Org: tb.Org, Commit: tb.Commit, Box: b.Name, Phase: "steps", Started: time.Now().UTC(), KeysSet: []string{}}
 	for _, s := range tb.Steps {
 		st.Steps = append(st.Steps, TeamStepStatus{ID: s.ID, Title: s.Title, Sudo: s.Sudo, State: TeamTodo})
+	}
+	if len(tb.Agents) > 0 {
+		st.Steps = append(st.Steps, TeamStepStatus{ID: team.AgentsStep, Title: agentcli.Names(tb.Agents) + " on " + b.Name, State: TeamTodo})
 	}
 	if tb.GitHub {
 		st.Steps = append(st.Steps, TeamStepStatus{ID: team.GitHubStep, Title: "GitHub on " + b.Name, State: TeamTodo})
@@ -337,6 +344,9 @@ func (b *Box) runSteps(st TeamStatus, from int) (TeamStatus, error) {
 	}
 	if tb, err := t.readBundle(st.ID); err == nil {
 		env = append(env, team.Settings(tb.Settings).Env()...)
+		if len(tb.Agents) > 0 {
+			env = append(env, "BERTH_TEAM_AGENTS="+strings.Join(tb.Agents, " "))
+		}
 	}
 	sess, err := b.Sessions.Create(ctx, name, "", home, command, env)
 	if errors.Is(err, errTmuxMissing) {
@@ -442,6 +452,21 @@ while [ $# -gt 0 ]; do
       c=$?
       mark github failed "$c"
       stop github "$c"
+    fi
+    continue
+  fi
+  if [ "$s" = agents ]; then
+    mark agents running
+    printf '\n\033[1m==> Agent CLIs on this box\033[0m\n'
+    printf '    Into ~/.local/bin, as you, without sudo. Signing in stays yours:\n'
+    printf '    each agent asks the first time it starts.\n\n'
+    # shellcheck disable=SC2086 # a list of agent ids
+    if "$BERTHD" agents install --integrations ${BERTH_TEAM_AGENTS:-}; then
+      mark agents done
+    else
+      c=$?
+      mark agents failed "$c"
+      stop agents "$c"
     fi
     continue
   fi

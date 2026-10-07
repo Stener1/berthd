@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sean-brydon/berthd/internal/agentcli"
 	"github.com/sean-brydon/berthd/internal/box"
 	"github.com/sean-brydon/berthd/internal/statefile"
 	"github.com/sean-brydon/berthd/internal/team"
@@ -360,6 +361,20 @@ func githubStepView() TeamStepView {
 	}
 }
 
+func agentsStepView(ids []string) TeamStepView {
+	cmds := []string{"berthd agents install --integrations " + strings.Join(ids, " ") + "   # each is skipped when it is already there"}
+	for _, id := range ids {
+		if a, ok := agentcli.ByID(id); ok {
+			cmds = append(cmds, "#   "+a.Name+": "+a.Install)
+		}
+	}
+	return TeamStepView{
+		ID: team.AgentsStep, Title: agentcli.Names(ids) + " on the box", Berth: true,
+		Detail:   "The agent CLIs the team uses, installed into ~/.local/bin without sudo, with Berth's hooks and skills. Signing in to each stays yours",
+		Commands: cmds,
+	}
+}
+
 func onePasswordStepView() TeamStepView {
 	return TeamStepView{
 		ID: team.OnePasswordStep, Title: "1Password on the box", Berth: true,
@@ -380,6 +395,9 @@ func (r teamRead) stepViews() []TeamStepView {
 			cmds = append(cmds, body...)
 		}
 		out = append(out, TeamStepView{ID: s.ID, Title: s.Title, Detail: s.Detail, Sudo: s.Sudo, Commands: cmds})
+	}
+	if len(r.setup.Agents) > 0 {
+		out = append(out, agentsStepView(r.setup.Agents))
 	}
 	if len(r.setup.Projects) > 0 {
 		out = append(out, githubStepView())

@@ -9,15 +9,26 @@ BIN := bin
 .PHONY: all build daemons test clean
 
 # berth for this machine, plus berthd for every box platform, side by side
-# in bin/ so `berth add ssh` can find the right daemon to upload.
+# in bin/ so `berth add ssh` can find the right daemon to upload, and Berth's
+# own static tmux for Linux boxes (tmux-linux-amd64, -arm64), which it
+# uploads to a box that has none.
 all: build daemons
 
 build:
 	$(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/ ./cmd/berth ./cmd/berthd
 
+# TMUX=0 leaves Berth's tmux out. It is built once (scripts/build-tmux.sh,
+# pinned sources in a pinned Alpine container, so it needs Docker) and kept
+# in bin/; without Docker, make says so and goes on, and berth add ssh then
+# installs tmux with the box's package manager instead.
+TMUX ?= 1
+
 daemons:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/berthd-linux-amd64 ./cmd/berthd
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/berthd-linux-arm64 ./cmd/berthd
+ifneq ($(TMUX),0)
+	@scripts/build-tmux.sh $(BIN) || echo "make daemons: Berth's tmux was not built (above says why); berth add ssh installs tmux with the box's package manager instead"
+endif
 
 test:
 	$(GO) vet ./...
@@ -68,6 +79,9 @@ endif
 			--sign "$$APPLE_SIGNING_IDENTITY" $(SIDECAR)/berthd-local; \
 	fi
 	cp $(BIN)/berthd-linux-amd64 $(BIN)/berthd-linux-arm64 $(SIDECAR)/
+	@# The app carries Berth's tmux for Linux boxes; a release must have it.
+	scripts/build-tmux.sh $(BIN)
+	cp $(BIN)/tmux-linux-amd64 $(BIN)/tmux-linux-arm64 $(SIDECAR)/
 
 app-dev: all
 	cd app && pnpm tauri dev

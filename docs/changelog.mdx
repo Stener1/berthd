@@ -11,6 +11,37 @@ again.
 
 ## Unreleased
 
+- **Adding a box over SSH is one guided install.** Set up (or Install and
+  pair on a tailnet machine) first shows the plan: what will run, step by
+  step, the exact commands a click away, which steps may need `sudo`, and
+  an **Agents** choice (Claude Code ticked; Codex, Cursor Agent and OpenCode
+  to add; remembered for the next box). Then `berth add ssh` runs in a
+  terminal here, full screen, beside a checklist: press Enter to start, and
+  type your password when `sudo` asks for it on the box (it goes to the box
+  and nowhere else; Berth never sees or keeps it). A failed step shows its
+  command as a copyable line and **Retry from here**; the steps before it
+  are kept. It ends with **Ready**, and goes on to the box, or back to Team
+  setup. `berth add ssh` does the same in your own terminal: the plan, then
+  Enter; `--yes` and scripts stop with the command to run instead, never a
+  command made into a sentence.
+- **Berth brings its own tmux.** `berth` and the app carry a static tmux
+  for Linux (amd64 and arm64, 1.3 MB, built from pinned sources by
+  `scripts/build-tmux.sh`), uploaded to `~/.local/bin` on a box without
+  one, so tmux needs no sudo. git still comes from the package manager, in
+  the guided terminal. berthd's service now has `~/.local/bin` on its `PATH`
+  on Linux too.
+- **Berth installs the agent CLIs.** `berthd agents install claude codex`
+  puts them in `~/.local/bin` without sudo: Claude Code with its native
+  installer, Codex from its pinned GitHub release with its sha256 checked,
+  Cursor Agent and OpenCode with their own installers; each is skipped when
+  it is there. The guided install runs it, then installs their hooks and
+  skills (`berthd integrations install present`), so there is nothing left
+  to run by hand. **Settings › Boxes › … › Add agents…** adds more later, in
+  the same view. Signing in stays yours. A team setup can name them too:
+  `"agents": ["claude", "codex"]` in `team.json` becomes Berth's own step.
+- The guided install refuses to install as root, and asks before berthd
+  listens on every interface on a box without a tailnet address.
+
 - **Team setup.** A GitHub org publishes how its engineers' boxes are set
   up in a repository called `.berth` (`team.json`, schema `berth.team/v1`,
   plus the box script and any kits), and a new engineer runs it from Berth:
@@ -77,6 +108,12 @@ again.
   is part of every worktree's URL, so `team.json` refuses one with a dot
   (`cal.com`; use `cal`, with `path` keeping the folder). Repos picked from
   an org without a `.berth` get one (`cal.com` → `cal-com`).
+- **A box with a full hostname has worktree URLs.** A cloud VM whose
+  hostname is `devbox.europe-north1-a.c.example.internal` called itself by
+  all of it, which can't be one label of a URL, so `$BERTH_URL` was empty
+  and `berthd browser open` refused every worktree. A box (and a box a
+  laptop pairs) is now named by its hostname's first label, `devbox`, with
+  `_` becoming `-`. Restart berthd on such a box to pick up the new name.
 - **The Cal.com example** is now the one a real run on a fresh Ubuntu 24.04
   box went through: 8 box steps, 4 with sudo, versions in `box.settings`,
   for the public `calcom/cal.com` (Cal.com's own setup lives privately).

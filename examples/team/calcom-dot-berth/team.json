@@ -28,6 +28,8 @@
       { "id": "redis", "title": "Redis in Docker", "detail": "cal-redis, the version in box.settings (8), on 127.0.0.1:6379, volume cal-redis-data, restarts unless stopped" }
     ]
   },
+  "agents": ["claude", "codex"],
+  "$agents": "The agent CLIs every Cal.com box gets. Berth installs them as a step of its own, after the steps above, into ~/.local/bin without sudo (Claude Code with its native installer, Codex from its pinned GitHub release, checksum checked), then their hooks and skills. Each engineer signs in to them on first start.",
   "projects": [
     {
       "id": "cal",

@@ -18,9 +18,17 @@ import (
 
 // tmuxDirs are searched for tmux after PATH. berthd started by the app or
 // launchd on a Mac inherits a minimal PATH without Homebrew's, so a tmux
-// installed there would otherwise look missing. A variable so tests can
-// point it elsewhere.
-var tmuxDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"}
+// installed there would otherwise look missing; and the guided install puts
+// Berth's own tmux in ~/.local/bin when a box has none, which a service's
+// PATH may lack. A variable so tests can point it elsewhere.
+var tmuxDirs = append([]string{"/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"}, localBin()...)
+
+func localBin() []string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return []string{filepath.Join(home, ".local", "bin")}
+	}
+	return nil
+}
 
 // tmuxFound caches where tmux was found. Only a find is kept, so a box
 // that lacked tmux finds it once it is installed, without a restart.

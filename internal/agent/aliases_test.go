@@ -58,3 +58,23 @@ func TestTheProxyAcceptsTheBoxsOwnName(t *testing.T) {
 		t.Errorf("an unknown box name got %d", code)
 	}
 }
+
+// Two cloud VMs called devbox in different zones both name themselves
+// devbox, the first label of their hostnames. A laptop that paired them as
+// devbox-a and devbox-b cannot tell which one devbox means, so it leads to
+// neither; once one is paired as devbox, that name is its own.
+func TestABoxsOwnNameClaimedTwiceIsNoAlias(t *testing.T) {
+	a := &Agent{clients: map[string]*boxState{"devbox-a": {}, "devbox-b": {}}}
+	a.selfNames.set("devbox-a", "devbox")
+	if paired, ok := a.boxAlias("devbox"); !ok || paired != "devbox-a" {
+		t.Fatalf("one box: %q %v", paired, ok)
+	}
+	a.selfNames.set("devbox-b", "devbox")
+	if paired, ok := a.boxAlias("devbox"); ok {
+		t.Fatalf("two boxes claim devbox, and it led to %q", paired)
+	}
+	a.clients["devbox"] = &boxState{}
+	if paired, ok := a.boxAlias("devbox"); ok {
+		t.Fatalf("a paired box's name is no alias, and it led to %q", paired)
+	}
+}

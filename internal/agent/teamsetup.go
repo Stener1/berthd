@@ -115,6 +115,8 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 		tb.Projects = append(tb.Projects, plan)
 	}
 	tb.GitHub = len(tb.Projects) > 0
+	// The agent CLIs the team names, installed by Berth's own step.
+	tb.Agents = r.setup.Agents
 	// The box reads the shared keys' op:// references with its own op,
 	// which Berth signs in as a step, so nothing asks in a service's
 	// terminal later.

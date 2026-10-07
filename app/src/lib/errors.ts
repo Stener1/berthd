@@ -40,9 +40,18 @@ export function looksRaw(text: string): boolean {
   return RAW.some((r) => r.test(text.trim()));
 }
 
+// looksCommand is text that is a command to type ("sudo apt-get install -y
+// git"): it is never made into a sentence, which would capitalise it into
+// something that no longer runs.
+export function looksCommand(text: string): boolean {
+  const t = text.trim();
+  return /^(sudo|curl|apt(-get)?|dnf|yum|brew|berthd?|ssh|git|tmux|npm|pnpm|export|loginctl|systemctl)\s/.test(t) || /^[a-z][\w.-]*\s+(-{1,2}[\w-]+|&&)/.test(t);
+}
+
 const sentence = (s: string) => {
   const t = s.trim().replace(/\s+/g, " ");
   if (!t) return t;
+  if (looksCommand(t)) return t;
   const first = t.charAt(0).toUpperCase() + t.slice(1);
   return /[.!?…)]$/.test(first) ? first : `${first}.`;
 };

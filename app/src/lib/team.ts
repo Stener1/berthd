@@ -59,6 +59,8 @@ export interface TeamSetup {
   docs?: string;
   // settings reach the box script as BERTH_SETTING_<NAME>.
   box?: { os?: string[]; script?: string; steps?: TeamStep[]; settings?: Record<string, string> };
+  // The agent CLIs Berth installs on the box, as a step of its own.
+  agents?: string[];
   projects?: TeamProjectSpec[];
   keys?: Record<string, TeamKeys>;
   updates?: { notify?: boolean };

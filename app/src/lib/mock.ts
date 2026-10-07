@@ -1,5 +1,5 @@
 import { mockFileBlob, mockFilesCall } from "@/lib/mock-files";
-import type { BerthEvent, Client, Hook, HooksFile, Location, Service, Session, Stats, Status, TerminalHandlers, Turn } from "@/lib/api";
+import type { BerthEvent, Client, Hook, HooksFile, Location, Service, Session, SshFailure, Stats, Status, TerminalHandlers, Turn } from "@/lib/api";
 import { flowsCall } from "@/lib/mock-flows";
 import { runsCall } from "@/lib/mock-runs";
 import { mockRequirements } from "@/lib/mock-requirements";
@@ -18,6 +18,7 @@ import { usageCall, usageExec } from "@/lib/mock-usage";
 import { initMockQueue, queueCall } from "@/lib/mock-queue";
 import { computersBoxCall, computersCall, initMockComputers } from "@/lib/mock-computers";
 import { initMockLocalBox, localBoxCall, localBoxFolders, localBoxStream } from "@/lib/mock-local-box";
+import { initMockInstall, mockBoxAgents, mockInstallAgents, mockInstallPlan, mockInstallTerminal } from "@/lib/mock-install";
 import { mockBoxDoctor, mockDiagnosticsCall } from "@/lib/mock-diagnostics";
 import { ApiError } from "@/lib/api";
 import { titleOf } from "@/lib/derive";
@@ -596,6 +597,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
   }
   const review = reviewCall(box, method, path, sessions[box]);
   if (review) return review;
+  if (method === "GET" && path === "agents") return delay(mockBoxAgents(box));
   if (method === "GET" && path === "requirements") {
     reqAsks[box] = (reqAsks[box] ?? 0) + 1;
     return delay(mockRequirements(box, !!status.boxes.find((b) => b.name === box)?.local, reqAsks[box] - 1));
@@ -651,7 +653,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
       build: mockBuilds[box] ?? SHIPPED_BUILD,
       tools: ["claude", "codex"],
       home: HOME,
-      capabilities: ["diff", "turns", "queue", "ask", "answer", "journal", "runs", "exec.detach", "browser", "titles", "sample", "service.terminal", "session.home"],
+      capabilities: ["diff", "turns", "queue", "ask", "answer", "journal", "runs", "exec.detach", "browser", "titles", "sample", "service.terminal", "session.home", "agents.install"],
       adapters: {
         claude: { ready: true, started: true, waiting: true, finished: true, final_message: true, via: "hooks" },
         codex: { ready: true, started: true, waiting: true, finished: true, final_message: true, via: "hooks" },
@@ -946,6 +948,11 @@ function laptopBoxes(method: string, path: string, body: unknown): Promise<unkno
         }),
     });
   if (method === "GET" && path === "/v1/ssh/hosts") return delay(["dev-box", "hetzner", "pi"]);
+  if (method === "GET" && path.startsWith("/v1/ssh/install-plan")) {
+    const q = new URLSearchParams(path.split("?")[1] ?? "");
+    const agents = (q.get("agents") ?? "").split(",").filter((a) => a && a !== "none");
+    return delay(mockInstallPlan(q.get("host") || "me@box", agents));
+  }
   if (method === "GET" && path.startsWith("/v1/ssh/plan")) return delay(mockSshPlan(new URLSearchParams(path.split("?")[1]).get("host") ?? ""));
   if (method === "POST" && path === "/v1/boxes/pair") {
     const r = body as { link: string; name?: string; network?: string };
@@ -1011,6 +1018,11 @@ async function mockStream(method: string, path: string, body: unknown, onValue: 
     onValue({ done: true });
     return;
   }
+  const addAgents = /^\/v1\/boxes\/([^/]+)\/api\/agents\/install$/.exec(path);
+  if (method === "POST" && addAgents) {
+    await mockInstallAgents(decodeURIComponent(addAgents[1]), (body as { agents: string[] }).agents, onValue, wait);
+    return;
+  }
   const upgrade = /^\/v1\/boxes\/([^/]+)\/upgrade$/.exec(path);
   if (method === "POST" && upgrade) {
     const name = decodeURIComponent(upgrade[1]);
@@ -1065,6 +1077,12 @@ async function mockStream(method: string, path: string, body: unknown, onValue: 
 initMockComputers({ status, networks: mockNetworks, addBox: addMockBox, emit, delay });
 // Use this Mac (lib/mock-local-box).
 initMockLocalBox({ status, addBox: addMockBox, delay });
+// The guided install's terminal (lib/mock-install).
+initMockInstall({
+  addBox: addMockBox,
+  sshFailure: (host, trusted) => mockSshFailure(host, trusted) as SshFailure | undefined,
+  boxIP: (where) => [...discovery.machines, ...networkMachines].find((m) => m.dns_name === where || m.ip === where)?.ip ?? "100.64.0.11",
+});
 
 // The offline prompt queue and its box-offline simulator (lib/mock-queue).
 initMockQueue({ status, sessions, emit, delay, send: (box, session, text, enter) => boxCall(box, "POST", `sessions/${encodeURIComponent(session)}/send`, { text, enter, when: "now" }) }, fresh);
@@ -1169,6 +1187,7 @@ export function mockClient(): Client {
       setTimeout(onConnect, 0);
       signal.addEventListener("abort", () => listeners.delete(onEvent));
     },
+    installTerminal: (req, cols, rows, handlers) => mockInstallTerminal(req, cols, rows, handlers),
     attach: (box, session, _cols, _rows, h) => mockAttach(box, session, h),
     serviceUrl: (box, port) => `http://${port}.${box}.localhost:1377/`,
   };

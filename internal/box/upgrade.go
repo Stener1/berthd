@@ -139,7 +139,9 @@ func (b *Box) Capabilities() []string {
 	// latest turns touched (worktreefiles.go, touched.go). files.dir:
 	// GET .../files?dir= lists one folder for the Files panel
 	// (worktreefolder.go), and touched files say live.
-	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir"}
+	// agents.install: GET /v1/agents and POST /v1/agents/install, agent
+	// CLIs added to the box without sudo (agentinstall.go).
+	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install"}
 	if b.Turns != nil {
 		// controls: POST .../keys, .../interrupt and .../mode, GET
 		// .../controls (controls.go).

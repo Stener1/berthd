@@ -13,14 +13,15 @@ TLS; it never needs SSH to reach the box, and at most uses it once, to install.
 
 - Linux (or macOS) on amd64 or arm64
 - `git` (repositories and worktrees) and `tmux` (sessions). A fresh Ubuntu
-  has neither: the install command and `berth add ssh` install them when
-  that needs no password, the install command offers to with `sudo` when it
-  can ask, and otherwise they stop with the command to run
-  (`sudo apt-get install -y tmux git`)
+  has neither: [over SSH](#over-ssh) Berth puts its own tmux on the box (no
+  sudo) and installs git in a terminal where `sudo` asks for your password;
+  the install command offers to install both with `sudo` when it can ask,
+  and otherwise stops with the command to run
 - a [Tailscale](https://tailscale.com) address, unless you choose to listen
   elsewhere (see [Where berthd listens](#where-berthd-listens))
-- optional: the agent CLIs you want to run (`claude`, `codex`, …), and
-  `cloudflared` for public shares
+- the agent CLIs you want to run (`claude`, `codex`, …): setting a box up
+  over SSH installs the ones you pick; and optionally `cloudflared` for
+  public shares
 
 ## This Mac
 
@@ -186,37 +187,125 @@ read it before piping it to `sh` if you like.
 
 ## Over SSH
 
-If you can `ssh me@my-box`, one command on the laptop installs berthd and
-pairs, with nothing to run on the box. It uploads the Linux daemons that sit
-beside `berth`: the app carries them, and so do the release's CLI archive and
-`make all` (see [the berth command](/getting-started/install#the-berth-command)):
+If you can `ssh me@my-box`, Berth sets the box up from here in one guided
+flow, with nothing to install on the box by hand: berthd, tmux and git when
+they're missing, the agent CLIs you choose, their hooks, and the pairing.
+
+### In the app
+
+**Add a box › Or let Berth set it up over SSH** (or **Install and pair** on a
+machine on your tailnet) opens the guided install, full screen:
+
+1. **The plan.** What will run, step by step, with the exact commands a click
+   away and the steps that may need `sudo` marked. Above it, **Agents**:
+   Claude Code is ticked; Codex, Cursor Agent and OpenCode are there to add.
+   Your choice is remembered for the next box.
+2. **The terminal.** Open the terminal and install starts `berth add ssh` in
+   a terminal on this computer, shown full screen beside a checklist of the
+   steps. Press **Enter** in it to start. When `sudo` on the box asks
+   for your password, the banner says so: type it in the terminal. What you
+   type goes to the box through this terminal and nowhere else; Berth never
+   sees, keeps or logs it.
+3. **Ready.** Each step ticks as it ends. A step that fails shows what failed
+   (with any command to run as a copyable line) and **Retry from here**,
+   which runs again from that step; the steps before it are kept. At the end
+   the box is paired, and the button goes on to it (or back to
+   [Team setup](/guides/team-setup) when that's where you came from).
+
+A login problem stops at the first step with what to do: trust a new host
+key, try another key file, or install with the command on the box instead.
+
+### From a terminal
+
+The same flow, in your own terminal:
 
 ```sh
-berth add ssh me@my-box --name my-box
+berth add ssh me@my-box --agents claude,codex
 ```
 
-It:
+It connects, reads what the box has, prints the plan, and waits for
+**Enter**:
 
-1. opens one SSH connection (asking any password or host-key question once;
-   if your keys are refused it tries 1Password's SSH agent);
-2. checks the box's platform with `uname`;
-3. uploads the matching `berthd-<os>-<arch>` from beside `berth` to
-   `~/.local/bin/berthd` on the box;
-4. runs `berthd install`, which sets berthd up as a user service (systemd
-   on Linux, launchd on macOS) and installs the
-   [hooks that report agent state](/getting-started/first-agent#let-the-box-report-agent-state)
-   for the agent CLIs it finds;
-5. runs `berthd pair` and pairs this laptop with the link it prints.
+```text title="On a fresh Ubuntu 24.04 box"
+==> Connect to me@my-box
+✓ Connect to me@my-box (me@my-box, linux/arm64)
 
-```text title="Example output"
-Using your SSH agent
-Checking me@my-box…
-Installing berthd-linux-amd64 (9 MB)…
-  Installed /home/me/.config/systemd/user/berthd.service; berthd is serving on 100.101.102.103:7444.
-  Agent integrations (hooks for needs-you, working and done; berth's skills):
-    Claude Code: skills in /home/me/.claude/skills; hooks added in /home/me/.claude/settings.json
-    Not found: Codex, Cursor Agent. After installing one, run: /home/me/.local/bin/berthd integrations install codex|cursor
-Paired with my-box at 100.101.102.103:7444. SSH is no longer needed for this box.
+Berth will set this box up:
+ 1. Install berthd
+      upload berthd-linux-arm64 → ~/.local/bin/berthd
+      ~/.local/bin/berthd install --no-tools --no-integrations --keep-listen
+ 2. Keep berthd running after you log out  [sudo]
+      sudo loginctl enable-linger me
+ 3. tmux and git  [sudo]
+      upload tmux-linux-arm64 → ~/.local/bin/tmux   (Berth's own build: no sudo)
+      sudo apt-get update -q
+      sudo apt-get install -y -q git
+ 4. Claude Code and Codex
+      ~/.local/bin/berthd agents install claude codex
+ 5. Agent integrations
+      ~/.local/bin/berthd integrations install present
+ 6. Pair with this computer
+
+Press Enter to start, or Ctrl-C to stop.
+```
+
+Then it uploads berthd (and Berth's tmux, below), and runs the box's steps
+in one terminal on the box (`ssh -t`), so `sudo` asks for your password once,
+there. It ends with `Ready: paired with my-box`. Running it again is safe:
+each step checks first, and on a box that is set up it only reinstalls the
+service and pairs again.
+
+What each step does:
+
+- **berthd** goes in `~/.local/bin` and runs as your user service (systemd on
+  Linux, launchd on macOS), with `~/.local/bin` on its `PATH`.
+- **Lingering** (Linux): systemd stops a user's services at logout unless
+  lingering is on, so it is turned on with `sudo loginctl enable-linger`,
+  only if it is off.
+- **tmux and git**, only what is missing. `berth` and the app carry a static
+  tmux for Linux (amd64 and arm64), so a box without tmux gets that one in
+  `~/.local/bin`, with no sudo. git comes from the box's package manager
+  (apt, dnf, yum, pacman, zypper, apk or Homebrew) with `sudo`.
+- **Agent CLIs**, without sudo, into `~/.local/bin`, each skipped when it is
+  there already (`berthd agents install`):
+  - Claude Code with its native installer
+    (`curl -fsSL https://claude.ai/install.sh | bash`), which checks the
+    build it downloads against its checksum;
+  - Codex, its release binary from
+    [github.com/openai/codex](https://github.com/openai/codex/releases),
+    pinned to a version and checked against its sha256;
+  - Cursor Agent and OpenCode with their own installers (over HTTPS; neither
+    publishes checksums for them).
+
+  Gemini CLI isn't offered: it installs with npm and needs Node.js 20 or
+  newer, which Berth doesn't install. Install Node, then
+  `npm install -g @google/gemini-cli`.
+  If a login shell's `PATH` lacks `~/.local/bin`, one marked line adds it to
+  your profile. Signing in is yours: each agent asks the first time it starts
+  (Claude Code right in the chat).
+- **Integrations**: the [hooks that report agent state](/getting-started/first-agent#let-the-box-report-agent-state)
+  and Berth's skills, for every agent CLI on the box.
+- **Pair**: `berthd pair` on the box, and this computer pairs with the link.
+
+A box without a tailnet address asks where berthd should listen: press
+**Enter** to listen on every interface (`0.0.0.0:7444`; only laptops
+you pair can connect, both keys pinned), or pass `--listen`.
+
+Berth installs as the user your agents will run as, never as root: logging in
+as `root` stops at the first step and says to log in as that user (make one
+with `adduser me && usermod -aG sudo me`).
+
+### Without a terminal
+
+With `--yes`, or with no terminal (a script, CI), nothing waits for Enter and
+nothing can type a password: steps that need `sudo` use it only when it asks
+for nothing, and otherwise stop with the command to run on the box:
+
+```text
+Installing git needs root, and sudo asks for a password, which Berth can't type without a terminal.
+Run this on the box, then set it up again:
+  sudo apt-get update -q && sudo apt-get install -y -q git
+✗ tmux and git: Installing git needs root, and sudo asks for a password, which Berth can't type without a terminal.
 ```
 
 Only the Linux daemons come with `berth`. For a Mac box, run
@@ -233,19 +322,25 @@ Options:
 | Flag | What it does |
 | --- | --- |
 | `--name N` | What to call the box in Berth (default: its hostname). It becomes part of URLs like `3000.N.localhost`. |
+| `--agents LIST` | The agent CLIs to install: `claude`, `codex`, `cursor`, `opencode`, comma-separated, or `none` (default `claude`). |
+| `--yes` | Ask nothing: don't wait for Enter, and stop with the command to run where `sudo` would ask for a password. |
+| `--from STEP` | Start from a step (`berthd`, `linger`, `tools`, `agents`, `integrations`, `pair`), keeping the ones before it. It still connects first. |
 | `--network NET` | Reach the box through one of [your other tailnets](#boxes-on-another-tailnet). |
-| `--listen ADDR` | Passed to `berthd install`, for a box without a tailnet address. |
+| `--listen ADDR` | Where berthd listens, for a box without a tailnet address. |
 | `--address ADDR` | The address the laptop should dial, when the one berthd guesses is wrong. |
 | `--identity FILE` | An SSH private key to log in with, as `ssh -i`. |
 | `--trust-host-key SHA256:…` | Trust a new box's host key if its fingerprint is this one. |
 | `--no-integrations` | Don't install agent hooks and skills on the box. |
 | `-- OPTIONS` | Anything after `--` goes to `ssh`. |
 
-<Callout title="Keep it running after you log out">
-  `berthd install` warns when user lingering is off, because systemd then
-  stops user services at logout. Turn it on once with
-  `sudo loginctl enable-linger $USER`.
-</Callout>
+### More agents later
+
+**Settings › Boxes**, a box's **…** menu, **Add agents…** adds agent CLIs to
+a box that is already set up, in the same view: the agents to choose (the
+ones there are ticked and marked), then their install and integrations in a
+terminal beside a checklist. Nothing there needs a password. On the box
+itself it is `berthd agents install --integrations codex`; `berthd agents
+list` says which are there.
 
 ## With a pairing link
 

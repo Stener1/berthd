@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sean-brydon/berthd/internal/agentcli"
 )
 
 // Schema is the only team.json schema this build reads.
@@ -33,6 +35,11 @@ const Repo = ".berth"
 // to GitHub with its own gh, so it has a credential of its own to clone
 // with, which can be revoked on its own.
 const GitHubStep = "github"
+
+// AgentsStep is the step Berth adds after the team's own when a team setup
+// names agents: it installs those agent CLIs on the box, as the engineer,
+// without sudo, and their hooks and skills (berthd agents install).
+const AgentsStep = "agents"
 
 // OnePasswordStep is the step Berth adds after GitHub when a team setup's
 // keys read 1Password (op:// references): the box's own op is signed in, in
@@ -53,9 +60,13 @@ type Setup struct {
 	Description string `json:"description,omitempty"`
 	// Contact is where to ask for help or access, in the team's words
 	// ("#eng-onboarding on Slack").
-	Contact  string    `json:"contact,omitempty"`
-	Docs     string    `json:"docs,omitempty"`
-	Box      Box       `json:"box"`
+	Contact string `json:"contact,omitempty"`
+	Docs    string `json:"docs,omitempty"`
+	Box     Box    `json:"box"`
+	// Agents are the agent CLIs every engineer's box gets ("claude",
+	// "codex", "cursor", "opencode"), installed by Berth as a step of its
+	// own. Signing in to each stays the engineer's.
+	Agents   []string  `json:"agents,omitempty"`
 	Projects []Project `json:"projects"`
 	Keys     KeySet    `json:"keys,omitempty"`
 	Updates  Updates   `json:"updates"`
@@ -191,7 +202,7 @@ var (
 	orgPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
 	keyPattern     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 	refPattern     = regexp.MustCompile(`^(op|env)://[^\n\r]+$`)
-	reservedSteps  = map[string]bool{"all": true, "check": true, "plan": true, GitHubStep: true, OnePasswordStep: true}
+	reservedSteps  = map[string]bool{"all": true, "check": true, "plan": true, GitHubStep: true, OnePasswordStep: true, AgentsStep: true}
 )
 
 // ValidOrg reports whether s can be a GitHub org or user name.
@@ -217,7 +228,7 @@ func Parse(data []byte) (*Setup, []string, error) {
 
 // known lists the fields of each object in team.json, for warnings.
 var known = map[string][]string{
-	"":        {"schema", "id", "name", "org", "description", "contact", "docs", "box", "projects", "keys", "updates"},
+	"":        {"schema", "id", "name", "org", "description", "contact", "docs", "box", "agents", "projects", "keys", "updates"},
 	"box":     {"os", "script", "steps", "settings"},
 	"step":    {"id", "title", "detail", "sudo"},
 	"project": {"id", "repo", "path", "required", "kit", "init", "init_detail", "first_task"},
@@ -335,7 +346,7 @@ func (s *Setup) Validate() error {
 			return fmt.Errorf("box.steps[%d]: id %q must be lowercase letters, digits and dashes, starting with a letter", i, st.ID)
 		}
 		if reservedSteps[st.ID] {
-			return fmt.Errorf("box.steps[%d]: %q is reserved (all, check, plan, github and 1password are not step names)", i, st.ID)
+			return fmt.Errorf("box.steps[%d]: %q is reserved (all, check, plan, agents, github and 1password are not step names)", i, st.ID)
 		}
 		if seen[st.ID] {
 			return fmt.Errorf("box.steps: %q is there twice", st.ID)
@@ -343,6 +354,14 @@ func (s *Setup) Validate() error {
 		seen[st.ID] = true
 		if strings.TrimSpace(st.Title) == "" {
 			return fmt.Errorf("box.steps[%d] (%s) has no title", i, st.ID)
+		}
+	}
+	if _, err := agentcli.ParseList(strings.Join(s.Agents, ",")); err != nil {
+		return fmt.Errorf("agents: %v", err)
+	}
+	for _, a := range s.Agents {
+		if a == "none" || strings.ContainsAny(a, ", ") {
+			return fmt.Errorf("agents: %q is not an agent id (claude, codex, cursor, opencode)", a)
 		}
 	}
 	ids, repos := map[string]bool{}, map[string]bool{}

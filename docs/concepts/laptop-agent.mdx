@@ -29,7 +29,8 @@ a forward or a queued prompt.
 ## A box's own name
 
 You name a box when you pair it (`devl`), and the box has a name of its own
-(`devbox`, its hostname). URLs the box makes, such as `$BERTH_URL` or an
+(`devbox`, its hostname's first label, so `devbox.europe-north1-a.c.example.internal`
+is `devbox` too). URLs the box makes, such as `$BERTH_URL` or an
 app's configured origin, use its own name: `http://checkout.shop.devbox.localhost:1377`.
 The proxy accepts both, so a link an agent prints opens on your laptop, and
 on a new computer that paired the box under another name. It learns each
