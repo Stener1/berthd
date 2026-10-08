@@ -142,6 +142,121 @@ a box's own flow with that `id` replaces the kit's.
 A plugin can ship kits by listing their folders under `"kits"` in its
 `berth-plugin.json`.
 
+## Personas: logging in as a dev user
+
+Most pages worth checking are behind a login. A kit can name the dev users a
+worktree can be logged in as, and a script that logs one in, so you, an
+agent, or a visual diff open a worktree as "the Pro user" in one step:
+
+```json title="kit.json"
+{
+  "id": "shop-dev",
+  "name": "Shop development",
+  "config": {
+    "login": {
+      "script": "scripts/login.sh",
+      "users": [
+        "pro@acme.test",
+        { "email": "admin@acme.test", "label": "Team admin" },
+        { "email": "free@acme.test", "label": "Free user" }
+      ],
+      "any": false
+    }
+  }
+}
+```
+
+- **`script`** is a path inside the kit's folder (for a repository's
+  `.berth/config.json`, inside its `.berth/` folder). It runs in the
+  worktree, with the worktree's environment (`$BERTH_PORT`, `$BERTH_URL`,
+  its `DATABASE_URL`…) and `BERTH_LOGIN_EMAIL`, against the worktree's own
+  dev server and database. The email is only ever an environment variable,
+  never part of a command line.
+- **`users`** are emails, or `{ "email", "label" }`. People see the label.
+- **`any`**: `true` lets a link or a command name any valid email, not only
+  the listed ones. It is `false` unless you say so.
+
+`login` can also sit at the top of `kit.json`, next to `config`.
+
+### What the script prints
+
+One JSON object on stdout:
+
+```json
+{ "cookies": [{ "name": "session", "value": "…", "httpOnly": true, "sameSite": "Lax" }], "redirect": "/dashboard" }
+```
+
+Each cookie takes `name` and `value`, and optionally `path`, `httpOnly`,
+`secure`, `sameSite` (`Lax`, `Strict` or `None`) and `maxAge` (seconds).
+There is no `domain`: a cookie is always set for the worktree's own address
+and no other. `redirect` is where to go when nobody asked for a page. Output
+that isn't exactly this, more than 64 KB of it, a non-zero exit, or more than
+30 seconds is an error, and the error never quotes what the script printed.
+Write anything else (progress, a reason it failed) to stderr, which is
+dropped.
+
+A script for an app with a credentials endpoint (`POST /api/auth/login`,
+which sets a `session` cookie):
+
+```sh title="scripts/login.sh"
+#!/bin/sh
+# Logs the worktree's own dev server in as $BERTH_LOGIN_EMAIL and prints
+# the session it set. Every seeded user has the password acme-dev.
+set -eu
+jar=$(mktemp)
+trap 'rm -f "$jar"' EXIT
+body=$(printf '{"email":"%s","password":"%s"}' "$BERTH_LOGIN_EMAIL" "${ACME_DEV_PASSWORD:-acme-dev}")
+curl -fsS -o /dev/null -c "$jar" -H 'content-type: application/json' \
+  --data "$body" "http://localhost:$BERTH_PORT/api/auth/login"
+session=$(awk -F '\t' '$6 == "session" { print $7 }' "$jar")
+[ -n "$session" ] || { echo "the app set no session cookie" >&2; exit 1; }
+printf '{"cookies":[{"name":"session","value":"%s","httpOnly":true,"sameSite":"Lax"}],"redirect":"/dashboard"}\n' "$session"
+```
+
+The users have to exist in the worktree's database: seed them in the kit's
+`setup` script, or let the login script create one it doesn't find.
+
+### Logging in
+
+- **In the app:** the Browser tab's **Log in as…** menu, next to the
+  address, lists the worktree's users and logs the tab in, staying on the
+  page it shows. ⌘K has **Log in as Pro user** for each. The project's
+  settings show the login read-only, under **Login users**.
+- **In any browser on your laptop:** open
+  `http://fix-x.shop.devl.localhost:1377/__berth/login?as=pro%40acme.test&next=/orders`
+  (the main checkout: `shop.devl.localhost`). The laptop runs the
+  worktree's login on its box, answers with the cookies for that address
+  only, and sends you on to `next`.
+- **An agent:** `berthd browser open --as pro@acme.test --path /orders`
+  logs the [agent browser](/guides/agent-browser) in the same way.
+- **A visual diff:** `berthd shots compare --as pro@acme.test` logs both
+  sides in, each with its own login, since the worktree and main each have
+  their own dev server and database. See
+  [visual diffs](/guides/visual-diffs).
+
+### What keeps it safe
+
+- **Only config you trust names users.** A login comes from the kit, the
+  box's own config, or the repository's `.berth/config.json` in the main
+  checkout once [trusted](/guides/project-config#trusting-a-repositorys-config),
+  never from a worktree's own checkout: a pull request can't add a user or
+  change the script.
+- **Only you start a login.** The `/__berth/login` route takes `GET` from
+  your own laptop, and only when nothing else started it: a request another
+  site or another worktree's page sent (by its `Origin`, its `Referer`, or
+  `Sec-Fetch-Site`) is refused. It is the laptop's own: it never reaches the
+  dev server.
+- **`next` stays on the worktree.** Anything that isn't a plain path, such
+  as `//evil.example`, `https://…` or `/\evil.example`, encoded or not,
+  goes to `/` instead.
+- **Emails are plain addresses.** `a@b.c; rm -rf /` or anything with a
+  space, a quote or a `$` is refused before anything runs, and with `"any":
+  false` so is an email the config doesn't list.
+- **Sessions stay out of the record.** The box's journal gets a
+  `worktree.login` event with the worktree, the email and whether it
+  worked; cookie values never reach a log, an event or an error. A
+  `before:worktree.login` [gate](/guides/hooks#gates) can refuse a login.
+
 ## Safety
 
 A kit runs its scripts on the boxes you apply it to, with your account's

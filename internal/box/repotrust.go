@@ -71,7 +71,8 @@ func readRepoFile(repo string) (c RepoConfig, hash string, ok bool, err error) {
 // runs. Ports alone only reserve ports.
 func (c RepoConfig) runsAnything() bool {
 	return c.Setup != "" || c.Archive != "" || len(c.Env) > 0 || len(c.Services) > 0 ||
-		len(c.Hooks) > 0 || len(c.Flows) > 0 || len(c.Agents) > 0 || len(c.BrowserAllow) > 0
+		len(c.Hooks) > 0 || len(c.Flows) > 0 || len(c.Agents) > 0 || len(c.BrowserAllow) > 0 ||
+		c.Login != nil
 }
 
 // repoLayer is the part of a location's repository config the box applies,
@@ -174,6 +175,9 @@ func wantsSummary(c *RepoConfig) map[string]any {
 	}
 	if len(c.Agents) > 0 {
 		out["agents"] = len(c.Agents)
+	}
+	if c.Login != nil {
+		out["login"] = c.Login.Script
 	}
 	return out
 }

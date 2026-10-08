@@ -61,22 +61,34 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		fs, _ := flags(args)
 		size := fs.String("size", "", "the page's size first: WIDTHxHEIGHT or a preset (phone, phone-max, tablet, laptop, desktop)")
 		scale := fs.String("scale", "", "the device scale factor first, 1 to 3")
+		as := fs.String("as", "", "log in as this user first (an email the project's login lists)")
+		path := fs.String("path", "", "the page to open, such as /settings (the same as PATH)")
+		usage := "browser open [LOC/WT] [PATH|URL] [--as EMAIL] [--path /x] [--size WxH|PRESET] [--scale N]"
 		pos, err := parse(fs, args)
 		if err != nil || len(pos) > 2 {
-			return usageErr("browser open [LOC/WT] [PATH|URL] [--size WxH|PRESET] [--scale N]")
+			return usageErr(usage)
 		}
 		loc, wt, rest, err := browserWorktree(pos)
 		if err != nil {
 			return err
 		}
-		target := ""
+		target := *path
 		if len(rest) > 0 {
+			if target != "" {
+				return usageErr(usage)
+			}
 			target = rest[0]
+		}
+		if *path != "" && !strings.HasPrefix(*path, "/") {
+			return errors.New("--path is a path on the worktree, such as /settings")
+		}
+		if *as != "" && !box.ValidLoginEmail(*as) {
+			return fmt.Errorf("--as takes an email, such as pro@acme.test; %q isn't one", *as)
 		}
 		if err := checkSize(*size, *scale); err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "open", map[string]string{"url": target, "size": *size, "scale": *scale}, out)
+		return browserCall(ctx, c, loc, wt, "POST", "open", map[string]string{"url": target, "size": *size, "scale": *scale, "as": *as}, out)
 	case "resize":
 		fs, _ := flags(args)
 		scale := fs.String("scale", "", "the device scale factor, 1 to 3 (2 for a Retina screen)")

@@ -39,6 +39,10 @@ type Proxy struct {
 	// art-<id>.<box>.localhost (artifact.go). Optional: without it those
 	// hosts answer 404.
 	Artifact ArtifactFunc
+	// Login runs a worktree's login script for the login route
+	// (login.go). Optional: without it the route answers 404, and it is
+	// never forwarded either way.
+	Login LoginFunc
 	// LibFetch fetches a pinned library for artifact pages; nil uses the
 	// network (tests set it).
 	LibFetch func(ctx context.Context, url string) ([]byte, error)
@@ -61,6 +65,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (requestlog.go).
 	lw := p.logRequest(w, r)
 	defer lw.finish()
+	// The login route is the proxy's own on every host: answered here,
+	// never passed to a dev server or a router (login.go).
+	if isLoginRoute(r) {
+		p.serveLogin(lw, r)
+		return
+	}
 	p.serve(lw, r)
 }
 

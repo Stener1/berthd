@@ -1,6 +1,7 @@
 package box
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -25,5 +26,7 @@ func TestMain(m *testing.M) {
 	}
 	testFinder := &agentpath.Finder{NoCache: true, NoVersion: true, NoNPM: true, SystemDirs: []string{}}
 	agentFinder = func() *agentpath.Finder { return testFinder }
+	// Login scripts run with the test's PATH, never the developer's shell's.
+	loginPATH = func(context.Context) string { return "" }
 	os.Exit(m.Run())
 }

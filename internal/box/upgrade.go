@@ -147,7 +147,7 @@ func (b *Box) Capabilities() []string {
 	// /v1/locations/{name}/worktrees/{worktree} names one, worktreetitles.go).
 	// agents.paths: info says where each agent CLI was found
 	// (agent_paths), and POST /v1/agents/refresh looks again (agentpaths.go).
-	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths"}
+	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths", "login"}
 	if b.Turns != nil {
 		// controls: POST .../keys, .../interrupt and .../mode, GET
 		// .../controls (controls.go).

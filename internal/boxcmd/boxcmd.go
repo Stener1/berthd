@@ -77,7 +77,7 @@ var usageSections = []struct {
 		{"%[1]s flow secret%[3]s FLOW [--scope S] [--json]", "Make a webhook flow's signing secret (shown once)"},
 	}},
 	{"Agent browser (a headless browser on the box, per worktree)", [][2]string{
-		{"%[1]s browser open %[2]s[LOC/WT] [PATH|URL] [--size WxH|PRESET] [--scale N]", "Open the worktree's page ($BERTH_URL); prints a compact snapshot with @refs"},
+		{"%[1]s browser open %[2]s[LOC/WT] [PATH|URL] [--as EMAIL] [--path /x] [--size WxH|PRESET] [--scale N]", "Open the worktree's page ($BERTH_URL), logged in as EMAIL with --as;\nprints a compact snapshot with @refs"},
 		{"%[1]s browser resize %[2]s[LOC/WT] WxH|PRESET [--scale N]", "Set the page's size (default 1920x1080; phone 390x844, tablet, laptop); kept until changed"},
 		{"%[1]s browser snapshot %[2]s[LOC/WT] [--full] [--delta] [--selector SEL] [--depth N]", "The page's elements (interactive by default; capped)"},
 		{"%[1]s browser click|hover|check %[2]s[LOC/WT] @REF", "Act on an element; prints what changed"},
@@ -94,7 +94,7 @@ var usageSections = []struct {
 		{"%[1]s browser reap%[3]s [--dry-run] [--json]", "Close agent-browser (Vercel's CLI) sessions left by ended berth sessions"},
 	}},
 	{"Visual diffs (before/after screenshots of a worktree's pages)", [][2]string{
-		{"%[1]s shots compare %[2]s[LOC/WT] [--pages / /login] [--sizes 375 768 1280]\n         [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both]\n         [--title T] [--note N] [--new]", "Shoot the worktree's pages and the base's, diff them, and\nkeep a visual diff (a new version on a re-run)"},
+		{"%[1]s shots compare %[2]s[LOC/WT] [--pages / /login] [--sizes 375 768 1280]\n         [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both]\n         [--as EMAIL] [--title T] [--note N] [--new]", "Shoot the worktree's pages and the base's, diff them, and\nkeep a visual diff (a new version on a re-run)"},
 		{"%[1]s shots baseline %[2]s[LOC/WT] [--name turn-start] [--pages …] [--sizes …]", "Save the worktree's pages as a baseline to compare with later"},
 		{"%[1]s shots accept %[2]s[LOC/WT] ID", "Keep a visual diff's after-shots as the accepted baseline"},
 	}},

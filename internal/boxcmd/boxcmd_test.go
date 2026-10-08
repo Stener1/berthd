@@ -309,3 +309,27 @@ func TestBrowserSizesFromTheCommandLine(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 }
+
+func TestLogInAsFromTheCommandLine(t *testing.T) {
+	r, _ := run(t, `{"text":"url: x"}`, "browser", "open", "shop/fix-x", "--as", "pro@acme.test", "--path", "/settings")
+	if r.path != "/v1/worktrees/shop/fix-x/browser/open" || r.body["as"] != "pro@acme.test" || r.body["url"] != "/settings" {
+		t.Fatalf("open --as: %s %v", r.path, r.body)
+	}
+	r, _ = run(t, `{"text":"visual diff"}`, "shots", "compare", "shop/fix-x", "--as", "pro@acme.test", "--pages", "/", "/billing")
+	if r.path != "/v1/worktrees/shop/fix-x/shots/compare" || r.body["as"] != "pro@acme.test" || len(r.body["pages"].([]any)) != 2 {
+		t.Fatalf("shots --as: %s %v", r.path, r.body)
+	}
+	// An email that isn't one never reaches the box.
+	for _, args := range [][]string{
+		{"browser", "open", "shop/fix-x", "--as", "a@b.c; rm -rf /"},
+		{"browser", "open", "shop/fix-x", "--as", "$(id)@acme.test"},
+		{"browser", "open", "shop/fix-x", "--path", "settings"},
+		{"browser", "open", "shop/fix-x", "/x", "--path", "/y"},
+		{"shots", "compare", "shop/fix-x", "--as", "pro"},
+	} {
+		rec := &recorder{}
+		if err := Run(context.Background(), &box.Client{Doer: rec}, args, io.Discard); err == nil || rec.path != "" {
+			t.Errorf("%v: %v (sent %q)", args, err, rec.path)
+		}
+	}
+}

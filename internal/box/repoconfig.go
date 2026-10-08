@@ -74,6 +74,11 @@ func (c RepoConfig) validate() error {
 	if err := ValidateFlows(c.Flows); err != nil {
 		return err
 	}
+	if c.Login != nil {
+		if err := c.Login.validate(); err != nil {
+			return err
+		}
+	}
 	return hooks.Validate(c.Hooks)
 }
 
@@ -114,6 +119,10 @@ func merge(repo, local RepoConfig) RepoConfig {
 	out.BrowserAllow = append(append([]string{}, repo.BrowserAllow...), local.BrowserAllow...)
 	if local.Shots != nil {
 		out.Shots = local.Shots
+	}
+	// A login is whole: the script and its users go together.
+	if local.Login != nil {
+		out.Login = local.Login
 	}
 	return out
 }

@@ -19,6 +19,7 @@ import { FlowsSection } from "@/views/project/flows-section";
 import { mergeConfig } from "@/lib/kits";
 import { KitSection } from "@/views/project/kit-section";
 import { KitLayer, LayeredScript, Section, SourceBadge } from "@/views/project/parts";
+import { LoginSection } from "@/views/project/login-section";
 import { ServicesSection } from "@/views/project/services-section";
 import { ProjectTeamKeys } from "@/views/team/team-keys-note";
 import { clean, useProjectConfig } from "@/views/project/use-project-config";
@@ -31,6 +32,7 @@ const SECTIONS = [
   { id: "env", label: "Environment" },
   { id: "ports", label: "Ports" },
   { id: "services", label: "Services" },
+  { id: "login", label: "Login users" },
   { id: "agents", label: "Agents" },
   { id: "flows", label: "Automations" },
   { id: "skills", label: "Skills" },
@@ -186,6 +188,7 @@ export function ProjectView({ box, location }: { box: string; location: string }
                 <EnvSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <PortsSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <ServicesSection repo={base} draft={draft} setDraft={setDraft} box={box} location={location} urlPort={urlPort} />
+                <LoginSection config={config} box={box} />
                 <AgentsSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <FlowsSection box={box} location={location} />
                 <section id="skills" className="scroll-mt-6">
@@ -255,4 +258,4 @@ function MemberSwitcher({ box, location }: { box: string; location: string }) {
 
 // runsAnything: a committed config with only ports needs no trust.
 const runsAnything = (c: RepoConfig | null) =>
-  !!c && !!(c.setup || c.archive || Object.keys(c.env ?? {}).length || c.services?.length || c.hooks?.length || c.flows?.length || c.agents?.length);
+  !!c && !!(c.setup || c.archive || Object.keys(c.env ?? {}).length || c.services?.length || c.hooks?.length || c.flows?.length || c.agents?.length || c.login);
