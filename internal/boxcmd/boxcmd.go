@@ -45,6 +45,7 @@ var usageSections = []struct {
 		{"%[1]s worktree new %[2]sLOC/NAME [--branch B] [--base REF] [--parent NAME]", "Create a git worktree and run its setup; --parent nests it\nunder another worktree of the location"},
 		{"%[1]s worktree rm %[2]sLOC/NAME [--force]", "Remove a worktree"},
 		{"%[1]s worktree rename %[2]sLOC/NAME [TITLE]", "Give a worktree a display name (its branch and folder keep\ntheir names; no TITLE clears it)"},
+		{"%[1]s reviews%[3]s [--idle-days N] [--json]", "Pull requests opened for review here; --idle-days sets how long\none may sit unused before it is cleaned up (0: never)"},
 	}},
 	{"Agent sessions", [][2]string{
 		{"%[1]s sessions%[3]s [--json]", "List sessions"},
@@ -179,6 +180,7 @@ var Commands = map[string]int{
 	"secret": 2,
 	"runs":   1, "run": 2, "flow": 2, "browser": 2, "shots": 2,
 	"artifact": 2,
+	"reviews":  1,
 }
 
 // Run executes args, which start with the command words, against c.
@@ -250,6 +252,8 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return browserCmd(ctx, c, strings.TrimPrefix(cmd, "browser "), rest, out)
 	case "shots compare", "shots baseline", "shots accept":
 		return shotsCmd(ctx, c, strings.TrimPrefix(cmd, "shots "), rest, out)
+	case "reviews":
+		return reviewsCmd(ctx, c, rest, out)
 	case "artifact add", "artifact list", "artifact ls", "artifact show", "artifact rm":
 		return artifactCmd(ctx, c, strings.TrimPrefix(cmd, "artifact "), rest, out)
 	case "run start", "run get", "run logs", "run cancel", "run approve", "run reject", "run templates":

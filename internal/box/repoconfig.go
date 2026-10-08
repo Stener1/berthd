@@ -384,6 +384,17 @@ func (b *Box) worktreeEnv(ctx context.Context, location string, wt Worktree) (wo
 	for k, v := range cfg.Effective.Env {
 		merged[k] = v
 	}
+	// A pull request opened for review gets the team's shared keys, as any
+	// worktree does, and never the reviewer's own (prreview.go).
+	if _, mark := b.Locations.reviewAt(wt.Path); mark != nil && wt.Path != "" {
+		for _, k := range mark.Withheld {
+			delete(merged, k)
+		}
+		vars["BERTH_REVIEW"] = strconv.Itoa(mark.PR)
+		vars["BERTH_REVIEW_REPO"] = mark.Repo
+		vars["BERTH_REVIEW_SHA"] = mark.SHA
+		vars["BERTH_WITHHELD"] = strings.Join(mark.Withheld, ",")
+	}
 	// Many dev servers read PORT (the hello sample, Express, Next.js): give
 	// it the worktree's own in every terminal, agent and service, unless the
 	// box or the project sets it. Without it every worktree's `npm start`

@@ -55,6 +55,7 @@ starts.
 | `berthd worktree new LOC/NAME [--branch B] [--base REF] [--parent NAME]` | Create a git worktree and run its setup; `--parent` nests it under another worktree of the location |
 | `berthd worktree rm LOC/NAME [--force]` | Remove a worktree |
 | `berthd worktree rename LOC/NAME [TITLE]` | Give a worktree a display name (no TITLE clears it) |
+| `berthd reviews [--idle-days N] [--json]` | The [pull requests opened for review](/guides/review-a-pr) here; `--idle-days` sets how long one may sit unused before it is cleaned up (`0`: never; default 7) |
 
 `berthd preview` with no arguments uses the worktree it runs in (from
 `$BERTH_WORKTREE_PATH` or the current directory) and its `$BERTH_PORT`. It

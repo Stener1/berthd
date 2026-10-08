@@ -22,6 +22,7 @@ import {
   GitBranchIcon,
   GitCompareArrowsIcon,
   GitBranchPlusIcon,
+  GitPullRequestIcon,
   GlobeIcon,
   HomeIcon,
   LinkIcon,
@@ -42,6 +43,9 @@ import { AgentIcon } from "@/components/agent-glyph";
 import { EditorMenuItems } from "@/components/editors/editor-menu";
 import { AutoFixItems } from "@/components/sidebar/autofix-items";
 import { boxHasRuns } from "@/lib/runs";
+import { openUpdate, reviewOf } from "@/lib/pr-review";
+import { copyReviewLink } from "@/views/pr-review/copy-link";
+import { entryKey, useReview } from "@/views/review/review-store";
 import { SessionActionItems } from "@/components/orchestrate/session-actions";
 import { confirm, copy } from "@/components/sidebar/confirm";
 import { Tip } from "@/components/tip";
@@ -381,6 +385,12 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
   items.push(sep, item("Copy path", <CopyIcon />, () => copy(wt.path, "path")));
   if (wt.branch) items.push(item("Copy branch", <GitBranchIcon />, () => copy(wt.branch!, "branch name")));
   if (url) items.push(item("Copy URL", <LinkIcon />, () => copy(url, "URL")));
+  // The berth://review link for its PR, for a teammate to review it on
+  // their own box: a review's PR, or the PR its branch has, if any.
+  const review = reviewOf(wt);
+  const knownPr = useReview.getState().prs[entryKey(box, wt.path)];
+  if (review || (!wt.main && wt.branch && knownPr !== null)) items.push(item("Copy review link", <GitPullRequestIcon />, () => void copyReviewLink(box, loc, wt)));
+  if (review) items.push(item("Update review to latest…", <span className="size-4" />, () => openUpdate(box, loc, wt)));
 
   const danger: Action[] = [];
   if (sessions.length > 0) {

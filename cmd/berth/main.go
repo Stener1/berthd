@@ -62,6 +62,9 @@ Boxes
   berth kit add|apply|list|save …        Set projects up the same way on every box; see berth kit help
   berth team show|setup|status|retry …   Set a box up the way your team's are, from <org>/.berth
                                          on GitHub (read with gh); see berth team help
+  berth review OWNER/NAME#N [--box BOX] [--yes] [--json]
+                                         Open a teammate's PR on your box, at the commit
+                                         shown, set up by your team's kit; see berth review help
   berth edit BOX/PROJECT[/WT] [FILE[:LINE[:COL]]] [--in EDITOR]
                                          Open a worktree, or a file at a line, in your editor
                                          (EDITOR: cursor, vscode, windsurf or zed; default: the first installed)
@@ -177,6 +180,8 @@ func run(args []string) error {
 		return kitCommand(l, rest)
 	case "team":
 		return teamCommand(l, rest)
+	case "review":
+		return reviewCommand(l, rest)
 	case "ssh-config":
 		return sshConfigCommand(l, rest)
 	case "edit":

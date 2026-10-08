@@ -20,7 +20,7 @@ func TestHelpMatchesFlags(t *testing.T) {
 	if len(cmds) < 20 {
 		t.Fatalf("found only %d commands with flags; is the scan still finding them?", len(cmds))
 	}
-	for _, p := range usagecheck.Problems("berth", helpText()+"\n"+kitUsage+"\n"+teamUsage, cmds, nil) {
+	for _, p := range usagecheck.Problems("berth", helpText()+"\n"+kitUsage+"\n"+teamUsage+"\n"+reviewUsage, cmds, nil) {
 		t.Error(p)
 	}
 }

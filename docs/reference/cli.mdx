@@ -5,7 +5,8 @@ description: Every command of berth, the laptop CLI.
 
 `berth` runs on your laptop. It talks to the [laptop agent](/concepts/laptop-agent),
 starting it if needed, and through it to every box. `berth help` prints this
-list; `berth kit help` the kit commands, `berth team help` the team setup ones.
+list; `berth kit help` the kit commands, `berth team help` the team setup ones,
+`berth review help` the review ones.
 
 - **Addressing.** A box is `devl`; a location on it `devl/shop`; a worktree
   `devl/shop/checkout`; a session `devl/SESSION`.
@@ -73,6 +74,17 @@ See [kits](/guides/kits).
 to one anywhere: `github.com/OWNER/REPO[@REF]` or
 `github.com/OWNER/REPO/tree/REF/FOLDER`. GitHub goes through `gh`: this laptop's reads the team setup, and the box
 signs in with its own. See [team setup](/guides/team-setup).
+
+## Reviewing a PR
+
+| Command | What it does |
+| --- | --- |
+| `berth review OWNER/NAME#N [--box BOX] [--yes] [--json]` | The review sheet: the PR, its author and the exact head commit, the box, what will run there and which keys it gets, and what in the PR changes setup. Then asks, and makes the worktree at that commit (`--yes` doesn't ask; `--json` prints the sheet and makes nothing). Also takes a `berth://review` link |
+| `berth review link OWNER/NAME#N` | Print the PR's review link, to paste in its description or a chat |
+| `berth reviews BOX [--idle-days N] [--json]` | The reviews on BOX; `--idle-days` sets how long one may sit unused before it is cleaned up (`0`: never) |
+
+Who may be reviewed is read from GitHub with this laptop's `gh`, as you. See
+[review a PR](/guides/review-a-pr).
 
 ## Reaching services
 

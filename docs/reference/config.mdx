@@ -171,6 +171,7 @@ as shown, `--untrust` stops running it.
 | `requires` | array | `{ "tool": "psql", "hint": "how to install it" }`. A missing tool is a warning when the kit is applied. |
 | `config` | object | A `.berth/config.json`, validated by the same rules. |
 | `files` | object | Small files inline, `{ "scripts/setup.sh": "…" }`. Paths stay inside the kit. |
+| `watch` | array | The repository's files that change how the kit sets a worktree up, as globs (`*` within a folder, `**` any folders): `["prisma/**", "scripts/setup/*"]`. A pull request that changes one says so on its [review sheet](/guides/review-a-pr). |
 
 A kit's files are copied to each box it is applied to, and
 `$BERTH_KIT_DIR` points at them. Files starting with `#!` are made

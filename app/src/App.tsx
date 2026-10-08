@@ -50,6 +50,9 @@ import { useTeamDeepLinks, useTeamWatch } from "@/views/team/team-entry";
 import { TeamSetupView } from "@/views/team/team-view";
 import { KitsView } from "@/views/kits/kits-view";
 import { ReviewSheet } from "@/views/kits/review-sheet";
+import { useReviewDeepLinks } from "@/views/pr-review/deep-link";
+import { PrReviewSheet } from "@/views/pr-review/review-sheet";
+import { useReviewStatuses } from "@/views/pr-review/use-review-status";
 import { ReviewView } from "@/views/review/review-view";
 import { ProjectView } from "@/views/project/project-view";
 import { DashboardView } from "@/views/dashboard";
@@ -86,6 +89,10 @@ export default function App() {
   useKitDeepLinks();
   // Team setup: berth://team?org= links, and setups running on boxes.
   useTeamDeepLinks();
+  // PR reviews: berth://review links open the review sheet, and each review
+  // worktree's PR is checked for new commits now and then.
+  useReviewDeepLinks();
+  useReviewStatuses();
   useTeamWatch();
   const view = useStore((s) => s.view);
   const workspace = view.kind === "workspace";
@@ -198,6 +205,7 @@ export default function App() {
           <CustomizeSidebarSheet />
           <ShortcutsSheet />
           <ReviewSheet />
+          <PrReviewSheet />
           <NotificationCenter />
           <WhatsNewDialog />
         </ErrorBoundary>

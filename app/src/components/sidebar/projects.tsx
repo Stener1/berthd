@@ -15,7 +15,8 @@ import {
 import { memo, useMemo, useState } from "react";
 
 import { AgentIcon, BoxStateDot, StateGlyph } from "@/components/agent-glyph";
-import { type Action, Armed, boxActions, useArmed, ContextRow, DotsMenu, newSection, projectActions, projectGroupActions, worktreeActions } from "@/components/sidebar/actions";
+import { type Action, Armed, boxActions, useArmed, ContextRow, DotsMenu, newSection, projectActions, projectGroupActions, removeWorktree, worktreeActions } from "@/components/sidebar/actions";
+import { ReviewNotice, ReviewTag } from "@/views/pr-review/review-marks";
 import { confirm } from "@/components/sidebar/confirm";
 import { type Project, projectActions as groupActions, useProjects } from "@/lib/project-groups";
 import { Tip } from "@/components/tip";
@@ -421,12 +422,14 @@ const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, se
               </span>
             )}
             {!away && <SetupMark box={box} wt={wt} />}
+            {!away && <ReviewTag box={box} wt={wt} />}
             <span className="ml-auto" />
             {away ? <AwayMark box={away} short={!!chip} /> : <Glyphs sessions={sessions} data={data} />}
           </SidebarMenuSubButton>
         </Tip>
         {!away && <RowActions box={box} loc={loc} wt={wt} />}
       </ContextRow>
+      {!away && <ReviewNotice box={box} loc={loc} wt={wt} onRemove={() => removeWorktree(box, loc, wt)} />}
     </SidebarMenuSubItem>
   );
 }, sameRow);

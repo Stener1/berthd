@@ -68,6 +68,8 @@ import { quietNow, setDoNotDisturb, setNotificationsOpen } from "@/lib/notificat
 import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { isLink, teamRef } from "@/lib/team-ref";
+import { openReviewSheet } from "@/lib/pr-review";
+import { parseReviewRef } from "@/lib/review-link";
 import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useWorkspaces } from "@/lib/workspaces";
 import { openShortcuts } from "@/components/shortcuts-sheet";
 import { hasWhatsNew, openWhatsNew } from "@/lib/whats-new";
@@ -230,6 +232,10 @@ export function CommandPalette() {
       // A link to a team setup pasted here opens it.
       ...(q.includes("/") && teamRef(q) && isLink(teamRef(q)!)
         ? [{ value: `team setup link ${q}`, label: "Open team setup from link", detail: teamRef(q), search: q, icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", org: teamRef(q), from: "palette" })) }]
+        : []),
+      // A review link, or OWNER/NAME#N, pasted here opens the PR's review sheet.
+      ...(parseReviewRef(q)
+        ? [{ value: `review pr ${q}`, label: "Review this PR on your box…", detail: `${parseReviewRef(q)!.repo}#${parseReviewRef(q)!.pr}`, search: q, icon: slot(<GitBranchIcon />), run: go(() => openReviewSheet(parseReviewRef(q)!)) }]
         : []),
       { value: "settings-developer", label: "Developer settings", icon: slot(<CodeIcon />), run: go(() => st.setView({ kind: "settings", section: "developer" })) },
       // Each part of Settings, by name ("appearance", "theme", "terminal").

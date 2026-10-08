@@ -116,6 +116,21 @@ then shows `repo_trust.state` as `untrusted` or `changed`. Never trust it
 yourself (`--trust`); tell the user what it wants to run and let them decide
 in the app or with `berth location config BOX/LOC --trust HASH`.
 
+## Review links for the PRs you open
+
+When you open a pull request, add its review link to the description so a
+teammate can open it on their own box in one click, set up by the team's
+kit:
+
+```
+Review it on your box: berth://review?repo=OWNER/NAME&pr=N
+```
+
+The link holds the repository and the PR number only; put nothing else in
+it. In a review worktree, `BERTH_REVIEW` is the PR number: it is someone
+else's work pinned to the commit they were shown, so don't push to its
+branch.
+
 ## Share publicly — only when a human asks
 
 `berthd share 3000` makes a port reachable **by anyone on the internet**

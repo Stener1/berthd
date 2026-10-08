@@ -1,0 +1,135 @@
+---
+title: Review a PR
+description: Open a teammate's pull request on your own box in one click, set up the way your team's worktrees are.
+---
+
+A review link opens a pull request on **your** box: a worktree at the PR's
+head commit, set up by your team's kit (database, `.env`, ports, dev
+server), with a Browser tab on its dev server and the Diff beside it.
+
+```
+berth://review?repo=acme/shop&pr=42
+```
+
+Paste one in a PR's description or a chat. From the terminal it is
+`berth review acme/shop#42`.
+
+## Opening a review
+
+A review link, a paste in the command palette (⌘K, then paste the link or
+`acme/shop#42`) or `berth review` opens the **review sheet**. Nothing is
+fetched to a box and nothing runs until you press **Review**. The sheet
+shows:
+
+- **The pull request**: the repository, its number and title, the author
+  and how they belong to the org ("Member of acme"), the head branch and the
+  **exact commit** that will be checked out.
+- **What will run**: which box (a picker when several have the project),
+  where its setup comes from (your team's kit, or the default branch's
+  `.berth/config.json` as your box trusts it), the setup command and the
+  services by name.
+- **Keys**: the team's shared keys, by name, and the keys that are yours
+  alone, which the review never gets.
+- **What it changes in setup**: the files in the PR that touch how a
+  worktree is set up, in plain words (below).
+- **Clean-up**: when the review goes.
+
+**Review** checks everything again (the author, the commit, the box) and
+makes the worktree at the commit you were shown. The sheet then shows the
+setup's progress; when the dev server is up, the worktree opens with the
+Browser and the Diff.
+
+In the sidebar a review is named **Review: #42 Fix checkout rounding**, with
+a small PR badge. Its menu has **Copy review link**, which every worktree
+whose branch has a PR offers too.
+
+## Who can be reviewed this way
+
+The link says only which repository and which PR. Everything else is
+read from GitHub with your own `gh`, as you, so a private repository you
+can't see fails with "You can't see acme/shop#42 with your GitHub account".
+A PR opens in one click when:
+
+- its repository is one of your [team setup](/guides/team-setup)'s projects
+  (`team.json`), or a project already on one of your boxes;
+- it is open, and its branch is in that repository, not a fork;
+- its author is a **member** or **owner** of the org, or a **collaborator**
+  on the repository.
+
+Anything else is refused with what to do instead, such as "Review this one
+by hand: its author is outside acme" or "it comes from a fork (jo/shop)".
+Nothing is fetched for a refused PR.
+
+## The commit stays put
+
+The review is the commit the sheet showed: the box fetches
+`refs/pull/42/head` and checks it is that commit before it makes anything,
+or stops with "PR #42 moved on". When the PR moves on later, the review
+stays where it was and the sidebar says **3 new commits since you opened
+it**. **Update to latest** shows the sheet again, for the new head, with the
+author and setup changes checked again, and moves the review only when you
+confirm. A review with uncommitted changes is not moved.
+
+## Setup never comes from the PR
+
+A review is set up like any worktree of the project: by your team's kit
+and the `.berth/config.json` your box trusts, read from the main checkout,
+never from the PR's own `.berth/`. Git hooks are off while Shipyard checks
+the PR out.
+
+What the PR changes in setup is listed on the sheet, so you can look before
+you start:
+
+| Change | What the sheet says |
+| --- | --- |
+| `.berth/**` | Changes Shipyard's own setup (not used for this review) |
+| `package.json` scripts (`postinstall`, `prepare`, `dev`, …) | Changes package.json scripts, by name |
+| Other `package.json` changes, manifests | Changes dependencies |
+| Lockfiles alone | Lockfile only |
+| Dockerfiles, `docker-compose*` | Changes a Dockerfile, Changes Docker Compose |
+| Migrations (`migrations/`, `db/migrate/`, `schema.prisma`) | Adds or changes a database migration |
+| `.env*` | Changes an environment file |
+| `.husky/`, `.githooks/`, `lefthook.yml` | Changes git hooks |
+| The kit's [`watch`](/reference/config#kitjson) globs | Changes files the kit watches |
+
+## Keys
+
+A review gets the team's **shared** keys (the `op://` references in
+`team.json`'s `keys.<project>.shared`) exactly as any worktree of the
+project does, and **never** the keys that are yours alone (`ask`). Setup
+scripts see `BERTH_REVIEW` (the PR number) and `BERTH_WITHHELD` (the names
+left out), so a kit can skip anything personal too. A kit that copies the
+main checkout's `.env` into each worktree copies what is in it: keep
+personal keys out of that file, or have the kit skip them when
+`BERTH_REVIEW` is set.
+
+## Containment
+
+The dev server is reachable only through Shipyard's private URL, as any
+worktree's is. Its terminals and agents run in their own session scopes, so
+removing the review stops everything it started.
+
+## Clean-up
+
+A review is removed, through the project's archive step (which drops its
+database), when its PR is merged or closed, or after 7 days unused. It is
+never removed with uncommitted changes, or with a session running in it:
+the sidebar asks instead ("PR merged. Remove this review? It has
+uncommitted changes."). Each box can change the 7 days:
+
+```sh
+berth reviews BOX --idle-days 14   # 0: never for being idle
+```
+
+## The journal
+
+Each review is in the box's [journal](/reference/events#reviews):
+`review.opened` (the repository, PR, commit, author, association, box,
+reviewer and the keys policy), `review.updated`, `review.waiting` and
+`review.removed`.
+
+## For agents
+
+An agent that opens a PR can add its review link to the description, so a
+teammate opens it in one click: `berth://review?repo=OWNER/NAME&pr=N`, or
+`berth review link OWNER/NAME#N` on the laptop.

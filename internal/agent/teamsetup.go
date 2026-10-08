@@ -130,6 +130,7 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 			}
 			for _, name := range k.Ask {
 				plan.Keys = append(plan.Keys, name)
+				plan.Ask = append(plan.Ask, name)
 				if val := typed[name]; val != "" {
 					plan.Env[name] = val
 				}

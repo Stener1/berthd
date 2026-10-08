@@ -9,6 +9,21 @@ upgrades with `berth upgrade BOX`, or by running the
 [install command](/getting-started/add-a-box#with-the-install-command)
 again.
 
+## Unreleased
+
+- **Review a PR in one click, on your own box.** A review link,
+  `berth://review?repo=acme/shop&pr=42`, or `berth review acme/shop#42`,
+  opens a review sheet: the PR, its author, the exact commit, the box, what
+  will run there, which keys it gets, and what in the PR changes setup.
+  **Review** makes a worktree at that commit, set up by your team's kit,
+  and opens it with the dev server in a Browser tab and the Diff beside it.
+  Only your team's projects, and only PRs by members and collaborators from
+  the repository itself; never a fork's. The PR's own `.berth/` never runs,
+  the review never gets your own keys, and it cleans itself up when the PR
+  is merged or closed, or after a week unused. **Copy review link** is in
+  every worktree's menu whose branch has a PR. See
+  [review a PR](/guides/review-a-pr).
+
 ## v0.3.12
 
 - **The Linux alpha's downloads.** v0.3.11's Linux build stopped before it

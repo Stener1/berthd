@@ -71,6 +71,8 @@ type Worktree struct {
 	// Parent is the path of the worktree whose agent handed this one off,
 	// for clients to nest it under (worktreeparents.go).
 	Parent string `json:"parent,omitempty"`
+	// Review marks a pull request opened for review (prreview.go).
+	Review *ReviewMark `json:"review,omitempty"`
 }
 
 var (
@@ -107,6 +109,9 @@ type savedLocation struct {
 	// Parents are the worktrees handed off from another, child path to
 	// parent path (worktreeparents.go).
 	Parents map[string]string `json:"parents,omitempty"`
+	// Reviews are the worktrees opened to review a pull request, by path
+	// (prreview.go).
+	Reviews map[string]*ReviewMark `json:"reviews,omitempty"`
 }
 
 func (l *Locations) Add(ctx context.Context, name, path string) (Location, error) {
@@ -367,6 +372,7 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 		// A worktree made again under the same name starts without a title.
 		l.forgetTitle(location, w.Path)
 		l.forgetParent(location, w.Path)
+		l.setReview(location, w.Path, nil)
 		return nil
 	}
 	return ErrUnknownWorktree
@@ -400,6 +406,10 @@ func describe(ctx context.Context, s savedLocation) Location {
 	loc.Worktrees = parseWorktrees(out, s.Path)
 	for i := range loc.Worktrees {
 		loc.Worktrees[i].Title = s.Titles[loc.Worktrees[i].Path]
+		if m := s.Reviews[loc.Worktrees[i].Path]; m != nil && !loc.Worktrees[i].Main {
+			c := *m
+			loc.Worktrees[i].Review = &c
+		}
 	}
 	withParents(loc.Worktrees, s.Parents)
 	return loc
