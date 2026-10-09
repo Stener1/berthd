@@ -98,7 +98,7 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 		}
 		p, _ := r.setup.Project(v.ID)
 		plan := box.TeamProjectPlan{ID: v.ID, Repo: v.Repo, URL: "https://github.com/" + v.Repo + ".git", Path: v.Path, Required: v.Required,
-			Source: v.Source, TrustHash: v.ConfigHash, FirstTask: p.FirstTask}
+			Source: v.Source, TrustHash: v.ConfigHash, FirstTask: p.FirstTask, ReviewButton: p.ReviewButton}
 		if p.Init != "" {
 			plan.Init = cleanInside(p.Init)
 		}

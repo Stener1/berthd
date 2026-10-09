@@ -134,6 +134,13 @@ func Diff(old, new *Setup, oldFiles, newFiles map[string]string) []Change {
 				what = append(what, "now optional")
 			}
 		}
+		if was.ReviewButton != p.ReviewButton {
+			if p.ReviewButton {
+				what = append(what, "review button on")
+			} else {
+				what = append(what, "review button off")
+			}
+		}
 		if was.FirstTask != p.FirstTask && p.FirstTask != "" {
 			what = append(what, "a new first task")
 		}

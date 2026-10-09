@@ -50,6 +50,16 @@ Shipyard's landing page: static HTML and CSS, no build step. Open
   and review click their way in, so they also work against the built demo:
   `node site/scripts/capture.mjs --url http://127.0.0.1:1460/demo/ --only
   pane-terminal,attempts` with `site/` served on 1460.
+- `review/`: the bounce page for the **Review in Shipyard** button on PRs
+  (`/review?repo=O/N&pr=N[&sha=…][&as=…][&path=…]`, rewritten to
+  `review/index.html` in `vercel.json`). It checks the parameters as strictly
+  as the app's `review-link.ts`, opens the `berth://review?…` link rebuilt
+  from them, and shows the PR, a link to it on GitHub and where to install.
+  One inline script, allowed by hash in its CSP (the page's `<meta>` and
+  `vercel.json`): change the script and `review/review.test.mjs` (run with
+  the app's `pnpm test`) says the new hash.
+- `badges/review.svg`: the button itself, one small SVG that reads on
+  GitHub's light and dark themes.
 - `demo/`: the live demo, built from `app/` (see below). Committed, so the
   site still has no build step.
 - `assets/og-film.jpg`: the 1200×630 link preview for Open Graph and

@@ -301,7 +301,8 @@ branch is offered as an update, like the org's own.
   "projects": [
     { "id": "shop", "repo": "acme/shop", "path": "~/code/shop", "required": true,
       "kit": "https://github.com/acme/berth-kit-shop@5476af4",
-      "init": "box/init-shop.sh", "first_task": "Find a good first issue and fix it" },
+      "init": "box/init-shop.sh", "first_task": "Find a good first issue and fix it",
+      "review_button": true },
     { "id": "api", "repo": "acme/api", "kit": "./projects/api" }
   ],
   "keys": {
@@ -327,9 +328,10 @@ branch is offered as an update, like the org's own.
 | `box.steps[]` | `id` (a subcommand of the script), `title`, `detail`, `sudo` (it asks for the password). `all`, `check`, `plan`, `agents`, `github` and `1password` are reserved |
 | `agents` | optional: the agent CLIs Shipyard installs on the box as its own step, `claude`, `codex`, `cursor` and `opencode` ([above](#agent-clis-on-the-box)) |
 | `box.settings` | values the team keeps in one place for its script (versions, ports), name → string. Each reaches the script, and each project's `init`, as `BERTH_SETTING_<NAME>`. Names are letters, digits and `_`; values are one line, at most 4096 bytes; at most 64 settings |
-| `projects[]` | `id` (the project's name on the box), `repo` (`owner/name`), `path` (default `~/code/<id>`), `required`, `kit`, `init`, `init_detail`, `first_task` |
+| `projects[]` | `id` (the project's name on the box), `repo` (`owner/name`), `path` (default `~/code/<id>`), `required`, `kit`, `init`, `init_detail`, `first_task`, `review_button` |
 | `projects[].id` | lowercase letters, digits and dashes, not starting or ending with a dash. It is part of every worktree's URL (`<worktree>.<id>.<box>.localhost`), so an id with a dot is refused: for `acme/acme.com`, use `"id": "site"` with `"path": "~/code/acme.com"` to keep the folder. (An org without a `.berth` names each picked repo this way itself: `acme.com` becomes `acme-com`.) |
 | `projects[].kit` | for a repository without its own `.berth/config.json`: a kit link pinned to a commit (`https://github.com/o/kit@7f93797`, or `…/tree/<commit>/<dir>`), or a folder inside `.berth` (`./projects/api`). A link without a commit is refused |
+| `projects[].review_button` | default `false`: berthd adds a [Review in Shipyard button](/guides/review-a-pr#the-review-in-shipyard-button) to the description of each PR opened from the project's worktrees, on every engineer's box. A box's own Project settings, or the repository's `.berth/config.json`, can still turn it off |
 | `keys.<project>` | `from` (default `.env.example`), `shared` (name → `op://…` or `env://…` reference; a value is refused), `ask` (names each engineer enters once) |
 | `onepassword` | optional: `"optional"` (the default) lets engineers [skip 1Password](#skipping-1password) and type the shared keys instead; `"required"` means the box must sign op in. Anything else is refused |
 | `updates.notify` | default `true`: offer newer commits as updates |

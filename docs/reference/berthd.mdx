@@ -56,6 +56,8 @@ starts.
 | `berthd worktree rm LOC/NAME [--force]` | Remove a worktree |
 | `berthd worktree rename LOC/NAME [TITLE]` | Give a worktree a display name (no TITLE clears it) |
 | `berthd reviews [--idle-days N] [--json]` | The [pull requests opened for review](/guides/review-a-pr) here; `--idle-days` sets how long one may sit unused before it is cleaned up (`0`: never; default 7) |
+| `berthd review-button [LOC/WT] [--as EMAIL] [--path /x] [--clear] [--json]` | The [Review in Shipyard button](/guides/review-a-pr#the-review-in-shipyard-button) on the worktree's PR: whether the project has it on, and whether the PR has it. `--as` (one of the project's login users) and `--path` set what it opens with; berthd puts the new link in place on its next look. `--clear` drops both |
+| `berthd login users [LOC[/WT]] [--json]` | The users the project's worktrees can be logged in as, from its trusted login config: what a review link's `as` may name |
 
 `berthd preview` with no arguments uses the worktree it runs in (from
 `$BERTH_WORKTREE_PATH` or the current directory) and its `$BERTH_PORT`. It

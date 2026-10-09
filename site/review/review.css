@@ -1,0 +1,113 @@
+/* The "Review in Shipyard" bounce page: one calm card on the site's tokens
+   (styles.css), light and dark with the system. */
+
+[hidden] {
+  display: none !important;
+}
+.rv {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 32px 16px;
+  background: radial-gradient(120% 70% at 50% 0%, var(--sea), var(--bg) 70%);
+}
+.rv-card {
+  width: min(460px, 100%);
+  padding: 28px 28px 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+.rv-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 22px;
+  font-weight: 650;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+.rv-brand svg {
+  width: 15px;
+  height: 19px;
+}
+.rv h1 {
+  font-size: 21px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.rv-lede {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.rv-facts {
+  display: grid;
+  gap: 0;
+  margin: 20px 0 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13.5px;
+}
+.rv-facts > div {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 9px 12px;
+}
+.rv-facts > div + div {
+  border-top: 1px solid var(--border);
+}
+.rv-facts dt {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.rv-facts dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.rv-open {
+  justify-content: center;
+  width: 100%;
+  height: 42px;
+  font-size: 15px;
+}
+.rv-alt {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 14px;
+}
+.rv-alt a,
+.rv-foot a {
+  color: var(--fg);
+  text-decoration-color: var(--input);
+  text-underline-offset: 3px;
+}
+.rv-alt a:hover,
+.rv-foot a:hover {
+  text-decoration-color: currentColor;
+}
+.rv-foot {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+.rv code {
+  font-size: 12.5px;
+}
+@media (max-width: 420px) {
+  .rv-card {
+    padding: 22px 18px 18px;
+  }
+}

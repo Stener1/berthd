@@ -11,6 +11,17 @@ again.
 
 ## Unreleased
 
+- **A Review in Shipyard button on pull requests.** GitHub drops
+  `berth://` links from PR descriptions, so a review link is now a button
+  that goes through `https://berthd.app/review`, a small page that checks
+  the link and opens the review in Shipyard (with a link to the PR on
+  GitHub, and to install Shipyard). Agents add it to the PRs they open,
+  logged in as one of the project's dev users and at the page their change
+  affects (`berthd login users` lists them). Turn on `"review_button"` for a
+  project (its `.berth/config.json`, Project settings, or the team's
+  `team.json`) and berthd adds it to each new PR from the project's
+  worktrees by itself, once, without touching the rest of the description;
+  never to a fork's PR or one from outside the org.
 - **Review a PR in one click, on your own box.** A review link,
   `berth://review?repo=acme/shop&pr=42`, or `berth review acme/shop#42`,
   opens a review sheet: the PR, its author, the exact commit, the box, what

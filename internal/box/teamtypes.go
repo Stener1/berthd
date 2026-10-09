@@ -57,6 +57,10 @@ type TeamProjectPlan struct {
 	// Init, a path inside the bundle's files, runs once in the clone.
 	Init      string `json:"init,omitempty"`
 	FirstTask string `json:"first_task,omitempty"`
+	// ReviewButton is team.json's review_button: PRs opened from the
+	// project's worktrees get a "Review in Shipyard" button, unless the
+	// box's own config or the repository's says otherwise.
+	ReviewButton bool `json:"review_button,omitempty"`
 	// Env is laid into the project's own config on this box: secret
 	// references for shared keys, and the values the engineer typed.
 	Env map[string]string `json:"env,omitempty"`

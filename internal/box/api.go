@@ -102,6 +102,10 @@ type Box struct {
 	// Reviews keeps the box's review settings (prreview.go); nil uses the
 	// defaults.
 	Reviews *ReviewStore
+	// ReviewButtons adds the "Review in Shipyard" button to PRs opened from
+	// worktrees of projects that turn it on (reviewbutton.go); nil on a box
+	// without it.
+	ReviewButtons *ReviewButtons
 }
 
 func (b *Box) own(path string) {
@@ -133,6 +137,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/reviews/update", b.postReviewUpdate)
 	route("GET /v1/reviews/settings", b.getReviewSettings)
 	route("PUT /v1/reviews/settings", b.putReviewSettings)
+	route("GET /v1/worktrees/{loc}/{wt}/review-button", b.getReviewButton)
+	route("PUT /v1/worktrees/{loc}/{wt}/review-button", b.putReviewButton)
 	route("GET /v1/team", b.listTeams)
 	route("POST /v1/team", b.postTeam)
 	route("GET /v1/team/{id}", b.getTeam)
