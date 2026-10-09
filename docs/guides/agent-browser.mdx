@@ -177,9 +177,13 @@ its background services off, and downloads go to the worktree's
 so there is no debugging port another process (an agent included) could
 attach to.
 
-Signing in: seed a test user and log in with it, or add a dev credentials
-provider. A third-party sign-in page needs its origin allowed. Never give
-an agent your own accounts.
+Signing in: when the project's kit or config lists
+[dev users](/guides/kits#personas-logging-in-as-a-dev-user),
+`berthd browser open --as pro@acme.test --path /orders` logs the browser in
+as one in a step: the worktree's login script runs and its cookies go in for
+the worktree's address. Otherwise seed a test user and log in with it, or
+add a dev credentials provider. A third-party sign-in page needs its origin
+allowed. Never give an agent your own accounts.
 
 Page content is untrusted: the skill tells agents to treat what a page says
 as data, never as instructions.

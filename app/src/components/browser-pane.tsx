@@ -4,6 +4,7 @@ import { ArrowLeftIcon, ArrowUpRightIcon, ArrowRightIcon, BotIcon, CrosshairIcon
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { DevtoolsDrawer, DevtoolsToggle, InspectButton } from "@/components/browser-devtools";
+import { LoginMenu, OtherLogin } from "@/components/browser-login";
 import { BrowserSandboxCard, seedSandbox, useSandboxCardState } from "@/components/browser-sandbox";
 import { Tip } from "@/components/tip";
 import { Button } from "@/components/ui/button";
@@ -136,6 +137,8 @@ export function BrowserPane({ id: paneId, url, visible, onNavigate, worktree, on
     if (sandbox === "hidden") setSandboxOpen(false);
   }, [sandbox]);
   const [picked, setPicked] = useState<Pick>();
+  // "Another email…" from Log in as… (browser-login.tsx).
+  const [otherLogin, setOtherLogin] = useState(false);
   // The Console and Network drawer (browser-devtools.tsx): the page's, and
   // the agent's browser's while its view shows.
   const proxyPort = useStore((s) => s.status?.proxy.url_port);
@@ -246,6 +249,7 @@ export function BrowserPane({ id: paneId, url, visible, onNavigate, worktree, on
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs outline-none"
             />
           </div>
+          <LoginMenu ctx={ctx} url={url} onGo={go} onOther={() => setOtherLogin(true)} />
           <ToolButton label="Pick an element for the agent" disabled={!url} onClick={pick}>
             <CrosshairIcon />
           </ToolButton>
@@ -283,6 +287,7 @@ export function BrowserPane({ id: paneId, url, visible, onNavigate, worktree, on
           )}
         </form>
       )}
+      {otherLogin && !agentView && !sandboxView && <OtherLogin ctx={ctx} url={url} onGo={go} onDone={() => setOtherLogin(false)} />}
       {picked && ctx.ref && <PickSender pick={picked} ctx={ctx} onDone={() => setPicked(undefined)} />}
       {mode === "native" && loop && loop.url !== loopDismissed && !agentView && !sandboxView && (
         <ReloadLoopNotice loop={loop} onOpen={() => void openUrl(loop.url)} onDismiss={() => setLoopDismissed(loop.url)} />

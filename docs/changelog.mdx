@@ -23,6 +23,15 @@ again.
   is merged or closed, or after a week unused. **Copy review link** is in
   every worktree's menu whose branch has a PR. See
   [review a PR](/guides/review-a-pr).
+- **Open a worktree logged in as a dev user.** A kit, or a project's
+  config, can name a login script and the users it logs in (`"login":
+  {"script", "users", "any"}`). The Browser tab's **Log in as…** menu and ⌘K
+  list them; picking one runs the script against that worktree's own dev
+  server and database and sets its session for that worktree's address
+  alone. Agents get the same with `berthd browser open --as EMAIL`, and
+  `berthd shots compare --as EMAIL` shoots both sides logged in. A link
+  works too: `http://WT.LOC.BOX.localhost:1377/__berth/login?as=EMAIL&next=/path`.
+  See [kits](/guides/kits#personas-logging-in-as-a-dev-user).
 
 ## v0.3.12
 

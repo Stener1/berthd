@@ -142,6 +142,25 @@ export interface RepoConfig {
   services?: WorktreeService[];
   hooks?: Hook[];
   flows?: Flow[];
+  // Who a worktree's pages can be logged in as, and the script that does it
+  // (lib/login-url.ts). Only from trusted layers: the kit, the box's own
+  // config, or the committed config once trusted.
+  login?: LoginConfig;
+}
+
+// LoginUser is a seeded user a worktree can be logged in as. The box always
+// answers with objects; a config file may list plain emails.
+export interface LoginUser {
+  email: string;
+  label?: string;
+}
+
+export interface LoginConfig {
+  // Relative to the kit's folder ($BERTH_KIT_DIR) or the config's.
+  script: string;
+  users?: LoginUser[];
+  // Any valid email may be asked for, not only the listed users.
+  any?: boolean;
 }
 
 // RepoTrust says whether a box runs a repository's committed config. Until

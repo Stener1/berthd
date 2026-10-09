@@ -37,6 +37,8 @@ type Kit struct {
 	// "scripts/setup/*"), so a pull request changing them says so on its
 	// review sheet.
 	Watch []string `json:"watch,omitempty"`
+	// Login may sit at the top of kit.json too; it is config.login.
+	Login *LoginConfig `json:"login,omitempty"`
 	// Files are small files carried in kit.json itself, path → content, so
 	// a kit can be one file (a gist).
 	Files map[string]string `json:"files,omitempty"`
@@ -100,6 +102,12 @@ func (b *Box) InstallKit(ctx context.Context, location string, in KitInstall) (K
 	}
 	if strings.TrimSpace(k.Name) == "" {
 		k.Name = k.ID
+	}
+	if k.Login != nil {
+		if k.Config.Login != nil {
+			return KitResult{}, badRequest("kit %s: login is set twice, at the top and in config; keep one", k.ID)
+		}
+		k.Config.Login, k.Login = k.Login, nil
 	}
 	if err := k.Config.validate(); err != nil {
 		return KitResult{}, badRequest("kit %s: %v", k.ID, err)

@@ -29,6 +29,7 @@ import {
   SquareTerminalIcon,
   PackageIcon,
   PackagePlusIcon,
+  UserRoundIcon,
   UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -68,9 +69,10 @@ import { quietNow, setDoNotDisturb, setNotificationsOpen } from "@/lib/notificat
 import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { isLink, teamRef } from "@/lib/team-ref";
+import { loginUrl, loginUserLabel, useLoginConfig, worktreeOrigin } from "@/lib/login-users";
 import { openReviewSheet } from "@/lib/pr-review";
 import { parseReviewRef } from "@/lib/review-link";
-import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useWorkspaces } from "@/lib/workspaces";
+import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useHereRef, useWorkspaces } from "@/lib/workspaces";
 import { openShortcuts } from "@/components/shortcuts-sheet";
 import { hasWhatsNew, openWhatsNew } from "@/lib/whats-new";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
@@ -150,6 +152,9 @@ export function CommandPalette() {
   const themes = useThemes();
   const pluginCommands = useRegistry((s) => s.commands);
   const nav = useArrangedNav();
+  // The users the worktree you are in can be logged in as (lib/login-users).
+  const here = useHereRef();
+  const login = useLoginConfig(here?.box, here?.location);
   const [query, setQuery] = useState("");
   // The theme in use when the palette opened, to put back after a preview.
   const before = useRef<string | undefined>(undefined);
@@ -258,6 +263,21 @@ export function CommandPalette() {
           label: `Demo: an agent opens Claude Code in a ${how} here`,
           icon: slot(<CodeIcon />),
           run: go(() => void import("@/lib/mock").then((m) => m.mockAgentOpens(ws.ref.box, where, ws.ref.path, how))),
+        });
+      }
+    }
+
+    // Log in as a seeded user: the worktree's page in a Browser tab, through
+    // the laptop proxy's login route.
+    const loginOrigin = hereAt && login ? worktreeOrigin(hereAt, status?.proxy.url_port) : undefined;
+    if (hereAt && loginOrigin) {
+      for (const u of login?.users ?? []) {
+        actions.push({
+          value: `log in as ${u.email} ${u.label ?? ""} login user persona`,
+          label: `Log in as ${loginUserLabel(u)}`,
+          detail: u.label ? u.email : undefined,
+          icon: slot(<UserRoundIcon />),
+          run: go(() => openBrowserAt(loginUrl(loginOrigin, u.email, "/"))),
         });
       }
     }
@@ -372,7 +392,7 @@ export function CommandPalette() {
     ].filter((g) => g.items.length);
     // close is stable enough: it only reads refs and store setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, boxes, status, themes, themeId, spaces, pluginCommands, query, nav.hidden, open]);
+  }, [sessions, boxes, status, themes, themeId, spaces, pluginCommands, query, nav.hidden, open, login]);
 
   return (
     <CommandDialog

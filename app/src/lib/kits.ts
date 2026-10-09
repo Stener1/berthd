@@ -165,6 +165,8 @@ export function mergeConfig(base: RepoConfig | null | undefined, over: RepoConfi
     agents: mergeBy<AgentPreset>(b.agents, o.agents, (a) => a.id),
     flows: mergeBy(b.flows, o.flows, (f) => f.id),
     hooks: b.hooks?.length || o.hooks?.length ? [...(b.hooks ?? []), ...(o.hooks ?? [])] : undefined,
+    // A layer's login replaces the one under it whole.
+    login: o.login ?? b.login,
   };
 }
 

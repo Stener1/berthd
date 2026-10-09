@@ -21,6 +21,7 @@ guide is in [project config](/guides/project-config).
 | `hooks` | array | [Hooks](#hooks) for this repository's events only, run in the worktree. |
 | `flows` | array | [Flows](#flows) for this repository's worktrees. |
 | `shots` | object | What `berthd shots compare` [shoots and diffs](#shots) by default. Read from the worktree's own file, trusted or not: it names pages and selectors and runs nothing. |
+| `login` | object | [Dev users](#login) a worktree can be logged in as, and the script that logs one in. |
 
 ### `services`
 
@@ -127,6 +128,24 @@ Defaults for [visual diffs](/guides/visual-diffs). Flags on
 | `seed_random` | boolean | `Math.random` repeats the same numbers on every load. |
 | `parallel` | number | Browser tabs shooting at once. Default: the box's CPUs, from 2 to 8. |
 
+### `login`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `script` | string | Required. A path inside the config's folder: the kit's own folder for a kit, the main checkout's `.berth/` for the repository's file and the box's own config. No `..`, no absolute path; a symlink that leads outside is refused when it runs. Run in the worktree, with its environment and `BERTH_LOGIN_EMAIL`, for up to 30 seconds. |
+| `users` | array | Emails, or `{ "email", "label" }`, at most 50. An email is a plain address: letters, digits and `. _ + -` before the `@`, starting with a letter or digit, at most 254 characters. A label is one line of at most 48 characters, shown in place of the email. |
+| `any` | boolean | Any valid email may log in, not only `users`. Default `false`. |
+
+The script prints one JSON object on stdout, at most 64 KB:
+`{"cookies": [{"name", "value", "path"?, "httpOnly"?, "secure"?, "sameSite"?, "maxAge"?}], "redirect"?: "/path"}`.
+One to 32 cookies; no `domain` (a cookie is set for the worktree's own
+address); `sameSite` is `Lax`, `Strict` or `None`; `maxAge` is 1 second to
+400 days; `redirect` is a path on the worktree. Anything else, a non-zero
+exit or a timeout is an error that never quotes the output. A login comes
+from the kit, the box's own config, or the repository's trusted file in the
+main checkout, never from a worktree's own checkout. See
+[personas](/guides/kits#personas-logging-in-as-a-dev-user).
+
 ## How layers merge
 
 A location's effective config is the repository's file, then its kit's
@@ -139,6 +158,7 @@ A location's effective config is the repository's file, then its kit's
 | `env` | Key by key; the later one wins |
 | `services`, `agents`, `flows` | By `name` or `id`: a later one replaces, new ones are added |
 | `hooks` | Added up: the file's, the kit's, then the box's |
+| `login` | Whole: the later one's script and users replace the earlier one's |
 
 Only the effective flows run: a flow replaced by `id` never does, and a
 replacement with `enabled: false` switches the flow off on that box.
@@ -170,6 +190,7 @@ as shown, `--untrust` stops running it.
 | `match` | object | `slug`: the `owner/repo` it is for. Selects matching projects in the app; nothing enforces it. |
 | `requires` | array | `{ "tool": "psql", "hint": "how to install it" }`. A missing tool is a warning when the kit is applied. |
 | `config` | object | A `.berth/config.json`, validated by the same rules. |
+| `login` | object | The same as `config.login`, at the top for short kits; set one or the other. |
 | `files` | object | Small files inline, `{ "scripts/setup.sh": "…" }`. Paths stay inside the kit. |
 | `watch` | array | The repository's files that change how the kit sets a worktree up, as globs (`*` within a folder, `**` any folders): `["prisma/**", "scripts/setup/*"]`. A pull request that changes one says so on its [review sheet](/guides/review-a-pr). |
 

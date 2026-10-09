@@ -58,6 +58,9 @@ type RepoConfig struct {
 	// Shots is what `berthd shots compare` screenshots and diffs by
 	// default: pages, sizes, and selectors to mask (shots.go).
 	Shots *ShotsConfig `json:"shots,omitempty"`
+	// Login logs a worktree in as a dev user: a script that prints the
+	// session's cookies, and the users it may log in (login.go).
+	Login *LoginConfig `json:"login,omitempty"`
 }
 
 // ReadRepoConfig reads repo's .berth/config.json; ok is false without one.

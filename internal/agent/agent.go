@@ -415,6 +415,8 @@ func (a *Agent) startProxy(ctx context.Context) {
 		Route:    a.route,
 		Worktree: a.worktree,
 		BoxAlias: a.boxAlias,
+		// Logging a worktree in as a dev user (proxy/login.go, login.go).
+		Login: a.login,
 		// An artifact's page, for its own origin (proxy/artifact.go): over
 		// this laptop's paired channel, so the page never holds a token.
 		Artifact: func(ctx context.Context, name, id, version string) (*http.Response, error) {
