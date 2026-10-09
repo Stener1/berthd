@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,10 @@ type Worktree struct {
 	// Parent is the path of the worktree whose agent handed this one off,
 	// for clients to nest it under (worktreeparents.go).
 	Parent string `json:"parent,omitempty"`
+	// SetupOnOpen marks a worktree the repository had before Team setup
+	// adopted it: its per-worktree setup runs the first time a terminal or
+	// an agent starts there (firstopen.go).
+	SetupOnOpen bool `json:"setup_on_open,omitempty"`
 	// Review marks a pull request opened for review (prreview.go).
 	Review *ReviewMark `json:"review,omitempty"`
 }
@@ -109,6 +114,9 @@ type savedLocation struct {
 	// Parents are the worktrees handed off from another, child path to
 	// parent path (worktreeparents.go).
 	Parents map[string]string `json:"parents,omitempty"`
+	// FirstOpen are worktrees set up the first time they are opened, by
+	// path (firstopen.go).
+	FirstOpen []string `json:"first_open,omitempty"`
 	// Reviews are the worktrees opened to review a pull request, by path
 	// (prreview.go).
 	Reviews map[string]*ReviewMark `json:"reviews,omitempty"`
@@ -406,6 +414,7 @@ func describe(ctx context.Context, s savedLocation) Location {
 	loc.Worktrees = parseWorktrees(out, s.Path)
 	for i := range loc.Worktrees {
 		loc.Worktrees[i].Title = s.Titles[loc.Worktrees[i].Path]
+		loc.Worktrees[i].SetupOnOpen = slices.Contains(s.FirstOpen, loc.Worktrees[i].Path)
 		if m := s.Reviews[loc.Worktrees[i].Path]; m != nil && !loc.Worktrees[i].Main {
 			c := *m
 			loc.Worktrees[i].Review = &c

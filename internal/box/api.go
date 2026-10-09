@@ -138,6 +138,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/team/{id}", b.getTeam)
 	route("POST /v1/team/{id}/retry", b.retryTeam)
 	route("POST /v1/team/{id}/onepassword", b.useOnePassword)
+	route("GET /v1/team/{id}/existing", b.getExisting)
+	route("POST /v1/team/{id}/pull", b.pullExisting)
 	route("POST /v1/locations/new", b.newLocation)
 	route("POST /v1/locations/{name}/resolve", b.resolve)
 	route("GET /v1/locations/{name}/branches", b.listBranches)
@@ -726,6 +728,9 @@ func (b *Box) startSession(r *http.Request, name, location, dir, command, preset
 		data["agent"] = a
 	}
 	b.publish(r, "session.started", data)
+	// A worktree the repository had before Team setup adopted it is set
+	// up now, the first time anyone works in it.
+	b.setUpOnFirstOpen(origin(r), dir)
 	if prompted {
 		b.startupPrompt(origin(r), gateOrigin(r), Session{Name: sess.Name, Agent: agentFor(sess)})
 	}

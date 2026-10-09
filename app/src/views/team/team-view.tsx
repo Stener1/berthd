@@ -14,13 +14,14 @@ import { copyText } from "@/lib/clipboard";
 import { ago, errorMessage } from "@/lib/format";
 import { openUrl } from "@/lib/open-url";
 import { useStore } from "@/lib/store";
-import { type GitHubState, isLink, loadTeams, type PlanStep, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, teamRef, useTeam, useTeamAddBox } from "@/lib/team";
+import { defaultUse, type ExistingClone, type GitHubState, isLink, loadTeams, type PlanStep, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, teamRef, useTeam, useTeamAddBox } from "@/lib/team";
 import { focusSession } from "@/lib/workspaces";
 import { useKeepFocusIn } from "@/lib/focus-home";
 import { finishOnboarding } from "@/views/onboarding/onboarding-state";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { TeamDone } from "@/views/team/team-done";
 import { TeamFiles } from "@/views/team/team-files";
+import { FoundClones } from "@/views/team/team-found";
 import { GitHubMark, OrgAvatar, OrgHeader, Section } from "@/views/team/team-parts";
 import { Plan } from "@/views/team/team-plan";
 import { Checklist, RunCard } from "@/views/team/team-rail";
@@ -244,6 +245,10 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const [checks, setChecks] = useState(0);
   // 1Password or not, for the shared keys that are op:// references.
   const [skipOP, setSkipOP] = useState(false);
+  // Which clone on the box each repo uses (by project id, or repo for an
+  // org without .berth): a folder there, or "" for a fresh clone. Chosen
+  // again for repos whose clones the box reports anew.
+  const [use, setUse] = useState<Record<string, string>>({});
 
   // The box: the one asked for, the one it was set up on, else the online
   // box with the fewest projects (a new one, usually). Chosen again as the
@@ -267,6 +272,17 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       const v = await teamApi.view(client, org, { box, from: from === "link" ? "link" : undefined });
       setView(v);
       setPicked((p) => p ?? new Set(v.state === "none" ? (v.repos ?? []).filter((r) => r.has_berth).map((r) => r.full_name) : v.projects.filter((x) => x.access).map((x) => x.id)));
+      // Each repo starts on the clone it would use anyway (a Shipyard
+      // project of it, or its one clean clone), else a fresh clone.
+      const found: [string, ExistingClone[]][] = v.state === "none" ? (v.repos ?? []).map((r) => [r.full_name, r.existing ?? []]) : v.projects.map((x) => [x.id, x.existing ?? []]);
+      setUse((u) => {
+        const next: Record<string, string> = {};
+        for (const [id, clones] of found) {
+          if (!clones.length) continue;
+          next[id] = id in u && (u[id] === "" || clones.some((c) => c.path === u[id])) ? u[id] : defaultUse(clones);
+        }
+        return next;
+      });
     } catch (err) {
       setError(errorMessage(err));
       if (/gh_/.test(String((err as { code?: string }).code))) void refreshGitHub();
@@ -344,10 +360,14 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       if (!skipping && opKeys.some((o) => o.project === p && o.key === k)) continue;
       (byProject[p] ??= {})[k] = v;
     }
+    // The clone each repo with one found uses, or "" for a fresh clone:
+    // the box checks a chosen folder's origin again before using it.
+    const chosen = Object.fromEntries(Object.entries(use).filter(([id]) => (view.state === "none" ? sel.has(id) : view.projects.some((x) => x.id === id && x.access && (x.required || sel.has(x.id))))));
+    const useReq = Object.keys(chosen).length ? chosen : undefined;
     const req =
       view.state === "none"
-        ? { box, repos: [...sel] }
-        : { box, commit: updating ? view.update!.to : view.commit?.sha, projects: view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).map((x) => x.id), keys: byProject, skip_onepassword: skipping || undefined };
+        ? { box, repos: [...sel], use: useReq }
+        : { box, commit: updating ? view.update!.to : view.commit?.sha, projects: view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).map((x) => x.id), keys: byProject, skip_onepassword: skipping || undefined, use: useReq };
     const s = await teamApi.setup(client, key, req);
     putRun(s);
     if (updating) {
@@ -399,6 +419,20 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
     if (run && s) void focusSession(run.box, s);
   };
   const openSession = (s: string) => run && void focusSession(run.box, s);
+  const onUse = (id: string, path: string) => setUse((u) => ({ ...u, [id]: path }));
+  // Pull is its own button, for a found clone that is behind: using a
+  // clone never pulls.
+  const pull = async (repo: string, c: ExistingClone) => {
+    if (!client || !box) return;
+    try {
+      const fresh = await teamApi.pull(client, key, box, repo, c.path);
+      const swap = (list?: ExistingClone[]) => list?.map((x) => (x.path === c.path ? { ...x, ...fresh } : x));
+      setView((v) => v && { ...v, projects: v.projects.map((x) => ({ ...x, existing: swap(x.existing) })), repos: v.repos?.map((r) => ({ ...r, existing: swap(r.existing) })) });
+      toastManager.add({ title: `Pulled ${c.display}`, description: fresh.branch ? `${fresh.branch} is up to date with its upstream` : undefined });
+    } catch (err) {
+      toastManager.add({ type: "error", title: `Couldn't pull ${c.display}`, description: errorMessage(err) });
+    }
+  };
   const startOn = (project: string) => {
     const r = run?.projects.find((x) => x.id === project);
     if (!run || !r?.location) return;
@@ -407,7 +441,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const background = () => useStore.getState().setView({ kind: "workspace" });
 
   if (view.state === "none") {
-    return <NoBerth view={view} github={github} boxes={boxes} box={box} noTmux={noTmux} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} />;
+    return <NoBerth view={view} github={github} boxes={boxes} box={box} noTmux={noTmux} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} use={use} onUse={onUse} onPull={pull} />;
   }
 
   const live = run && run.phase !== "done" && !updating ? run : undefined;
@@ -451,7 +485,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       <OrgHeader view={view} from={from} badge={updating ? <span className="rounded-full bg-info/10 px-2.5 py-1 font-medium text-info-foreground text-xs">Update · {view.update!.from} → {view.update!.to}</span> : undefined} />
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_300px] gap-8 px-8 pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:px-5 @max-[819px]:pt-4">
         <div className="min-w-0 @max-[819px]:order-2">
-          <Plan view={(live ? live.onepassword_skipped : skipping) ? { ...view, steps: view.steps?.filter((s) => s.id !== "1password") } : view} skipOP={live ? live.onepassword_skipped : skipping} run={live} box={box} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} onRetry={retry} onOpenTerminal={openTerminal} onOpenSession={openSession} onStartOn={startOn} onFiles={() => setFiles(true)} update={updating ? view.update : undefined} />
+          <Plan view={(live ? live.onepassword_skipped : skipping) ? { ...view, steps: view.steps?.filter((s) => s.id !== "1password") } : view} skipOP={live ? live.onepassword_skipped : skipping} run={live} box={box} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} onRetry={retry} onOpenTerminal={openTerminal} onOpenSession={openSession} onStartOn={startOn} onFiles={() => setFiles(true)} update={updating ? view.update : undefined} use={use} onUse={onUse} onPull={(x, c) => pull(x.repo, c)} />
         </div>
         <div className="@max-[819px]:order-1">
           <div className="sticky top-4 @max-[819px]:hidden">{rail(false)}</div>
@@ -554,7 +588,13 @@ function NoBerth({
   onStartOn,
   onBackground,
   noTmux,
+  use,
+  onUse,
+  onPull,
 }: {
+  use: Record<string, string>;
+  onUse(id: string, path: string): void;
+  onPull(repo: string, c: ExistingClone): Promise<void>;
   view: View;
   github: GitHubState;
   boxes: { name: string; detail: string }[];
@@ -625,6 +665,7 @@ function NoBerth({
                 {live.projects.map((p) => (
                   <div key={p.id} className="flex items-center gap-2.5 px-4 py-2.5">
                     <span className="font-mono text-[13px]">{p.repo}</span>
+                    {p.adopted && p.path && <span className="truncate text-muted-foreground text-xs">in your existing checkout</span>}
                     <span className="ml-auto text-muted-foreground text-xs">{p.state === "ready" ? <Button size="xs" onClick={() => onStartOn(p.id)}>Start on {p.id}</Button> : p.state}</span>
                   </div>
                 ))}
@@ -640,7 +681,7 @@ function NoBerth({
               </div>
               <ul className="divide-y overflow-hidden rounded-xl border bg-card">
                 {repos.map((r) => (
-                  <li key={r.full_name}>
+                  <li key={r.full_name} data-testid={`pick-${r.full_name}`}>
                     <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-accent/30">
                       <Checkbox className="not-dark:border-foreground/25" checked={picked.has(r.full_name)} onCheckedChange={(v) => onPick(r.full_name, !!v)} />
                       <span className="min-w-0 flex-1">
@@ -654,6 +695,11 @@ function NoBerth({
                         </span>
                       </span>
                     </label>
+                    {picked.has(r.full_name) && !!r.existing?.length && (
+                      <div className="px-4 pb-2.5 pl-11">
+                        <FoundClones id={r.full_name.split("/")[1]} repo={r.full_name} clones={r.existing} use={use[r.full_name] ?? ""} onUse={(path) => onUse(r.full_name, path)} onPull={(c) => onPull(r.full_name, c)} />
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

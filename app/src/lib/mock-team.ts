@@ -3,7 +3,7 @@ import { ApiError } from "@/lib/api";
 import initShop from "@/lib/fixtures/team-acme/init-shop.sh.txt?raw";
 import readme from "@/lib/fixtures/team-acme/README.md.txt?raw";
 import setupSh from "@/lib/fixtures/team-acme/setup.sh.txt?raw";
-import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
+import type { Accepted, ExistingClone, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
 
 // Mock mode's Team setup, behaving like the laptop agent (internal/agent
 // team.go, reading <org>/.berth with gh) and the box's runner (internal/box
@@ -26,6 +26,10 @@ import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupReques
 // so Skip 1Password isn't offered.
 // &teamhold=init: the first repo's first-time setup stops at a question
 // in its own terminal (corepack's [Y/n]) until advance("init").
+// &team-clones=1: the box already has clones of some repos, found by
+// their origin: acme/shop at ~/work/acme-shop (on feat/x, 3 uncommitted
+// changes, one worktree of its own), acme/website at ~/src/website (clean,
+// 2 commits behind), northwind/storefront at ~/work/storefront.
 // &teamhold=github,repos keeps the run at those points until
 // window.__teamMock.advance(name), for screenshots; the sudo prompt always
 // waits for a password typed in its terminal (or advance("sudo")).
@@ -44,6 +48,7 @@ export interface TeamMockCtx {
 const params = new URLSearchParams(location.search);
 export const teamScenario = params.get("team") ?? "acme";
 const holds = new Set((params.get("teamhold") ?? "").split(",").filter(Boolean));
+const withClones = params.get("team-clones") === "1";
 
 const now = Date.now();
 const ago = (min: number) => new Date(now - min * 60_000).toISOString();
@@ -214,6 +219,17 @@ function shopProjects(): ProjectView[] {
   ];
 }
 
+// The clones the box already has, with &team-clones=1, by repo.
+const CLONES: Record<string, ExistingClone[]> = {
+  "acme/shop": [{ path: "/home/me/work/acme-shop", display: "~/work/acme-shop", branch: "feat/x", dirty: 3, last_commit: ago(90), worktrees: 1 }],
+  "acme/website": [{ path: "/home/me/src/website", display: "~/src/website", branch: "main", dirty: 0, behind: 2, last_commit: ago(60 * 24 * 3) }],
+  "northwind/storefront": [{ path: "/home/me/work/storefront", display: "~/work/storefront", branch: "main", dirty: 0, last_commit: ago(60 * 5) }],
+};
+const SCANNED = { looked: ["~/code", "~/work", "~/src", "~/projects", "~/dev", "~/repos", "~/git", "~/* (one level)"] };
+// Pulled clones are up to date from then on.
+const pulled = new Set<string>();
+const clonesOf = (repo: string): ExistingClone[] | undefined => (withClones ? CLONES[repo]?.map((c) => (pulled.has(c.path) ? { ...c, behind: 0 } : c)) : undefined);
+
 // A setup read from a link: a user's repo, a branch, a folder in it.
 export const TEAM_LINK = "github.com/jo-acme/acme-setup/tree/team-setup/team";
 const JO_AVATAR = svg(`<rect width="64" height="64" rx="32" fill="#7c3aed"/><text x="32" y="42" font-family="Inter,Helvetica,Arial,sans-serif" font-size="28" font-weight="600" fill="#fff" text-anchor="middle">J</text>`);
@@ -278,7 +294,7 @@ function github(): GitHubState {
 
 function acmeView(box?: string): TeamView {
   const setup = structuredClone(shopSetup);
-  const projects = shopProjects();
+  const projects = shopProjects().map((p) => (box && p.access && clonesOf(p.repo) ? { ...p, existing: clonesOf(p.repo) } : p));
   const readable = projects.filter((p) => p.access);
   const run = box ? runs[`${box}/acme`] : undefined;
   const view: TeamView = {
@@ -301,6 +317,7 @@ function acmeView(box?: string): TeamView {
     },
     warnings: [],
   };
+  if (box && withClones) view.scanned = SCANNED;
   view.source = orgSource;
   const acc = accepted.find((a) => a.org === "acme");
   if (acc) view.accepted = { commit: acc.commit, box: acc.box, at: acc.at };
@@ -370,8 +387,9 @@ function view(org: string, q: URLSearchParams): TeamView {
       projects: [],
       access: { readable: northwindRepos.length, total: northwindRepos.length, missing: [] },
       keys: { shared: 0, ask: [] },
-      repos: northwindRepos,
+      repos: northwindRepos.map((r) => (box && clonesOf(r.full_name) ? { ...r, existing: clonesOf(r.full_name) } : r)),
       warnings: [],
+      scanned: box && withClones ? SCANNED : undefined,
     };
   }
   return { org: { login: org, name: org, avatar_url: "", verified: false, type: "Organization", html_url: `https://github.com/${org}` }, state: "no-org", projects: [], access: { readable: 0, total: 0, missing: [] }, keys: { shared: 0, ask: [] }, warnings: [] };
@@ -516,15 +534,15 @@ async function project(r: TeamStatus, p: TeamStatus["projects"][number], i: numb
   if (p.state === "skipped" || p.state === "ready") return;
   await wait(i * 350);
   p.state = "cloning";
-  p.line = "Receiving objects: 38%";
+  p.line = p.adopted ? `checking ${p.path}` : "Receiving objects: 38%";
   touch(r, "team.project", { project: p.id, state: p.state });
-  await wait(600);
+  await wait(p.adopted ? 200 : 600);
   p.state = "setting-up";
   p.line = p.id === "shop" ? "box/init-shop.sh · yarn install" : p.id === "billing-api" ? "yarn install" : "pnpm install";
   addLocation(r.box, p);
   // Its first-time setup runs in a terminal of its own, in its checkout.
   p.session = `team-${r.id}-${p.id}`;
-  initSession(r.box, p.session, `/home/me/code/${p.id}`, p.location ?? p.id, `${p.id} first-time setup`);
+  initSession(r.box, p.session, p.path ?? `/home/me/code/${p.id}`, p.location ?? p.id, `${p.id} first-time setup`);
   touch(r, "team.project", { project: p.id, state: p.state, location: p.location });
   if (i === 0 && holds.has("init")) {
     p.waiting = true;
@@ -549,8 +567,10 @@ function addLocation(box: string, p: TeamStatus["projects"][number]) {
   p.location = name;
   const list = (ctx.locations[box] ??= []);
   if (list.some((l) => l.name === name)) return;
-  const path = `/home/me/code/${name}`;
-  list.push({ name, path, repo: true, remote: `https://github.com/${p.repo}.git`, slug: p.repo, default_branch: "main", scripts: {}, worktrees: [{ name, path, branch: "main", main: true }] });
+  const path = p.path ?? `/home/me/code/${name}`;
+  const c = p.adopted ? clonesOf(p.repo)?.find((x) => x.path === path) : undefined;
+  const worktrees = [{ name, path, branch: c?.branch ?? "main", main: true }, ...(c?.worktrees ? [{ name: "review", path: `${path}-review`, branch: "review", setup_on_open: true }] : [])];
+  list.push({ name, path, repo: true, remote: `https://github.com/${p.repo}.git`, slug: p.repo, default_branch: "main", scripts: {}, worktrees });
   ctx.emit({ type: "location.added", box, data: { location: name, path, url: `https://github.com/${p.repo}.git` } });
 }
 
@@ -621,6 +641,12 @@ function setup(org: string, req: SetupRequest): Promise<TeamStatus> {
     if (acc) Object.assign(acc, { commit, box, at: iso(), key: source.key, source });
     else accepted.push({ org: "acme", id: "acme", name: "Acme", commit, box, at: iso(), key: source.key, source });
   }
+  // The clones chosen on the page: used as they are, not cloned again.
+  for (const p of r.projects) {
+    const path = req.use?.[p.id] ?? req.use?.[p.repo];
+    const c = path ? clonesOf(p.repo)?.find((x) => x.path === path) : undefined;
+    if (c) Object.assign(p, { adopted: true, path: c.path, first_open: c.worktrees || undefined });
+  }
   const key = `${box}/${r.id}`;
   runs[key] = r;
   logs[key] = [];
@@ -684,7 +710,7 @@ export function teamLaptopCall(method: string, path: string, body: unknown, dela
   }
   if (!route.startsWith("/v1/team")) return undefined;
   if (method === "GET" && route === "/v1/team") return delay(accepted);
-  const m = /^\/v1\/team\/([^/]+)(?:\/(setup|retry|update))?$/.exec(route);
+  const m = /^\/v1\/team\/([^/]+)(?:\/(setup|retry|update|pull))?$/.exec(route);
   if (!m) return undefined;
   const org = decodeURIComponent(m[1]);
   const gh = github().state;
@@ -692,6 +718,13 @@ export function teamLaptopCall(method: string, path: string, body: unknown, dela
   if (gh !== "ready") return Promise.reject(new ApiError("Connect GitHub first: gh is not signed in on this computer", 412, "gh_signed_out"));
   if (method === "GET" && !m[2]) return delay(view(org, q));
   if (method === "POST" && m[2] === "setup") return setup(org, body as SetupRequest);
+  if (method === "POST" && m[2] === "pull") {
+    const b = body as { repo: string; path: string };
+    const c = clonesOf(b.repo)?.find((x) => x.path === b.path);
+    if (!c) return Promise.reject(new ApiError(`${b.path} is no longer a clone of ${b.repo}`, 400));
+    pulled.add(c.path);
+    return delay({ ...c, behind: 0 });
+  }
   if (method === "POST" && m[2] === "retry") {
     const r = body as { box: string; from: string };
     return retry(r.box, idOf(org), r.from);

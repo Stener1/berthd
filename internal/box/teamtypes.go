@@ -70,6 +70,12 @@ type TeamProjectPlan struct {
 	// when the engineer skipped 1Password: not in the project's config, so
 	// nothing reads them with op, until Use 1Password lays them in.
 	Deferred map[string]string `json:"deferred,omitempty"`
+	// Use is a clone already on the box to use instead of cloning, as the
+	// engineer chose it on the page; the box checks its origin again first.
+	Use string `json:"use,omitempty"`
+	// Fresh asks for a fresh clone at Path even when a Shipyard location is
+	// a clone of the repository already.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // Team step and project states.
@@ -145,4 +151,11 @@ type TeamProjectStatus struct {
 	Missing []string `json:"missing,omitempty"`
 	// Deferred are the keys 1Password would give it, while skipped.
 	Deferred []string `json:"deferred,omitempty"`
+	// Adopted says it uses a clone that was already on the box, at Path,
+	// rather than a fresh one; Note says which and why when there was a
+	// choice. FirstOpen counts its git worktrees set up on first open.
+	Adopted   bool   `json:"adopted,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Note      string `json:"note,omitempty"`
+	FirstOpen int    `json:"first_open,omitempty"`
 }

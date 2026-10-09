@@ -86,6 +86,12 @@ type TeamProjectView struct {
 	Commands   []string         `json:"commands"`
 	Keys       *TeamProjectKeys `json:"keys,omitempty"`
 	Error      string           `json:"error,omitempty"`
+	// Existing are clones of it already on the box (a Shipyard location, or
+	// one the box found in the usual folders), the preferred first; the
+	// page offers to use one instead of cloning. ExistingNote says why the
+	// first is preferred when several are locations.
+	Existing     []box.ExistingClone `json:"existing,omitempty"`
+	ExistingNote string              `json:"existing_note,omitempty"`
 }
 
 type TeamKitView struct {
@@ -134,6 +140,15 @@ type TeamView struct {
 	Accepted *TeamAcceptedRef  `json:"accepted,omitempty"`
 	Update   *TeamUpdate       `json:"update,omitempty"`
 	Warnings []string          `json:"warnings"`
+	// Scanned says where the box looked for clones it already has, and
+	// whether its budget ran out first; nil without a box to ask.
+	Scanned *TeamScanned `json:"scanned,omitempty"`
+}
+
+// TeamScanned is where a box looked for existing clones.
+type TeamScanned struct {
+	Looked    []string `json:"looked"`
+	Truncated bool     `json:"truncated,omitempty"`
 }
 
 // TeamSource is where a team setup was read from.
@@ -204,6 +219,8 @@ type TeamRepoChoice struct {
 	Description string `json:"description"`
 	PushedAt    string `json:"pushed_at"`
 	HasBerth    bool   `json:"has_berth"`
+	// Existing are clones of it already on the box, as for a project.
+	Existing []box.ExistingClone `json:"existing,omitempty"`
 }
 
 type TeamAcceptedRef struct {
@@ -840,6 +857,17 @@ func (a *Agent) teamView(ctx context.Context, key, boxName string, fromLink bool
 			return v, nil
 		}
 		v.Repos = orgRepos(ctx, g, r.org)
+		refs := make([]existingRef, len(v.Repos))
+		for i, rc := range v.Repos {
+			name := strings.SplitN(rc.FullName, "/", 2)[1]
+			refs[i] = existingRef{ID: repoProjectID(name), Repo: rc.FullName, Path: "~/code/" + name}
+		}
+		if found, scanned := a.existingOnBox(ctx, boxName, repoTeamID(r.org.Login), refs); found != nil {
+			v.Scanned = scanned
+			for i := range v.Repos {
+				v.Repos[i].Existing = found[strings.ToLower(v.Repos[i].FullName)].Clones
+			}
+		}
 		return v, nil
 	}
 	v.Repo, v.Commit, v.Setup, v.Files, v.Steps = r.repo, r.commit, r.setup, r.fileViews(), r.stepViews()
@@ -866,6 +894,19 @@ func (a *Agent) teamView(ctx context.Context, key, boxName string, fromLink bool
 					v.Keys.OnePassword = append(v.Keys.OnePassword, TeamAsk{Project: tp.view.ID, Key: k, Set: set[tp.view.ID+"/"+k]})
 				}
 			}
+		}
+	}
+	var refs []existingRef
+	for _, p := range v.Projects {
+		if p.Access {
+			refs = append(refs, existingRef{ID: p.ID, Repo: p.Repo, Path: p.Path})
+		}
+	}
+	if found, scanned := a.existingOnBox(ctx, boxName, r.setup.ID, refs); found != nil {
+		v.Scanned = scanned
+		for i := range v.Projects {
+			e := found[strings.ToLower(v.Projects[i].Repo)]
+			v.Projects[i].Existing, v.Projects[i].ExistingNote = e.Clones, e.Note
 		}
 	}
 	if acc, _ := a.accepted(src); acc != nil {
@@ -910,6 +951,40 @@ func orgRepos(ctx context.Context, g ghCLI, org TeamOrg) []TeamRepoChoice {
 	sort.SliceStable(out, func(i, j int) bool { return out[i].HasBerth && !out[j].HasBerth })
 	return out
 }
+
+type existingRef struct{ ID, Repo, Path string }
+
+// existingOnBox asks a box for the clones it already has of refs' repos,
+// by repository in lower case. nil without a box, or when the box is older
+// or doesn't answer in time: the page then offers fresh clones only.
+func (a *Agent) existingOnBox(ctx context.Context, boxName, id string, refs []existingRef) (map[string]box.ExistingProject, *TeamScanned) {
+	if boxName == "" || len(refs) == 0 || !teamIDLike.MatchString(id) {
+		return nil, nil
+	}
+	c, ok := a.client(boxName)
+	if !ok {
+		return nil, nil
+	}
+	q := url.Values{}
+	for _, r := range refs {
+		q.Add("project", r.ID+":"+r.Repo+":"+r.Path)
+	}
+	var res box.ExistingResult
+	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	if err := box.NewClient(c).Call(cctx, "GET", "/v1/team/"+url.PathEscape(id)+"/existing?"+q.Encode(), nil, &res); err != nil {
+		return nil, nil
+	}
+	out := map[string]box.ExistingProject{}
+	for _, p := range res.Projects {
+		if len(p.Clones) > 0 {
+			out[strings.ToLower(p.Repo)] = p
+		}
+	}
+	return out, &TeamScanned{Looked: res.Looked, Truncated: res.Truncated}
+}
+
+var teamIDLike = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 
 // keysOnBox asks a box which of a team's keys it already has, so they are
 // not asked for again.

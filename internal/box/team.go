@@ -187,6 +187,9 @@ func validateBundle(tb *TeamBundle) error {
 		if (!strings.HasPrefix(p.Path, "~/") && !strings.HasPrefix(p.Path, "/")) || strings.Contains(p.Path, "..") {
 			return badRequest("project %s: path %q", p.ID, p.Path)
 		}
+		if p.Use != "" && ((!strings.HasPrefix(p.Use, "~/") && !strings.HasPrefix(p.Use, "/")) || strings.Contains(p.Use, "..") || p.Fresh) {
+			return badRequest("project %s: use %q must be a folder on the box (~/… or /…), and not with fresh", p.ID, p.Use)
+		}
 		if p.Init != "" {
 			c, err := team.InsidePath(p.Init)
 			if err != nil {
@@ -864,21 +867,32 @@ func (b *Box) runProjects(ctx context.Context, id string) {
 	}
 }
 
-// setUpProject clones one repository (or finds the clone already there),
-// adds it, and applies its setup.
+// setUpProject clones one repository, or uses a clone already on the box
+// (teamadopt.go), adds it, and applies its setup.
 func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan) error {
 	id := tb.ID
 	dest, err := filepath.Abs(expandHome(p.Path))
 	if err != nil {
 		return err
 	}
-	b.updateProject(id, p.ID, func(s *TeamProjectStatus) { s.State, s.Error, s.Warnings, s.Line = TeamCloning, "", nil, "" })
-	if _, err := os.Stat(dest); err == nil {
+	b.updateProject(id, p.ID, func(s *TeamProjectStatus) {
+		s.State, s.Error, s.Warnings, s.Line, s.Adopted, s.Path, s.Note, s.FirstOpen = TeamCloning, "", nil, "", false, "", "", 0
+	})
+	// A clone already there is used as it is: the one the page chose
+	// (checked again now), else a Shipyard location of the same repo.
+	adopted, name, note, err := b.adoptable(ctx, p)
+	if err != nil {
+		return err
+	}
+	if adopted != "" {
+		dest = adopted
+	} else if _, err := os.Stat(dest); err == nil {
 		// origin as written (get-url would apply url.*.insteadOf).
 		raw, _ := git(ctx, "-C", dest, "config", "--get", "remote.origin.url")
 		if got := slugOf(strings.TrimSpace(string(raw))); !strings.EqualFold(got, p.Repo) {
 			return fmt.Errorf("%s is already there and is not a clone of %s", p.Path, p.Repo)
 		}
+		adopted = dest
 	} else {
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
@@ -890,13 +904,19 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 			return err
 		}
 	}
-	name := ""
-	all, _ := b.Locations.List(ctx)
-	for _, l := range all {
-		if samePath(l.Path, dest) {
-			name = l.Name
+	if name == "" {
+		all, _ := b.Locations.List(ctx)
+		for _, l := range all {
+			if samePath(l.Path, dest) {
+				name = l.Name
+			}
 		}
 	}
+	// A location that was there already keeps its name, worktrees and
+	// settings; a clone new to Shipyard leaves its git worktrees to be set
+	// up the first time each is opened.
+	existed := name != ""
+	firstOpen := 0
 	if name == "" {
 		// The location's name is part of every worktree's URL
 		// (<worktree>.<project>.<box>.localhost), so it is one URL label
@@ -909,9 +929,17 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 		if _, err := b.Locations.Add(ctx, name, dest); err != nil {
 			return err
 		}
-		b.Events.Publish(events.Event{Type: "location.added", Box: b.Name, Data: map[string]any{"location": name, "path": dest, "url": p.URL, "team": id}})
+		b.Events.Publish(events.Event{Type: "location.added", Box: b.Name, Data: map[string]any{"location": name, "path": dest, "url": p.URL, "team": id, "adopted": adopted != ""}})
+		if adopted != "" {
+			firstOpen = b.markFirstOpen(ctx, name, dest)
+		}
 	}
-	b.updateProject(id, p.ID, func(s *TeamProjectStatus) { s.State, s.Location, s.Line = TeamSettingUp, name, "" })
+	b.updateProject(id, p.ID, func(s *TeamProjectStatus) {
+		s.State, s.Location, s.Line = TeamSettingUp, name, ""
+		if adopted != "" {
+			s.Adopted, s.Path, s.Note, s.FirstOpen = true, dest, note, firstOpen
+		}
+	})
 	var warnings []string
 	trust := RepoTrustNone
 	// The repository's own config, trusted as the engineer reviewed it.
@@ -930,12 +958,17 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 		}
 	}
 	if p.Kit != nil && trust != RepoTrustTrusted {
-		res, err := b.InstallKit(ctx, name, *p.Kit)
-		if err != nil {
-			return fmt.Errorf("kit %s: %w", p.Kit.Kit.ID, err)
+		// A location that was there already keeps a kit of its own.
+		if saved, err := b.Locations.saved(name); err == nil && existed && saved.Kit != nil && saved.Kit.ID != p.Kit.Kit.ID {
+			warnings = append(warnings, fmt.Sprintf("it keeps its own kit, %s; the team's kit (%s) can replace it in Project settings", saved.Kit.Name, p.Kit.Kit.Name))
+		} else {
+			res, err := b.InstallKit(ctx, name, *p.Kit)
+			if err != nil {
+				return fmt.Errorf("kit %s: %w", p.Kit.Kit.ID, err)
+			}
+			warnings = append(warnings, res.Warnings...)
+			b.Events.Publish(events.Event{Type: "kit.installed", Box: b.Name, Data: map[string]any{"location": name, "kit": res.Kit.ID, "source": res.Kit.Source, "team": id}})
 		}
-		warnings = append(warnings, res.Warnings...)
-		b.Events.Publish(events.Event{Type: "kit.installed", Box: b.Name, Data: map[string]any{"location": name, "kit": res.Kit.ID, "source": res.Kit.Source, "team": id}})
 	}
 	if len(p.Env) > 0 {
 		if err := b.mergeLocalEnv(name, p.Env); err != nil {
@@ -944,6 +977,8 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 	}
 	b.updateProject(id, p.ID, func(s *TeamProjectStatus) { s.Trust, s.Warnings = trust, warnings })
 	if p.Init != "" {
+		// In the clone, whichever it is: the team's inits leave what is
+		// there (an .env, its values) as it is.
 		if err := b.runInit(ctx, tb, p, name, dest); err != nil {
 			return err
 		}
@@ -1024,14 +1059,31 @@ func (b *Box) mergeLocalEnv(name string, env map[string]string) error {
 }
 
 // teamKeysSet lists "project/KEY" for a bundle's keys its projects'
-// configs on this box already have.
+// configs on this box already have. Each project is found by its location
+// in the setup's status (an adopted clone is not at its team.json path),
+// else by that path.
 func (b *Box) teamKeysSet(ctx context.Context, tb TeamBundle) []string {
 	out := []string{}
+	where := map[string]string{}
+	if b.Team != nil {
+		if st, err := b.Team.readState(tb.ID); err == nil {
+			for _, p := range st.Projects {
+				where[p.ID] = p.Location
+			}
+		}
+	}
 	all, _ := b.Locations.read()
 	for _, p := range tb.Projects {
 		dest, _ := filepath.Abs(expandHome(p.Path))
 		for _, s := range all {
-			if !samePath(s.Path, dest) || s.Config == nil {
+			if s.Config == nil {
+				continue
+			}
+			if loc := where[p.ID]; loc != "" {
+				if s.Name != loc {
+					continue
+				}
+			} else if !samePath(s.Path, dest) {
 				continue
 			}
 			for k, v := range s.Config.Env {

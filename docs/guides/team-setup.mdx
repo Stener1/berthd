@@ -211,6 +211,73 @@ what is its business (ports, URLs, databases, through the repository's
 config or kit); everything else stays as the repository has it. When
 nothing is missing, the keys line is skipped.
 
+### Repositories you already cloned
+
+If a repo is already on your box, Shipyard uses that clone instead of
+making a second one. It matches a clone by the repository its origin points
+to, not by its folder, so `~/work/acme-web` counts for `acme/web` even when
+`team.json` says `~/code/web`.
+
+**How a clone is matched.** Shipyard reads the clone's `remote.origin.url`
+as it is written in its `.git/config` (the same value `git config --get
+remote.origin.url` gives, so `url.*.insteadOf` rewrites don't change it).
+`https://github.com/acme/web`, `ssh://git@github.com/acme/web.git` and
+`git@github.com:acme/web` all match `acme/web`, in any case and with or
+without `.git`. A repository with the same folder name and another origin
+doesn't match. A git worktree is never used as a main checkout (its main
+checkout is offered instead), and a bare repository has no checkout to use.
+
+**Where Shipyard looks.** First at the projects you've already added to
+Shipyard. Then on the box, in:
+
+- `~/code`, `~/work`, `~/src`, `~/projects`, `~/dev`, `~/repos`, `~/git`, and
+  the folder `team.json` puts the repo in, two levels deep;
+- every other folder directly in your home folder, one level deep, so
+  `~/Downloads/acme-web` is found too.
+
+It skips `node_modules`, `.cache`, hidden folders and anything that isn't
+yours, never follows a symlink out of your home folder, and stops after
+about two seconds or 20,000 folder entries, whichever comes first. Of each
+repository it meets it reads `remote.origin.url` and nothing else; only the
+clones of your team's repos are looked at further, with git (their branch,
+uncommitted changes and last commit, without taking git's locks).
+
+**You choose.** The page shows each clone it finds: "**Found
+~/work/acme-web**, a clone of acme/web (on branch `feat/x`, 3 uncommitted
+changes) · **Use this** / **Clone a fresh copy**". It starts on **Use this**
+when the repo is a Shipyard project already, or when exactly one clone was
+found and it has no uncommitted changes; otherwise on a fresh clone.
+Choosing **Use this** says what happens there: "Runs in your existing
+checkout ~/work/acme-web", what its init does, and, when it has uncommitted
+changes, "Your uncommitted changes stay as they are". When several Shipyard
+projects are clones of the same repo, the one at the `team.json` path is
+used, else the one used most recently, and the page says which. The box
+checks the chosen folder's origin again before using it, and refuses it if
+it has changed since.
+
+**What using a clone does.** Shipyard adds it as a project, or keeps the
+project it already is (its name, worktrees and settings), installs the
+team's kit for it or trusts its own `.berth/config.json` as you reviewed it,
+lays in its keys, and runs its init in that checkout. Inits are written to
+leave what's there alone: an existing `.env` and its values are kept.
+
+**What it never does.** It never changes the checkout's branch, never
+stashes or resets, never touches your uncommitted changes, and never pulls.
+When the clone is behind its upstream (as of its last fetch), the page
+offers **Pull**, a button of its own, which fast-forwards it only.
+
+**Its worktrees.** The git worktrees the repo already has show in the
+sidebar as Shipyard worktrees, marked **set up on first open**. Each one's
+setup (its kit's or repo's setup script) runs the first time you open a
+terminal or start an agent there, not all at once during the team setup,
+and nothing touches their files before then.
+
+From the command line, `berth team show acme --box devbox` lists the clones
+devbox has, and `berth team setup acme devbox --use web='~/work/acme-web'`
+uses one (quote the `~` so your shell leaves it for the box). `--fresh web`
+clones a fresh copy even when a Shipyard project is a clone of it already.
+A clone the box found is used only with `--use`.
+
 ### Updates
 
 When the team changes `.berth`, Shipyard notices the newer commit (it checks
@@ -224,7 +291,8 @@ out), repositories added, kits moved to a new commit, keys. **Update**, with you
 If the org has no `.berth` you can read, the page lists its repositories you
 can read, with those that carry their own `.berth/config.json` picked. Shipyard
 clones the ones you choose and sets each up from its own config, after the
-box's GitHub sign-in.
+box's GitHub sign-in. A repo the box already has a clone of offers **Use
+this** too, as [above](#repositories-you-already-cloned).
 
 ### From the command line
 
@@ -234,6 +302,7 @@ berth team setup acme devbox              # run it on devbox; prints progress, a
 berth team status                         # each team setup you accepted, and how it stands
 berth team retry acme --from postgres     # start again from a step (or a repo)
 berth team setup acme devbox --no-1password   # skip 1Password: type the shared keys once (Enter leaves one missing)
+berth team setup acme devbox --use web='~/work/acme-web'   # use a clone devbox already has
 ```
 
 `berth team setup` follows the setup until it ends; the steps run in the
@@ -364,7 +433,8 @@ After a step that adds the engineer to a group, the steps left run with it
 
 ### A project's init
 
-`projects[].init` runs once in the fresh clone, in a terminal of its own on
+`projects[].init` runs once in the clone (a fresh one, or the one the
+engineer [already had](#repositories-you-already-cloned)), in a terminal of its own on
 the box (`team-<id>-<project>`, titled "`<project>` first-time setup"), with
 what a kit's scripts get, and `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`, so
 corepack fetches the yarn or pnpm a repository pins without asking (worktree

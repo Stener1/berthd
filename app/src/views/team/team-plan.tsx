@@ -7,8 +7,9 @@ import { TerminalView } from "@/components/workspace/terminal-view";
 import { copyText } from "@/lib/clipboard";
 import { bytes } from "@/lib/format";
 import { openUrl } from "@/lib/open-url";
-import { durationOf, plural, type PlanStep, type ProjectView, type TeamStatus, type TeamUpdate, type TeamView } from "@/lib/team";
+import { durationOf, type ExistingClone, plural, type PlanStep, type ProjectView, type TeamStatus, type TeamUpdate, type TeamView } from "@/lib/team";
 import { cn } from "@/lib/utils";
+import { adoptedLine, FoundClones } from "@/views/team/team-found";
 import { shortTitle } from "@/views/team/team-rail";
 import { BerthTag, whereFrom, card, Cmds, PrivateTag, Row, Section, SourceTag, StateIcon, SudoTag } from "@/views/team/team-parts";
 
@@ -30,6 +31,11 @@ export interface PlanProps {
   update?: TeamUpdate | null;
   // 1Password skipped: its keys are typed on the checklist instead.
   skipOP?: boolean;
+  // Which clone on the box each repo uses, by project id: a folder there,
+  // or "" for a fresh clone. Repos with no clone found aren't in it.
+  use?: Record<string, string>;
+  onUse?(id: string, path: string): void;
+  onPull?(p: ProjectView, c: ExistingClone): Promise<void>;
 }
 
 function StepHead({ s }: { s: PlanStep }) {
@@ -59,11 +65,20 @@ function ProjectHead({ p, view }: { p: ProjectView; view: TeamView }) {
   );
 }
 
-function ProjectDetail({ p }: { p: ProjectView }) {
+function ProjectDetail({ p, use }: { p: ProjectView; use?: ExistingClone }) {
+  const commands = use ? [`# uses your existing checkout ${use.display}, as it is: no clone, checkout, stash, reset or pull`, ...p.commands.filter((c) => !c.startsWith("git clone "))] : p.commands;
   return (
     <div className="space-y-2 text-xs">
       <p className="text-muted-foreground">
-        Into <span className="font-mono text-foreground">{p.path}</span>, as you, with the box's own GitHub sign-in.{" "}
+        {use ? (
+          <>
+            Runs in your existing checkout <span className="font-mono text-foreground">{use.display}</span>; nothing is cloned.{" "}
+          </>
+        ) : (
+          <>
+            Into <span className="font-mono text-foreground">{p.path}</span>, as you, with the box's own GitHub sign-in.{" "}
+          </>
+        )}
         {p.source === "repo" && p.config_hash && (
           <>
             Its <span className="font-mono">.berth/config.json</span> is trusted as you see it now (<span className="font-mono">{p.config_hash.slice(0, 7)}</span>); a later change asks again.
@@ -75,8 +90,8 @@ function ProjectDetail({ p }: { p: ProjectView }) {
           </>
         )}
       </p>
-      {p.init_detail && <p className="text-muted-foreground">Then once in the main checkout: {p.init_detail}.</p>}
-      <Cmds lines={p.commands} />
+      {p.init_detail && <p className="text-muted-foreground">Then once in {use ? "your existing checkout" : "the main checkout"}: {p.init_detail}.</p>}
+      <Cmds lines={commands} />
     </div>
   );
 }
@@ -131,6 +146,9 @@ export function Plan(p: PlanProps) {
   const runRepos = run ? view.projects.filter((x) => repoOf(x.id)) : readable;
   // Repos a run added that the plan didn't list (an update's new one).
   const extra = run?.projects.filter((x) => !view.projects.some((v) => v.id === x.id)) ?? [];
+  // Repos that use a clone the box has already, rather than a new one.
+  const reusing = run ? run.projects.filter((x) => x.adopted).length : readable.filter((x) => p.use?.[x.id]).length;
+  const reposAside = `${plural(run ? runRepos.length + extra.length : readable.length, "repo")}, ${reusing ? `${reusing} from ${reusing === 1 ? "a clone" : "clones"} you have, the rest cloned as you` : "cloned as you"} · setup from the repo itself when it has one`;
   const asks = view.keys.ask;
   const anyKeys = view.keys.shared + asks.length > 0;
 
@@ -203,7 +221,7 @@ export function Plan(p: PlanProps) {
       <Section
         id="plan-repos"
         title="Repos"
-        aside={`${plural(run ? runRepos.length + extra.length : readable.length, "repo")}, cloned as you · setup from the repo itself when it has one`}
+        aside={reposAside}
       >
         <div className={card}>
           {(run ? runRepos : view.projects).map((x) => {
@@ -235,7 +253,7 @@ export function Plan(p: PlanProps) {
                 head={<ProjectHead p={x} view={view} />}
                 open={!!open[`p:${x.id}`]}
                 onToggle={() => toggle(`p:${x.id}`)}
-                detail={<ProjectDetail p={x} />}
+                detail={<ProjectDetail p={x} use={x.existing?.find((c) => c.path && c.path === p.use?.[x.id])} />}
                 trailing={
                   run ? (
                     r?.state === "ready" && run.phase !== "done" ? (
@@ -264,6 +282,14 @@ export function Plan(p: PlanProps) {
                   ) : undefined
                 }
               >
+                {!run && x.access && !!x.existing?.length && p.onUse && (
+                  <FoundClones id={x.id} repo={x.repo} clones={x.existing} use={p.use?.[x.id] ?? ""} onUse={(path) => p.onUse?.(x.id, path)} note={x.existing_note} initDetail={x.init_detail} onPull={p.onPull ? (c) => p.onPull!(x, c) : undefined} />
+                )}
+                {run && r && adoptedLine(r) && (
+                  <p data-testid={`adopted-${x.id}`} className="text-muted-foreground text-xs">
+                    {adoptedLine(r)}
+                  </p>
+                )}
                 {r?.state === "failed" && (
                   <div className="space-y-2">
                     {r.error && <pre className="whitespace-pre-wrap rounded-md border border-destructive/25 bg-background px-3 py-2 font-mono text-[11.5px] text-destructive-foreground">{r.error}</pre>}

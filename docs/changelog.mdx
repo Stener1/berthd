@@ -10,6 +10,16 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
+- **Team setup uses the clones you already have.** Before cloning a repo,
+  Shipyard looks for one on the box: a project you added already, or a
+  clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,
+  reading nothing else). The page shows "Found ~/work/acme-web … · Use this
+  / Clone a fresh copy", and using it changes nothing in it: no checkout,
+  stash, reset or pull, and your `.env` and uncommitted changes stay as
+  they are. Its existing worktrees show in the sidebar and are set up the
+  first time you open each. `berth team setup … --use web=PATH` does the
+  same from the command line. See
+  [repositories you already cloned](/guides/team-setup#repositories-you-already-cloned).
 
 - **Review links can open logged in, at a page.** Add `&as=pro@acme.test&path=/event-types`
   to a review link (or `--as` and `--path` to `berth review`), and the
