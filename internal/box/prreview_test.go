@@ -606,3 +606,32 @@ func TestReviewRoutesOverTheWire(t *testing.T) {
 		t.Fatalf("negative idle days: %d", code)
 	}
 }
+
+func TestReviewSetupSaysWhoAReviewCanLogInAsFromTrustedConfigOnly(t *testing.T) {
+	f := newReviewFixture(t)
+	ctx := context.Background()
+	if s, err := f.b.ReviewSetupFor(ctx, "shop", nil); err != nil || s.Login != nil {
+		t.Fatalf("no login: %+v %v", s.Login, err)
+	}
+	saved, err := f.b.Locations.saved("shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := *saved.Config
+	c.Login = &LoginConfig{Script: "scripts/login.sh", Users: []LoginUser{{Email: "pro@acme.test", Label: "Pro"}}}
+	if err := f.b.Locations.SetLocalConfig("shop", c); err != nil {
+		t.Fatal(err)
+	}
+	// A PR that adds a user of its own changes nothing: its config is never read.
+	sha := f.pr(70, "", map[string]string{".berth/config.json": `{"login": {"script": "x.sh", "users": ["evil@acme.test"], "any": true}}`})
+	ch, stop := f.bus.Subscribe()
+	defer stop()
+	if _, err := f.open(70, sha); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, ch, "worktree.setup.finished")
+	s, err := f.b.ReviewSetupFor(ctx, "shop", nil)
+	if err != nil || s.Login == nil || s.Login.Any || strings.Join(s.Login.Users, ",") != "pro@acme.test" {
+		t.Fatalf("login: %+v %v", s.Login, err)
+	}
+}

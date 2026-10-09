@@ -13,6 +13,8 @@ import { parseReviewLink, reviewLink, validRepo } from "@/lib/review-link";
 //   #61  from a fork (jo/shop): refused
 //   #63  by someone outside acme: refused
 // and acme/secret-tool#5, a repo that is not one of the team's projects.
+// devl's shop logs worktrees in as pro@, admin@ or free@acme.test (its
+// kit's login); gpu's has no login, so a link's as= opens without one there.
 // &reviewhold=setup keeps a review's setup running until
 // window.__prReviewMock.advance(); window.__prReviewMock.push(n) adds n
 // commits to a PR's head, so its review says it has new commits.
@@ -166,6 +168,19 @@ const boxesWith = (repo: string) =>
 
 const reviewName = (pr: number) => `review-${pr}`;
 
+// Each box's project login, as the laptop agent reads it from review-setup.
+const LOGINS: Record<string, { users: string[]; any?: boolean } | undefined> = {
+  devl: { users: ["pro@acme.test", "admin@acme.test", "free@acme.test"] },
+};
+
+// loginCheck is internal/prreview's LoginCheck.
+function loginCheck(repo: string, box: string, as: string): { allowed: boolean; reason?: string } {
+  const l = LOGINS[box];
+  if (!l || (!l.users.length && !l.any)) return { allowed: false, reason: `${repo} has no login set up on this box, so it opens without logging in` };
+  if (l.any || l.users.some((u) => u.toLowerCase() === as.toLowerCase())) return { allowed: true };
+  return { allowed: false, reason: `${as} isn't one of ${repo}'s login users, so it opens without logging in` };
+}
+
 function reviewBox(box: string, loc: Location, pr: number): ReviewBox {
   const existing = loc.worktrees?.find((w) => w.name === reviewName(pr)) as ReviewWorktree | undefined;
   return {
@@ -204,13 +219,14 @@ function reviewBox(box: string, loc: Location, pr: number): ReviewBox {
   };
 }
 
-function plan(repo: string, n: number, pickBox?: string, hintSha?: string): ReviewSheet {
+function plan(repo: string, n: number, pickBox?: string, hintSha?: string, open: { as?: string; path?: string } = {}): ReviewSheet {
   const key = `${repo}#${n}`;
   const pr = prs[key];
   const base: ReviewSheet = {
     repo,
     pr: n,
-    link: reviewLink(repo, n),
+    link: reviewLink(repo, n, open),
+    ...(open.as || open.path ? { login: { ...(open.as ? { as: open.as } : {}), ...(open.path ? { path: open.path } : {}) } } : {}),
     org: "acme",
     reviewer: "sean",
     verdict: { allowed: true },
@@ -247,7 +263,7 @@ function plan(repo: string, n: number, pickBox?: string, hintSha?: string): Revi
     ...(hintSha ? { hint: { sha: hintSha, matches: h.startsWith(hintSha) } } : {}),
   };
   const on = boxesWith(repo);
-  sheet.boxes = on.map(({ box, loc }) => reviewBox(box, loc, n));
+  sheet.boxes = on.map(({ box, loc }) => ({ ...reviewBox(box, loc, n), ...(open.as ? { login: loginCheck(repo, box, open.as) } : {}) }));
   sheet.box = sheet.boxes.find((b) => b.box === pickBox)?.box ?? sheet.boxes[0]?.box;
   // As the laptop agent: a refused PR's diff is never read.
   const refuse = (code: ReviewSheet["verdict"]["code"], reason: string): ReviewSheet => ({ ...sheet, files: 0, changes: [], verdict: { allowed: false, code, reason } });
@@ -327,17 +343,25 @@ export function prReviewLaptopCall(method: string, path: string, body: unknown, 
       repo?: string;
       pr?: number;
       box?: string;
+      as?: string;
+      path?: string;
     };
     let repo = r.repo ?? "";
     let n = r.pr ?? 0;
     let hint: string | undefined;
+    let as = r.as;
+    let path = r.path;
     if (r.link !== undefined) {
       const ref = parseReviewLink(r.link);
       if (!ref) return Promise.reject(new ApiError("This isn't a review link Shipyard can open", 400, "bad_link"));
       ({ repo, pr: n, sha: hint } = ref);
+      as ??= ref.as;
+      path ??= ref.path;
     }
     if (!validRepo(repo) || !(n > 0)) return Promise.reject(new ApiError("This isn't a review link Shipyard can open", 400, "bad_link"));
-    return wait(350).then(() => delay(plan(repo, n, r.box, hint)));
+    // as and path beside the link are read as the link reads them.
+    if ((as || path) && !parseReviewLink(reviewLink(repo, n, { as, path }))) return Promise.reject(new ApiError("This isn't a review link Shipyard can open", 400, "bad_link"));
+    return wait(350).then(() => delay(plan(repo, n, r.box, hint, { as, path })));
   }
   if (method === "POST" && route === "/v1/pr-review/open") {
     const r = body as { repo: string; pr: number; sha: string; box: string };

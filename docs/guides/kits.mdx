@@ -229,6 +229,10 @@ The users have to exist in the worktree's database: seed them in the kit's
   only, and sends you on to `next`.
 - **An agent:** `berthd browser open --as pro@acme.test --path /orders`
   logs the [agent browser](/guides/agent-browser) in the same way.
+- **A review link:** `berth://review?repo=acme/shop&pr=42&as=pro@acme.test&path=/orders`
+  opens a teammate's PR on your box logged in as that user, at that page,
+  when this login lists them. See
+  [review a PR](/guides/review-a-pr#opening-logged-in-at-a-page).
 - **A visual diff:** `berthd shots compare --as pro@acme.test` logs both
   sides in, each with its own login, since the worktree and main each have
   their own dev server and database. See

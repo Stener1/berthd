@@ -123,3 +123,51 @@ test("new commits on the PR show under its review, and Update to latest asks aga
   await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByTestId("review-new-commits")).toHaveCount(0);
 });
+
+test("a link with as and path opens the review logged in, at that page", async ({ app }) => {
+  const { page } = app;
+  // Mock mode has no laptop proxy: a stand-in answers the worktree's host,
+  // and the login route with a page (as e2e/login-as.spec.ts does).
+  const logins: { as: string | null; next: string | null }[] = [];
+  await app.context.route(/^https?:\/\/[^/]+\.localhost:1377(?:\/|$)/, (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname === "/__berth/login") logins.push({ as: u.searchParams.get("as"), next: u.searchParams.get("next") });
+    return route.fulfill({ status: 200, contentType: "text/html", body: `<!doctype html><h1>${u.pathname}</h1>` });
+  });
+  await app.open({ params: { "review-link": `${link("acme/shop", 42)}&as=pro@acme.test&path=/event-types` } });
+  const s = sheet(page);
+  await expect(s.getByTestId("pr-review-login")).toHaveText("Opens /event-types, logged in as pro@acme.test");
+  await expect(s.getByTestId("pr-review-login")).toHaveAttribute("data-allowed", "true");
+  await s.getByTestId("pr-review-go").click();
+  await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
+  const pane = page.locator("[data-testid=browser-pane]:visible");
+  await expect(pane.getByRole("textbox", { name: "Address" })).toHaveValue("http://review-42.shop.devl.localhost:1377/__berth/login?as=pro%40acme.test&next=%2Fevent-types");
+  await expect.poll(() => logins).toContainEqual({ as: "pro@acme.test", next: "/event-types" });
+});
+
+test("a user the project doesn't list, or a box without a login, opens without logging in", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { "review-link": `${link("acme/shop", 42)}&as=guest@acme.test&path=/event-types` } });
+  const s = sheet(page);
+  const line = s.getByTestId("pr-review-login");
+  await expect(line).toHaveText("Opens /event-types. guest@acme.test isn't one of acme/shop's login users, so it opens without logging in.");
+  await expect(line).toHaveAttribute("data-allowed", "false");
+  // It is never a reason to refuse the review.
+  await expect(s.getByTestId("pr-review-go")).toBeEnabled();
+  // gpu's shop has no login at all.
+  await s.getByRole("combobox", { name: "Box" }).click();
+  await page.getByRole("option", { name: "gpu" }).click();
+  await expect(line).toHaveText("Opens /event-types. acme/shop has no login set up on this box, so it opens without logging in.");
+  await s.getByTestId("pr-review-go").click();
+  await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator("[data-testid=browser-pane]:visible").getByRole("textbox", { name: "Address" })).toHaveValue("http://review-42.shop.gpu.localhost:1377/event-types");
+});
+
+test("as or path with anything else in them make the whole link no link", async ({ app }) => {
+  const { page } = app;
+  for (const bad of ["as=a@b.c;rm", "path=//evil.example", "path=https%3A%2F%2Fevil.example", "as=pro@acme.test&as=admin@acme.test"]) {
+    await app.open({ params: { "review-link": `${link("acme/shop", 42)}&${bad}` } });
+    await expect(sheet(page)).toContainText("This isn't a review link Shipyard can open");
+    await expect(sheet(page).getByTestId("pr-review-go")).toHaveCount(0);
+  }
+});
