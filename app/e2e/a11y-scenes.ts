@@ -264,6 +264,22 @@ export const scenes: Scene[] = [
     },
   },
   {
+    // A PR review link's sheet (views/pr-review), with setup files changed.
+    id: "pr-review-sheet",
+    async run(app, theme) {
+      await app.open({ theme, params: { "review-link": "berth://review?repo=acme/shop&pr=57" } });
+      await expect(app.page.getByTestId("pr-review-changes")).toBeVisible();
+    },
+  },
+  {
+    id: "pr-review-refused",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, params: { "review-link": "berth://review?repo=acme/shop&pr=63" } });
+      await expect(app.page.getByTestId("pr-review-refused")).toBeVisible();
+    },
+  },
+  {
     id: "guided-install",
     async run(app, theme) {
       const { page } = app;

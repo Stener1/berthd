@@ -192,6 +192,37 @@ nothing in one runs until you have seen it:
 - On a box, a kit's files are written only inside its own folder, and
   `before:kit.install` and `before:kit.remove` gates can refuse them.
 
+## Review links
+
+A [review link](/guides/review-a-pr), `berth://review?repo=OWNER/NAME&pr=N`,
+can come from anyone, so it carries no authority:
+
+- **Read strictly.** It names a repository (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`)
+  and a positive PR number, and at most a head commit, which only warns
+  when it is not the head. Any other parameter, one given twice, or a value
+  out of shape makes it no link: no command, path, setting or variable is
+  ever read from one.
+- **Never run on open.** Opening it shows the review sheet and nothing
+  else. Nothing is fetched to a box or run until you press **Review**, which
+  checks everything again; `berth review` asks unless given `--yes`.
+- **Who.** The repository must be one of your team setup's projects or
+  already on one of your boxes. The PR is read with your own `gh`, so you
+  see only what your account can, and it must be open, from a branch of
+  that repository (not a fork), by a member, owner or collaborator.
+- **The commit shown.** The box fetches `refs/pull/N/head` and makes the
+  worktree only if it is the commit you confirmed. A PR that moves on
+  doesn't move the review; **Update to latest** asks again.
+- **Setup from the team, never the PR.** The kit and the `.berth/config.json`
+  the box trusts, read from the main checkout, set it up; the PR's own
+  `.berth/` never runs, and git hooks are off while it is checked out. The
+  sheet lists the files in the PR that touch setup.
+- **Keys.** The team's shared keys, as any worktree gets them; never your
+  own (`team.json`'s `ask` keys).
+- **Contained and cleaned up.** Its dev server is reachable only through
+  the private URL, its sessions run in their own scopes, and it is removed
+  when the PR is merged or closed or after 7 days unused, never with
+  uncommitted changes without asking. Each step is in the box's journal.
+
 ## Flows and event data
 
 [Flows](/guides/automations) run on events whose data can come from someone

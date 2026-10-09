@@ -65,6 +65,7 @@ State, in `<state>/box/`:
 | `runs/<id>.d/` | A run's headless agents' prompts and JSON output |
 | `flow-runs.json.imported` | Flow runs from before durable runs, once imported |
 | `autofix.json` | Each worktree's Auto-fix this PR settings |
+| `reviews.json` | [Review](/guides/review-a-pr) settings: `idle_days`. Each review's mark (its PR, commit, author, and the keys it doesn't get) is in `locations.json` |
 | `browser/shots/<location>/<worktree>/` | Agents' browser screenshots, 20 per worktree |
 | `browser/viewports.json` | The [size](/guides/agent-browser#size) an agent chose for each worktree's browser, by path; a worktree at the default 1920×1080 has none |
 | `browser/profiles/` | Running browsers' throwaway profiles, removed when each closes |
@@ -98,7 +99,8 @@ agents, `exec`, repository hooks, flow steps, services):
 | `BERTH_URL` | Its private URL as the laptop opens it: `http://WT.LOC.BOX.localhost:1377` |
 | `BERTH_BROWSER_PROXY`, `PLAYWRIGHT_MCP_PROXY_SERVER`, `PLAYWRIGHT_MCP_PROXY_BYPASS` | Its [browser proxy](/guides/agent-browser#a-browser-you-run-yourself) |
 | `BERTH_KIT_DIR` | Its kit's files, when it has a kit |
-| then | the box's `env.json`, the project's `env`, and resolved secrets |
+| `BERTH_REVIEW`, `BERTH_REVIEW_REPO`, `BERTH_REVIEW_SHA`, `BERTH_WITHHELD` | In a [review](/guides/review-a-pr): the PR number, its repository, the commit checked out, and the names of the reviewer's own keys it does not get |
+| then | the box's `env.json`, the project's `env`, and resolved secrets (in a review, without the reviewer's own keys) |
 | `PORT` | `$BERTH_PORT`, for servers that read `PORT`, unless the box or `env` sets it |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | Terminals and agents: `300000`, so an [agent-browser](/guides/agent-browser#agent-browser) left idle closes after 5 minutes, unless the box, `env` or berthd's environment sets it |
 | `ORCA_ROOT_PATH`, `ORCA_WORKTREE_PATH`, `ORCA_WORKSPACE_NAME` | Setup and archive scripts, for scripts written for Orca |

@@ -12,7 +12,12 @@ repositories on disk.
   $GH_FAKE_LOGIN                      the login `gh auth login` signs in as (default: engineer)
   $GH_FAKE_LOG                        every call is appended to this file
 
-Commands: --version, auth status|login|setup-git|token, api PATH.
+  <repo>.git/pulls/<N>.json           a pull request: title, author, association, state, cross,
+                                      head_repo, head_branch, base; its head is refs/pull/<N>/head
+  $GH_FAKE_NO_ASSOCIATION             pr view refuses the authorAssociation field, as an older gh would
+
+Commands: --version, auth status|login|setup-git|token, api PATH, pr view N -R REPO --json FIELDS,
+pr diff N -R REPO.
 """
 import base64
 import json
@@ -202,6 +207,14 @@ def api(path):
                 not_found()
             out({"type": "file", "path": p, "sha": sha.strip(), "size": len(data), "encoding": "base64",
                  "content": base64.encodebytes(data).decode()})
+        if rest[0] == "pulls" and len(rest) == 2:
+            pr = pull(d, owner, name, rest[1])
+            out({"number": pr["number"], "title": pr["title"], "state": "closed" if pr["state"] != "OPEN" else "open",
+                 "merged": pr["state"] == "MERGED", "draft": pr["isDraft"], "html_url": pr["url"],
+                 "user": {"login": pr["author"]["login"]}, "author_association": pr["authorAssociation"],
+                 "head": {"ref": pr["headRefName"], "sha": pr["headRefOid"],
+                          "repo": {"full_name": pr["headRepositoryOwner"]["login"] + "/" + pr["headRepository"]["name"]}},
+                 "base": {"ref": pr["baseRefName"]}})
         if rest[0] == "compare" and len(rest) == 2 and "..." in rest[1]:
             a, b = rest[1].split("...", 1)
             n = git(d, "rev-list", "--count", "%s..%s" % (a, b))
@@ -209,6 +222,66 @@ def api(path):
                 not_found()
             out({"total_commits": int(n.strip()), "status": "ahead"})
     not_found()
+
+
+def pull(d, owner, name, number):
+    path = os.path.join(d, "pulls", "%s.json" % number)
+    if not os.path.exists(path):
+        not_found()
+    with open(path) as f:
+        meta = json.load(f)
+    head = git(d, "rev-parse", "--verify", "--quiet", "refs/pull/%s/head" % number)
+    if not head:
+        not_found()
+    head_repo = meta.get("head_repo") or owner + "/" + name
+    h_owner, _, h_name = head_repo.partition("/")
+    return {
+        "number": int(number),
+        "title": meta.get("title", ""),
+        "state": meta.get("state", "OPEN"),
+        "isDraft": meta.get("draft", False),
+        "url": "https://github.com/%s/%s/pull/%s" % (owner, name, number),
+        "author": {"login": meta.get("author", "dana")},
+        "authorAssociation": meta.get("association", "MEMBER"),
+        "isCrossRepository": meta.get("cross", False),
+        "headRefName": meta.get("head_branch", "pr-%s" % number),
+        "headRefOid": head.strip(),
+        "headRepository": {"name": h_name},
+        "headRepositoryOwner": {"login": h_owner},
+        "baseRefName": meta.get("base", "main"),
+    }
+
+
+def pr_command(args):
+    sub = args[1] if len(args) > 1 else ""
+    number = args[2] if len(args) > 2 else ""
+    repo = args[args.index("-R") + 1] if "-R" in args else ""
+    owner, _, name = repo.partition("/")
+    d = repo_dir(owner, name)
+    if not d or not number.isdigit():
+        sys.stderr.write("GraphQL: Could not resolve to a Repository with the name '%s'. (repository)\n" % repo)
+        sys.exit(1)
+    if not os.path.exists(os.path.join(d, "pulls", "%s.json" % number)):
+        sys.stderr.write("GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)\n" % number)
+        sys.exit(1)
+    pr = pull(d, owner, name, number)
+    if sub == "view":
+        fields = args[args.index("--json") + 1].split(",") if "--json" in args else []
+        if "authorAssociation" in fields and os.environ.get("GH_FAKE_NO_ASSOCIATION"):
+            sys.stderr.write('Unknown JSON field: "authorAssociation"\n')
+            sys.exit(1)
+        if "files" in fields:
+            names = git(d, "diff", "--name-only", "%s...%s" % (pr["baseRefName"], pr["headRefOid"])) or ""
+            pr["files"] = [{"path": p} for p in names.splitlines() if p]
+        out({k: pr[k] for k in fields if k in pr})
+    if sub == "diff":
+        if os.environ.get("GH_FAKE_DIFF_TOO_LARGE"):
+            sys.stderr.write("could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300)\n")
+            sys.exit(1)
+        sys.stdout.write(git(d, "diff", "%s...%s" % (pr["baseRefName"], pr["headRefOid"])) or "")
+        sys.exit(0)
+    sys.stderr.write("fake gh: unknown pr command: %s\n" % " ".join(args))
+    sys.exit(2)
 
 
 def main():
@@ -246,6 +319,11 @@ def main():
                 sys.exit(1)
             print("gho_fake")
             return
+    if args[0] == "pr":
+        if not login():
+            sys.stderr.write("To get started with GitHub CLI, please run:  gh auth login\n")
+            sys.exit(4)
+        pr_command(args)
     if args[0] == "api" and len(args) > 1:
         path = next((a for a in args[1:] if not a.startswith("-")), "")
         api(path)

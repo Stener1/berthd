@@ -21,7 +21,7 @@ import (
 // Every test here works in a home folder of its own (t.TempDir as HOME),
 // with real git: nobody's own clones are looked at.
 
-func runGit(t *testing.T, dir string, args ...string) string {
+func adoptGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-c", "user.name=Acme Dev", "-c", "user.email=dev@acme.test", "-c", "init.defaultBranch=main", "-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
@@ -37,12 +37,12 @@ func repoAt(t *testing.T, dir, origin string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "init", "-q")
+	adoptGit(t, dir, "init", "-q")
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("acme\n"), 0o644)
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-qm", "first")
+	adoptGit(t, dir, "add", ".")
+	adoptGit(t, dir, "commit", "-qm", "first")
 	if origin != "" {
-		runGit(t, dir, "remote", "add", "origin", origin)
+		adoptGit(t, dir, "remote", "add", "origin", origin)
 	}
 	return dir
 }
@@ -85,11 +85,11 @@ func TestScanFindsClonesWhereEngineersKeepThem(t *testing.T) {
 	os.Symlink(h(".private/inrepo"), h("work/inside"))
 	// A bare repository is recognised, and not a checkout to use.
 	os.MkdirAll(h("work/bare.git"), 0o755)
-	runGit(t, h("work/bare.git"), "init", "-q", "--bare")
-	runGit(t, h("work/bare.git"), "remote", "add", "origin", "https://github.com/acme/bare")
+	adoptGit(t, h("work/bare.git"), "init", "-q", "--bare")
+	adoptGit(t, h("work/bare.git"), "remote", "add", "origin", "https://github.com/acme/bare")
 	// A git worktree is not a main checkout: its main checkout is found.
 	repoAt(t, h(".private/mainrepo"), "https://github.com/acme/main")
-	runGit(t, h(".private/mainrepo"), "worktree", "add", "-q", h("work/main-wt"), "-b", "wt")
+	adoptGit(t, h(".private/mainrepo"), "worktree", "add", "-q", h("work/main-wt"), "-b", "wt")
 	// The same folder name, another repository.
 	repoAt(t, h("src/web"), "https://github.com/someone-else/web")
 
@@ -234,7 +234,7 @@ func TestTeamSetupUsesALocationAlreadyOnTheBoxAtAnotherPath(t *testing.T) {
 	// The engineer cloned acme/web to ~/elsewhere/web and added it as
 	// "myweb", with a key of its own; team.json says ~/code/web.
 	mine := filepath.Join(f.home, "elsewhere", "web")
-	runGit(t, f.home, "clone", "-q", "https://github.com/acme/web", mine)
+	adoptGit(t, f.home, "clone", "-q", "https://github.com/acme/web", mine)
 	if _, err := f.b.Locations.Add(context.Background(), "myweb", mine); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestTeamSetupUsesALocationAlreadyOnTheBoxAtAnotherPath(t *testing.T) {
 
 	// Two locations of the same repo: the one at the team.json path wins,
 	// and the status says so.
-	runGit(t, f.home, "clone", "-q", "https://github.com/acme/web", filepath.Join(f.home, "code", "web"))
+	adoptGit(t, f.home, "clone", "-q", "https://github.com/acme/web", filepath.Join(f.home, "code", "web"))
 	f.b.Locations.Add(context.Background(), "web", filepath.Join(f.home, "code", "web"))
 	if _, err := f.b.StartTeam(context.Background(), tb); err != nil {
 		t.Fatal(err)
@@ -282,10 +282,10 @@ func TestAChosenCloneWhoseOriginChangedIsRefused(t *testing.T) {
 	f := newTeamFixture(t)
 	f.bundle()
 	mine := filepath.Join(f.home, "work", "acme-web")
-	runGit(t, f.home, "clone", "-q", "https://github.com/acme/web", mine)
+	adoptGit(t, f.home, "clone", "-q", "https://github.com/acme/web", mine)
 	tb := adoptBundle(f, TeamProjectPlan{ID: "web", Repo: "acme/web", Source: "none", Use: "~/work/acme-web"})
 	// Between the scan and the setup, it became a clone of another repo.
-	runGit(t, mine, "remote", "set-url", "origin", "https://github.com/acme/other")
+	adoptGit(t, mine, "remote", "set-url", "origin", "https://github.com/acme/other")
 	if _, err := f.b.StartTeam(context.Background(), tb); err != nil {
 		t.Fatal(err)
 	}
@@ -301,8 +301,8 @@ func TestAChosenCloneWhoseOriginChangedIsRefused(t *testing.T) {
 		t.Fatalf("it was added: %+v", all)
 	}
 	// A git worktree chosen as if it were a main checkout is refused too.
-	runGit(t, mine, "remote", "set-url", "origin", "https://github.com/acme/web")
-	runGit(t, mine, "worktree", "add", "-q", filepath.Join(f.home, "work", "acme-web-wt"), "-b", "wt")
+	adoptGit(t, mine, "remote", "set-url", "origin", "https://github.com/acme/web")
+	adoptGit(t, mine, "worktree", "add", "-q", filepath.Join(f.home, "work", "acme-web-wt"), "-b", "wt")
 	if _, err := verifyClone("~/work/acme-web-wt", "acme/web"); err == nil || !strings.Contains(err.Error(), "git worktree") {
 		t.Fatalf("a worktree as a main checkout: %v", err)
 	}
@@ -312,10 +312,10 @@ func TestAChosenCloneWhoseOriginChangedIsRefused(t *testing.T) {
 func snapshot(t *testing.T, dir string) string {
 	t.Helper()
 	var b strings.Builder
-	b.WriteString("branch " + runGit(t, dir, "symbolic-ref", "--short", "HEAD") + "\n")
-	b.WriteString("head " + runGit(t, dir, "rev-parse", "HEAD") + "\n")
-	b.WriteString("status\n" + runGit(t, dir, "status", "--porcelain", "--untracked-files=all") + "\n")
-	b.WriteString("stash " + runGit(t, dir, "stash", "list") + "\n")
+	b.WriteString("branch " + adoptGit(t, dir, "symbolic-ref", "--short", "HEAD") + "\n")
+	b.WriteString("head " + adoptGit(t, dir, "rev-parse", "HEAD") + "\n")
+	b.WriteString("status\n" + adoptGit(t, dir, "status", "--porcelain", "--untracked-files=all") + "\n")
+	b.WriteString("stash " + adoptGit(t, dir, "stash", "list") + "\n")
 	var files []string
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -342,8 +342,8 @@ func snapshot(t *testing.T, dir string) string {
 func dirtyAPI(t *testing.T, f *teamFixture) string {
 	f.gh.Repo("acme/api", map[string]string{"main.go": "package main\n", ".env.example": "SECRET=example\nPORT=3000\n"}, teamtest.Repo{})
 	dir := filepath.Join(f.home, "work", "acme-api")
-	runGit(t, f.home, "clone", "-q", "https://github.com/acme/api", dir)
-	runGit(t, dir, "checkout", "-qb", "feat/x")
+	adoptGit(t, f.home, "clone", "-q", "https://github.com/acme/api", dir)
+	adoptGit(t, dir, "checkout", "-qb", "feat/x")
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\n// half done\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("todo\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=mine\nPORT=4000\n"), 0o600)
@@ -390,7 +390,7 @@ func TestWorktreesOfAnAdoptedRepoAreSetUpOnFirstOpen(t *testing.T) {
 	f := newTeamFixture(t)
 	dir := dirtyAPI(t, f)
 	wt := filepath.Join(f.home, "work", "acme-api-review")
-	runGit(t, dir, "worktree", "add", "-q", wt, "-b", "review")
+	adoptGit(t, dir, "worktree", "add", "-q", wt, "-b", "review")
 	os.WriteFile(filepath.Join(wt, "wip.txt"), []byte("mine\n"), 0o644)
 	before := snapshot(t, wt)
 	if _, err := f.b.StartTeam(context.Background(), adoptBundle(f, apiPlan("~/work/acme-api"))); err != nil {
@@ -474,7 +474,7 @@ func TestExistingListsCandidatesForThePage(t *testing.T) {
 		t.Fatalf("web: %+v", web)
 	}
 	// Looking changed nothing: git's optional locks were off.
-	if out := runGit(t, dir, "status", "--porcelain"); strings.Count(out, "\n") != 2 {
+	if out := adoptGit(t, dir, "status", "--porcelain"); strings.Count(out, "\n") != 2 {
 		t.Fatalf("status: %q", out)
 	}
 	// Once a Shipyard location, it says which.

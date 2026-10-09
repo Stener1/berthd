@@ -63,6 +63,9 @@ type TeamProjectPlan struct {
 	// Keys are the names of every key the team lists for the project
 	// (shared and asked), so the box can say which are still missing.
 	Keys []string `json:"keys,omitempty"`
+	// Ask are the keys each engineer has their own of (team.json's "ask"):
+	// a pull request opened for review never gets them.
+	Ask []string `json:"ask,omitempty"`
 	// Deferred are the shared keys' 1Password references, name → op://…,
 	// when the engineer skipped 1Password: not in the project's config, so
 	// nothing reads them with op, until Use 1Password lays them in.

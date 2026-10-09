@@ -26,6 +26,8 @@ import (
 //	too_many         slow down and try again
 //	file_changed     a write named a version of the file that is no longer
 //	                 there (412); the answer carries the file as it is now
+//	moved            a pull request's head is not the commit confirmed
+//	dirty            a worktree has uncommitted changes, so it was left
 //	bad_request      the request itself was wrong
 //	internal         anything else
 const (
@@ -55,7 +57,10 @@ var errTmuxMissing = errors.New("tmux is not installed on this box")
 // codeFor names an error for clients.
 func codeFor(err error) string {
 	var he httpError
+	var rc reviewCode
 	switch {
+	case errors.As(err, &rc):
+		return rc.code
 	case errors.Is(err, ErrSessionExited):
 		return CodeSessionExited
 	case errors.Is(err, ErrSessionExists):

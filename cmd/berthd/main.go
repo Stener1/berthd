@@ -391,6 +391,10 @@ func serve(b boxHome, args []string) error {
 	go bx.RunShots(ctx)
 	bx.Team = &box.TeamRunner{Dir: filepath.Join(b.dir, "team")}
 	defer bx.Team.Stop()
+	// Pull requests opened for review: their settings, and their clean-up
+	// once merged, closed or idle.
+	bx.Reviews = &box.ReviewStore{Path: filepath.Join(b.dir, "reviews.json")}
+	go bx.RunReviewSweeps(ctx)
 	bx.Mount(s)
 	bx.ResumeTeams()
 	// Hooks that ran while berthd was down, in order, before anything new.

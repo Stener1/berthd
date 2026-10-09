@@ -99,6 +99,9 @@ type Box struct {
 	// Artifacts keeps what agents made for the person to look at
 	// (artifacts.go); nil on a box without them.
 	Artifacts *ArtifactStore
+	// Reviews keeps the box's review settings (prreview.go); nil uses the
+	// defaults.
+	Reviews *ReviewStore
 }
 
 func (b *Box) own(path string) {
@@ -124,6 +127,12 @@ func (b *Box) Mount(s *wire.Server) {
 	route("PUT /v1/locations/{name}/scripts", b.setScripts)
 	route("POST /v1/locations/{name}/worktrees", b.addWorktree)
 	route("POST /v1/locations/clone", b.cloneLocation)
+	route("GET /v1/locations/{name}/review-setup", b.reviewSetup)
+	route("GET /v1/reviews", b.listReviews)
+	route("POST /v1/reviews", b.postReview)
+	route("POST /v1/reviews/update", b.postReviewUpdate)
+	route("GET /v1/reviews/settings", b.getReviewSettings)
+	route("PUT /v1/reviews/settings", b.putReviewSettings)
 	route("GET /v1/team", b.listTeams)
 	route("POST /v1/team", b.postTeam)
 	route("GET /v1/team/{id}", b.getTeam)
@@ -247,9 +256,12 @@ func badRequest(format string, args ...any) error {
 
 func statusFor(err error) int {
 	var he httpError
+	var rc reviewCode
 	switch {
 	case errors.As(err, &he):
 		return he.status
+	case errors.As(err, &rc):
+		return rc.status
 	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare), errors.Is(err, ErrUnknownUnit), errors.Is(err, ErrUnknownArtifact):
 		return http.StatusNotFound
 	case errors.Is(err, ErrSessionExists), errors.Is(err, ErrSessionExited):
@@ -487,38 +499,82 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	}
-	b.stopServices(location, name)
-	from := origin(r)
-	removed := func(ctx context.Context) {
-		b.stopSessionsIn(from, dir)
-		b.Locations.Ports.Release(dir)
-		if branch != "" {
-			git(ctx, "-C", loc.Path, "branch", "-D", branch)
-		}
+	async, err := b.dropWorktree(origin(r), loc, name, dir, branch, force, "removed", nil)
+	if err != nil {
+		return err
 	}
-	// A worktree with an archive script is torn down in the background: the
-	// script may take minutes, and removal only follows if it succeeds.
-	if loc.Scripts.Archive != "" {
-		go b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
-			if err := b.Locations.RemoveWorktree(context.Background(), location, name, force); err != nil {
-				return err
-			}
-			removed(context.Background())
-			b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: from, Data: map[string]any{"location": location, "name": name, "path": dir}})
-			return nil
-		})
+	if async {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, map[string]string{"removing": name, "archive": loc.Scripts.Archive})
 		return nil
 	}
-	if err := b.Locations.RemoveWorktree(r.Context(), location, name, force); err != nil {
-		return err
-	}
-	removed(context.WithoutCancel(r.Context()))
-	b.publish(r, "worktree.removed", map[string]any{"location": location, "name": name, "path": dir})
 	writeJSON(w, map[string]string{"removed": name})
 	return nil
+}
+
+// dropWorktree removes a worktree: its services stop, and with an archive
+// script the script runs in the background and the removal follows if it
+// succeeds (async); without one it goes at once. done, when set, hears how
+// it ended. A review worktree's removal is journaled as review.removed,
+// with why.
+func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error)) (async bool, err error) {
+	_, mark := b.Locations.reviewAt(dir)
+	if mark != nil && branch == "" {
+		// A review's branch is Shipyard's own, made for it: it goes too.
+		if out, err := git(context.Background(), "-C", dir, "symbolic-ref", "--short", "HEAD"); err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "review/") {
+			branch = strings.TrimSpace(string(out))
+		}
+	}
+	finish := func(err error) {
+		if done != nil {
+			done(err)
+		}
+	}
+	b.stopServices(loc.Name, name)
+	removed := func(ctx context.Context) {
+		if b.Sessions != nil {
+			b.stopSessionsIn(from, dir)
+		}
+		b.Locations.Ports.Release(dir)
+		if branch != "" {
+			git(ctx, "-C", loc.Path, "branch", "-D", branch)
+		}
+		b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: from, Data: map[string]any{"location": loc.Name, "name": name, "path": dir}})
+		if mark != nil {
+			git(ctx, "-C", loc.Path, "update-ref", "-d", reviewRef(mark.PR))
+			b.Events.Publish(events.Event{Type: "review.removed", Box: b.Name, Origin: from, Data: map[string]any{
+				"location": loc.Name, "name": name, "path": dir, "repo": mark.Repo, "pr": mark.PR, "reason": reason,
+			}})
+		}
+	}
+	// A worktree with an archive script is torn down in the background: the
+	// script may take minutes, and removal only follows if it succeeds.
+	if loc.Scripts.Archive != "" {
+		go func() {
+			ran := false
+			var removeErr error
+			b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
+				ran = true
+				if removeErr = b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); removeErr != nil {
+					return removeErr
+				}
+				removed(context.Background())
+				return nil
+			})
+			if !ran {
+				removeErr = fmt.Errorf("%s's archive script failed, so it was left as it was", name)
+			}
+			finish(removeErr)
+		}()
+		return true, nil
+	}
+	if err := b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); err != nil {
+		return false, err
+	}
+	removed(context.Background())
+	finish(nil)
+	return false, nil
 }
 
 // stopSessionsIn ends the sessions working in a removed worktree: their

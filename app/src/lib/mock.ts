@@ -10,6 +10,7 @@ import { phoneCall } from "@/lib/mock-phone";
 import { worktreesCall } from "@/lib/mock-worktrees";
 import { kitsCall, kitsStream } from "@/lib/mock-kits";
 import { initTeamMock, isTeamSession, teamAttach, teamBoxCall, teamLaptopCall } from "@/lib/mock-team";
+import { initPrReviewMock, prReviewLaptopCall } from "@/lib/mock-pr-review";
 import { reviewCall, reviewExec } from "@/lib/mock-review";
 import { editorsCall } from "@/lib/mock-editors";
 import { imageGenCall } from "@/lib/mock-imagegen";
@@ -1246,6 +1247,7 @@ export function mockClient(): Client {
   if (!teamWired) {
     teamWired = true;
     initTeamMock({ status, locations, sessions, emit, delay, addBox: (name, address) => addMockBox(name, address) });
+    initPrReviewMock({ status, locations, services, emit, delay });
   }
   return counted(mockAgent());
 }
@@ -1366,6 +1368,8 @@ function mockAgent(): Client {
       if (kits) return kits as Promise<T>;
       const team = teamLaptopCall(method, path, body, delay);
       if (team) return team as Promise<T>;
+      const prReview = prReviewLaptopCall(method, path, body, delay);
+      if (prReview) return prReview as Promise<T>;
       const eds = editorsCall(method, path, body, delay);
       if (eds) return eds as Promise<T>;
       const gen = imageGenCall(method, path, delay);
