@@ -70,6 +70,11 @@ It does this once:
 - GitHub has no way to edit a description only if nobody else just did, so
   berthd reads it again right before writing, and when it changed, starts
   over from the new one, once;
+- only UI work gets one: a PR whose changed files include nothing a browser
+  shows (pages, components, styles, `.tsx`/`.jsx`/`.vue`/`.svelte`/`.html`/
+  `.css` and the like, images, `components/`, `pages/`, `public/`,
+  translations) gets none, and is looked at again when it gets new commits.
+  One someone asked for with `berthd review-button` goes on regardless;
 - a PR from a fork, or by someone who isn't a member, owner or collaborator,
   gets no button, as a review would refuse it;
 - `berthd review-button --as EMAIL --path /x`, in the worktree, sets the

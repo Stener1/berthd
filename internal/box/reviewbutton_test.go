@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,9 @@ case "$2" in
     n=$(cat "$d/head-$h" 2>/dev/null)
     if [ -z "$n" ]; then echo '[]'; exit 0; fi
     printf '['; pr "$n"; printf ']\n' ;;
+  */pulls/*/files*)
+    n=$(echo "$2" | sed -n 's/.*pulls\/\([0-9]*\)\/files.*/\1/p')
+    if [ -f "$d/files-$n.json" ]; then cat "$d/files-$n.json"; else echo '[{"filename":"app/billing/page.tsx"}]'; fi ;;
   */pulls/*) pr "${2##*/}" ;;
   *) exit 3 ;;
 esac
@@ -385,5 +389,76 @@ func TestWithReviewButton(t *testing.T) {
 	}
 	if l := ReviewButtonLink("acme/shop", 7, "a+b@acme.test", "/x y&z#w"); l != "https://berthd.app/review?repo=acme/shop&pr=7&as=a%2Bb@acme.test&path=/x%20y%26z%23w" {
 		t.Fatalf("link = %s", l)
+	}
+}
+
+// The button is for UI work: a PR whose files show nothing in a browser gets
+// none, is asked about again only when it moves on, and gets one once it
+// touches a page; a button someone asked for (berthd review-button) goes on
+// regardless.
+func TestOnlyUIWorkGetsAButton(t *testing.T) {
+	f := newButtonFixture(t)
+	f.setLocal(RepoConfig{ReviewButton: boolp(true), Login: &LoginConfig{Script: "login.sh", Users: []LoginUser{{Email: "pro@acme.test"}}}})
+	f.githubPR(12, strp("Moves the webhook queue."), "MEMBER", "acme/shop")
+	atHead := func(sha string) {
+		p := filepath.Join(f.ghDir, "pr-12.json")
+		b, _ := os.ReadFile(p)
+		s := regexp.MustCompile(`"ref":"feat-x"(,"sha":"[a-z0-9]*")?`).ReplaceAllString(string(b), `"ref":"feat-x","sha":"`+sha+`"`)
+		os.WriteFile(p, []byte(s), 0o644)
+	}
+	files := func(names ...string) {
+		var b strings.Builder
+		b.WriteString("[")
+		for i, n := range names {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(`{"filename":"` + n + `"}`)
+		}
+		b.WriteString("]")
+		os.WriteFile(filepath.Join(f.ghDir, "files-12.json"), []byte(b.String()), 0o644)
+	}
+	asked := func() int { return strings.Count(f.calls(), "/pulls/12/files") }
+
+	atHead("aaa")
+	files("internal/queue/webhook.go", "internal/queue/webhook_test.go", "docs/queue.md")
+	if n := f.poll(); n != 0 || f.patches() != 0 {
+		t.Fatalf("a backend-only PR got a button")
+	}
+	f.poll()
+	if asked() != 1 {
+		t.Fatalf("its files were asked for %d times at one commit, want 1", asked())
+	}
+
+	atHead("bbb")
+	files("internal/queue/webhook.go", "apps/web/components/Billing.tsx")
+	if n := f.poll(); n != 1 || !strings.Contains(f.body(12), ReviewButtonMarker) {
+		t.Fatalf("a PR that now touches a component got no button; calls:\n%s", f.calls())
+	}
+
+	// Asked for by hand, a backend PR gets one too.
+	g := newButtonFixture(t)
+	g.setLocal(RepoConfig{ReviewButton: boolp(true), Login: &LoginConfig{Script: "login.sh", Users: []LoginUser{{Email: "pro@acme.test"}}}})
+	g.githubPR(12, strp("Moves the webhook queue."), "MEMBER", "acme/shop")
+	os.WriteFile(filepath.Join(g.ghDir, "files-12.json"), []byte(`[{"filename":"internal/queue/webhook.go"}]`), 0o644)
+	if w := g.putButton("pro@acme.test", "/settings/webhooks"); w.Code != http.StatusOK {
+		t.Fatalf("set: %d %s", w.Code, w.Body)
+	}
+	if n := g.poll(); n != 1 {
+		t.Fatalf("a button someone asked for wasn't added")
+	}
+}
+
+func TestUIFile(t *testing.T) {
+	for name, want := range map[string]bool{
+		"apps/web/app/billing/page.tsx": true, "src/Button.jsx": true, "styles/main.css": true, "x/y.module.scss": true,
+		"packages/ui/components/Card.ts": true, "public/logo.png": true, "apps/web/public/static/locales/en/common.json": true,
+		"web/views/home.html": true, "src/App.vue": true,
+		"internal/queue/webhook.go": false, "api/v2/bookings.ts": false, "README.md": false, "prisma/schema.prisma": false,
+		"package.json": false, ".github/workflows/ci.yml": false, "src/lib/date.test.ts": false,
+	} {
+		if got := uiFile(name); got != want {
+			t.Errorf("uiFile(%q) = %v, want %v", name, got, want)
+		}
 	}
 }
