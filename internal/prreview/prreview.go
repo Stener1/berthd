@@ -44,6 +44,10 @@ type Ref struct {
 	// is a hint: the commit reviewed is the one GitHub reports, shown to
 	// the reviewer and confirmed; a hint that differs only warns.
 	SHA string `json:"sha,omitempty"`
+	// As and Path say how to open the review once it is ready: logged in
+	// as a dev user the project lists, at a page (login.go). Requests only.
+	As   string `json:"as,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // Repo is "owner/name".
@@ -123,7 +127,8 @@ func clip(s string) string {
 	return s
 }
 
-// ParseLink reads berth://review?repo=OWNER/NAME&pr=N[&sha=HEX]. It refuses
+// ParseLink reads berth://review?repo=OWNER/NAME&pr=N[&sha=HEX][&as=EMAIL]
+// [&path=/x]. It refuses
 // anything else: another scheme or host, a path, a user, a fragment, a
 // parameter it does not know or one given twice, and values that are not
 // exactly a repository, a number and a commit.
@@ -151,9 +156,9 @@ func ParseLink(s string) (Ref, error) {
 			return Ref{}, bad("%q has no value", clip(part))
 		}
 		switch k {
-		case "repo", "pr", "sha":
+		case "repo", "pr", "sha", "as", "path":
 		default:
-			return Ref{}, bad("it has a parameter %q; a review link takes only repo, pr and sha", clip(k))
+			return Ref{}, bad("it has a parameter %q; a review link takes only repo, pr, sha, as and path", clip(k))
 		}
 		if _, dup := seen[k]; dup {
 			return Ref{}, bad("it gives %s twice", k)
@@ -186,6 +191,18 @@ func ParseLink(s string) (Ref, error) {
 			return Ref{}, bad("the commit %q is not a commit hash", clip(sha))
 		}
 		ref.SHA = strings.ToLower(sha)
+	}
+	if as, ok := seen["as"]; ok {
+		if !ValidEmail(as) {
+			return Ref{}, bad("as %q is not a plain email address", clip(as))
+		}
+		ref.As = as
+	}
+	if p, ok := seen["path"]; ok {
+		if !ValidPath(p) {
+			return Ref{}, bad("path %q is not a page on the worktree's own address", clip(p))
+		}
+		ref.Path = p
 	}
 	return ref, nil
 }

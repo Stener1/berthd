@@ -16,13 +16,15 @@ import (
 
 const reviewUsage = `berth review — open a teammate's pull request on your own box, set up like any worktree
 
-  berth review OWNER/NAME#N [--box BOX] [--yes] [--json]
+  berth review OWNER/NAME#N [--box BOX] [--as EMAIL] [--path /x] [--yes] [--json]
                                    Show the review sheet: the PR, its author and the exact
                                    commit, the box, what will run there and which keys it
                                    gets, and what in it changes setup. Then ask, and make
                                    the worktree at that commit (--yes: don't ask; --json:
-                                   print the sheet and make nothing)
-  berth review link OWNER/NAME#N   Print the PR's review link, berth://review?repo=…&pr=…,
+                                   print the sheet and make nothing). --as and --path open
+                                   it logged in as one of the project's dev users, at a page
+  berth review link OWNER/NAME#N [--as EMAIL] [--path /x]
+                                   Print the PR's review link, berth://review?repo=…&pr=…,
                                    to paste in its description or a chat
 
 A review link carries no authority: only the repository and the PR number.
@@ -38,24 +40,37 @@ func reviewCommand(l laptop, args []string) error {
 		return nil
 	}
 	if args[0] == "link" {
-		if len(args) != 2 {
-			return errors.New("usage: berth review link OWNER/NAME#N")
-		}
-		ref, err := prreview.ParseArg(args[1])
-		if err != nil {
-			return err
-		}
-		fmt.Println(ref.Link())
-		return nil
+		return reviewLinkCommand(args[1:])
 	}
+	return reviewOpenCommand(l, args)
+}
+
+func reviewLinkCommand(args []string) error {
+	fs := flag.NewFlagSet("review link", flag.ContinueOnError)
+	as := fs.String("as", "", "open it logged in as this dev user")
+	page := fs.String("path", "", "open it at this page")
+	if err := fs.Parse(reorder(args)); err != nil || fs.NArg() != 1 {
+		return errors.New("usage: berth review link OWNER/NAME#N [--as EMAIL] [--path /x]")
+	}
+	ref, err := reviewRef(fs.Arg(0), *as, *page)
+	if err != nil {
+		return err
+	}
+	fmt.Println(ref.ShareLink())
+	return nil
+}
+
+func reviewOpenCommand(l laptop, args []string) error {
 	fs := flag.NewFlagSet("review", flag.ContinueOnError)
 	boxName := fs.String("box", "", "the box to review on (default: the first with the project)")
 	yes := fs.Bool("yes", false, "make the worktree without asking")
 	asJSON := fs.Bool("json", false, "print the sheet as JSON and make nothing")
+	as := fs.String("as", "", "open it logged in as this dev user")
+	page := fs.String("path", "", "open it at this page")
 	if err := fs.Parse(reorder(args)); err != nil || fs.NArg() != 1 {
-		return errors.New("usage: berth review OWNER/NAME#N [--box BOX] [--yes] [--json]")
+		return errors.New("usage: berth review OWNER/NAME#N [--box BOX] [--as EMAIL] [--path /x] [--yes] [--json]")
 	}
-	ref, err := prreview.ParseArg(fs.Arg(0))
+	ref, err := reviewRef(fs.Arg(0), *as, *page)
 	if err != nil {
 		return err
 	}
@@ -66,7 +81,7 @@ func reviewCommand(l laptop, args []string) error {
 	ctx, stop := signalContext()
 	defer stop()
 	var sh agent.ReviewSheet
-	if err := c.Call(ctx, "POST", "/v1/pr-review/plan", map[string]string{"link": ref.Link(), "box": *boxName}, &sh); err != nil {
+	if err := c.Call(ctx, "POST", "/v1/pr-review/plan", map[string]string{"link": ref.ShareLink(), "box": *boxName}, &sh); err != nil {
 		return err
 	}
 	if *asJSON {
@@ -90,12 +105,55 @@ func reviewCommand(l laptop, args []string) error {
 
 func openReview(ctx context.Context, c *agent.Client, sh agent.ReviewSheet) error {
 	var out agent.ReviewOpened
-	err := c.Call(ctx, "POST", "/v1/pr-review/open", agent.ReviewOpenRequest{Repo: sh.Repo, PR: sh.PR, SHA: sh.Head.SHA, Box: sh.Box}, &out)
+	req := agent.ReviewOpenRequest{Repo: sh.Repo, PR: sh.PR, SHA: sh.Head.SHA, Box: sh.Box}
+	if sh.Login != nil {
+		req.As, req.Path = sh.Login.As, sh.Login.Path
+	}
+	err := c.Call(ctx, "POST", "/v1/pr-review/open", req, &out)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("\n%s is ready on %s at %s (%s/%s). Its setup and dev server start there now;\nopen it in Shipyard, or: berth attach %s\n", reviewName(sh), out.Box, short(sh.Head.SHA), out.Location, out.Worktree.Name, out.Box)
+	if out.Open != "" {
+		fmt.Printf("In a browser on this computer: %s\n", out.Open)
+	}
 	return nil
+}
+
+// reviewRef reads OWNER/NAME#N or a link, with --as and --path read as a
+// link's as and path are.
+func reviewRef(arg, as, page string) (prreview.Ref, error) {
+	ref, err := prreview.ParseArg(arg)
+	if err != nil || (as == "" && page == "") {
+		return ref, err
+	}
+	if as == "" {
+		as = ref.As
+	}
+	if page == "" {
+		page = ref.Path
+	}
+	return prreview.ParseLink(prreview.LinkFor(ref.Repo(), ref.PR, as, page))
+}
+
+// loginLine says how the review opens, as the sheet does.
+func loginLine(sh agent.ReviewSheet, b *agent.ReviewBox) string {
+	if sh.Login == nil {
+		return ""
+	}
+	page := sh.Login.Path
+	if page == "" {
+		page = "/"
+	}
+	switch {
+	case sh.Login.As == "":
+		return "Opens " + page
+	case b != nil && b.Login != nil && b.Login.Allowed:
+		return fmt.Sprintf("Opens %s, logged in as %s", page, sh.Login.As)
+	case b != nil && b.Login != nil:
+		return fmt.Sprintf("Opens %s. %s", page, b.Login.Reason)
+	}
+	return ""
 }
 
 func reviewName(sh agent.ReviewSheet) string {
@@ -195,6 +253,9 @@ func describeReview(sh agent.ReviewSheet) {
 			fmt.Printf("  Clean-up   when the PR is merged or closed, or after %d days unused; never with uncommitted changes\n", b.IdleDays)
 		} else {
 			fmt.Printf("  Clean-up   when the PR is merged or closed; never with uncommitted changes\n")
+		}
+		if l := loginLine(sh, b); l != "" {
+			fmt.Printf("  Opens      %s\n", strings.TrimPrefix(l, "Opens "))
 		}
 		if b.Existing != nil {
 			fmt.Printf("  Already    open as %s at %s; Review moves it to this commit\n", b.Existing.Worktree, short(b.Existing.SHA))

@@ -10,7 +10,6 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
-
 - **Team setup uses the clones you already have.** Before cloning a repo,
   Shipyard looks for one on the box: a project you added already, or a
   clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,
@@ -21,6 +20,14 @@ again.
   first time you open each. `berth team setup … --use web=PATH` does the
   same from the command line. See
   [repositories you already cloned](/guides/team-setup#repositories-you-already-cloned).
+
+- **Review links can open logged in, at a page.** Add `&as=pro@acme.test&path=/event-types`
+  to a review link (or `--as` and `--path` to `berth review`), and the
+  review opens in its Browser tab logged in as that dev user, at that page,
+  when the project's login lists them; otherwise it opens without logging
+  in, and the sheet says why. **Copy review link as…** in the worktree menu
+  makes one. See [review a PR](/guides/review-a-pr#opening-logged-in-at-a-page).
+
 - **Review a PR in one click, on your own box.** A review link,
   `berth://review?repo=acme/shop&pr=42`, or `berth review acme/shop#42`,
   opens a review sheet: the PR, its author, the exact commit, the box, what

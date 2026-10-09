@@ -18,9 +18,11 @@ function copied(link: string) {
   });
 }
 
-export async function copyReviewLink(box: string, loc: Location, wt: Worktree) {
+// open, when given, makes the link open the review logged in as a dev user
+// (as) at a page (path); the default link has neither.
+export async function copyReviewLink(box: string, loc: Location, wt: Worktree, open: { as?: string; path?: string } = {}) {
   const r = reviewOf(wt);
-  if (r) return copied(linkFor(r));
+  if (r) return copied(linkFor(r, open));
   const client = useStore.getState().client;
   if (!client) return;
   try {
@@ -41,7 +43,7 @@ export async function copyReviewLink(box: string, loc: Location, wt: Worktree) {
       });
       return;
     }
-    copied(reviewLink(ref.repo, ref.pr));
+    copied(reviewLink(ref.repo, ref.pr, open));
   } catch {
     toastManager.add({
       title: "No PR for this branch",

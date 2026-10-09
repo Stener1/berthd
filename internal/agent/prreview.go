@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cosscom/shipyard/internal/box"
+	"github.com/cosscom/shipyard/internal/proxy"
 	"github.com/cosscom/shipyard/internal/prreview"
 	"github.com/cosscom/shipyard/internal/team"
 )
@@ -55,8 +57,24 @@ type ReviewSheet struct {
 	Box      string            `json:"box,omitempty"`
 	Changes  []prreview.Change `json:"changes"`
 	Files    int               `json:"files"`
+	// Login is how the link asks to open the review: as a dev user, at a
+	// page. Each box says whether its project's login allows it.
+	Login    *ReviewLoginAsk `json:"login,omitempty"`
 	ask      []string
 	boxRepos []string
+}
+
+// ReviewLoginAsk is a link's as and path.
+type ReviewLoginAsk struct {
+	As   string `json:"as,omitempty"`
+	Path string `json:"path,omitempty"`
+}
+
+// ReviewBoxLogin is whether a box's project lets the review open logged
+// in as the link asks, and if not why: it opens anyway, without logging in.
+type ReviewBoxLogin struct {
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type ReviewAuthor struct {
@@ -96,7 +114,9 @@ type ReviewBox struct {
 	Secrets  box.ReviewSecrets `json:"secrets"`
 	IdleDays int               `json:"idle_days"`
 	Existing *ReviewExisting   `json:"existing,omitempty"`
+	Login    *ReviewBoxLogin   `json:"login,omitempty"`
 	watch    []string
+	login    *box.ReviewLogin
 }
 
 type ReviewBoxSetup struct {
@@ -124,6 +144,10 @@ type ReviewOpenRequest struct {
 	PR   int    `json:"pr"`
 	SHA  string `json:"sha"`
 	Box  string `json:"box"`
+	// As and Path, from the link, say how to open it once ready; they
+	// change nothing the box fetches, sets up or trusts.
+	As   string `json:"as,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // ReviewUpdateRequest moves a review to the head the reviewer was shown.
@@ -140,6 +164,9 @@ type ReviewOpened struct {
 	Location string          `json:"location"`
 	Worktree box.Worktree    `json:"worktree"`
 	Review   *box.ReviewMark `json:"review"`
+	// Open is the address to open it at: through the login route when the
+	// project's login allows the link's user, else the page alone.
+	Open string `json:"open,omitempty"`
 }
 
 // ReviewStatus is how a review worktree stands against its PR now.
@@ -330,7 +357,7 @@ func (a *Agent) reviewBoxes(ctx context.Context, repo string, pr int, ask []stri
 				if err := bc.Call(cctx, http.MethodGet, "/v1/locations/"+url.PathEscape(l.Name)+"/review-setup?"+q.Encode(), nil, &s); err != nil {
 					continue
 				}
-				rb := ReviewBox{Box: name, Location: l.Name, Secrets: s.Secrets, IdleDays: s.IdleDays, watch: s.Watch,
+				rb := ReviewBox{Box: name, Location: l.Name, Secrets: s.Secrets, IdleDays: s.IdleDays, watch: s.Watch, login: s.Login,
 					Setup: ReviewBoxSetup{From: s.From, Kit: s.Kit, RepoConfig: s.RepoConfig, DefaultBranch: s.DefaultBranch, MatchesDefault: s.MatchesDefault,
 						Script: s.Script, Archive: s.Archive, Services: s.Services, Hooks: s.Hooks, Ports: s.Ports}}
 				for _, e := range s.Existing {
@@ -359,6 +386,10 @@ func (a *Agent) reviewBoxes(ctx context.Context, repo string, pr int, ask []stri
 func (a *Agent) reviewSheet(ctx context.Context, g ghCLI, ref prreview.Ref, pick string) (ReviewSheet, error) {
 	repo := ref.Repo()
 	sh := ReviewSheet{Repo: repo, PR: ref.PR, Link: ref.Link(), URL: fmt.Sprintf("https://github.com/%s/pull/%d", repo, ref.PR), Boxes: []ReviewBox{}, Changes: []prreview.Change{}}
+	if ref.As != "" || ref.Path != "" {
+		sh.Link = ref.ShareLink()
+		sh.Login = &ReviewLoginAsk{As: ref.As, Path: ref.Path}
+	}
 	owner, _, _ := strings.Cut(repo, "/")
 	sh.Org = owner
 	tm, teamRepos := a.reviewTeams(repo)
@@ -367,6 +398,17 @@ func (a *Agent) reviewSheet(ctx context.Context, g ghCLI, ref prreview.Ref, pick
 		sh.Org = tm.team.Org
 	}
 	boxes, boxRepos := a.reviewBoxes(ctx, repo, ref.PR, sh.ask)
+	for i := range boxes {
+		if ref.As == "" {
+			continue
+		}
+		var l *prreview.Login
+		if boxes[i].login != nil {
+			l = &prreview.Login{Users: boxes[i].login.Users, Any: boxes[i].login.Any}
+		}
+		ok, why := prreview.LoginCheck(repo, ref.As, l)
+		boxes[i].Login = &ReviewBoxLogin{Allowed: ok, Reason: why}
+	}
 	sh.Boxes, sh.boxRepos = boxes, boxRepos
 	policy := prreview.Policy{TeamRepos: teamRepos, BoxRepos: boxRepos, Org: sh.Org}
 	// A repository nobody listed is refused before GitHub is asked anything.
@@ -511,6 +553,8 @@ func (a *Agent) prReviewRoutes(mux *http.ServeMux) {
 			Repo string `json:"repo"`
 			PR   int    `json:"pr"`
 			Box  string `json:"box"`
+			As   string `json:"as"`
+			Path string `json:"path"`
 		}
 		if !decodeBody(w, r, &req) {
 			return
@@ -521,6 +565,11 @@ func (a *Agent) prReviewRoutes(mux *http.ServeMux) {
 			ref, err = prreview.ParseArg(req.Link)
 		} else {
 			ref, err = prreview.ParseArg(req.Repo + "#" + strconv.Itoa(req.PR))
+		}
+		// as and path given beside a link or OWNER/NAME#N are read as the
+		// link reads them.
+		if err == nil && (req.As != "" || req.Path != "") {
+			ref, err = prreview.ParseLink(prreview.LinkFor(ref.Repo(), ref.PR, firstOf(req.As, ref.As), firstOf(req.Path, ref.Path)))
 		}
 		if err != nil {
 			writeCoded(w, http.StatusBadRequest, err.Error(), "bad_link")
@@ -546,7 +595,7 @@ func (a *Agent) prReviewRoutes(mux *http.ServeMux) {
 			return
 		}
 		req.SHA = strings.ToLower(req.SHA)
-		ref, err := prreview.ParseArg(req.Repo + "#" + strconv.Itoa(req.PR))
+		ref, err := prreview.ParseLink(prreview.LinkFor(req.Repo, req.PR, req.As, req.Path))
 		if err != nil || !prreview.ValidSHA(req.SHA) || req.Box == "" {
 			writeCoded(w, http.StatusBadRequest, "say the repo, the PR, the full commit you were shown and the box", "bad_request")
 			return
@@ -567,7 +616,7 @@ func (a *Agent) prReviewRoutes(mux *http.ServeMux) {
 			writeCoded(w, code, err.Error(), ecode)
 			return
 		}
-		writeJSON(w, http.StatusOK, ReviewOpened{Box: req.Box, Location: rb.Location, Worktree: wt, Review: wt.Review})
+		writeJSON(w, http.StatusOK, ReviewOpened{Box: req.Box, Location: rb.Location, Worktree: wt, Review: wt.Review, Open: a.reviewOpenURL(req.Box, rb, wt, ref)})
 	})
 	// Update to latest: the sheet again, confirmed again.
 	mux.HandleFunc("POST /v1/pr-review/update", func(w http.ResponseWriter, r *http.Request) {
@@ -625,6 +674,35 @@ func (a *Agent) prReviewRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, http.StatusOK, st)
 	})
+}
+
+func firstOf(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+var hostLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// reviewOpenURL is where a ready review opens: its private URL at the
+// link's page, through the login route when the project's login lets the
+// link's user in. "" when its names can't be a host.
+func (a *Agent) reviewOpenURL(boxName string, rb *ReviewBox, wt box.Worktree, ref prreview.Ref) string {
+	labels := []string{strings.ToLower(wt.Name), strings.ToLower(rb.Location), strings.ToLower(boxName)}
+	for _, l := range labels {
+		if !hostLabel.MatchString(l) {
+			return ""
+		}
+	}
+	origin := "http://" + strings.Join(labels, ".") + ".localhost"
+	if p := a.status().Proxy.URLPort; p != 0 && p != 80 {
+		origin += ":" + strconv.Itoa(p)
+	}
+	if rb.Login != nil && rb.Login.Allowed {
+		return proxy.LoginURL(origin, ref.As, ref.Path)
+	}
+	return origin + proxy.SafeNext(ref.Path)
 }
 
 // reviewMark finds a review worktree's mark on its box.

@@ -6,12 +6,20 @@
 // app can refuse junk before it asks. Kept apart from the app so it tests
 // without it.
 
+import { safeNext } from "./login-url.ts";
+
 export interface ReviewRef {
   repo: string;
   pr: number;
   // The head commit the link was made at: only a hint, compared with the
   // PR's head to warn, never used to pick what is checked out.
   sha?: string;
+  // How to open the review once it is ready: logged in as one of the
+  // project's dev users, at a page. Requests only: the email is used only
+  // when the project's trusted login lists it, and neither changes what is
+  // fetched, set up or trusted.
+  as?: string;
+  path?: string;
 }
 
 const PART = /^[A-Za-z0-9._-]+$/;
@@ -36,7 +44,41 @@ export function prNumber(s: string): number | undefined {
   return n <= MAX_PR ? n : undefined;
 }
 
-// parseReviewLink reads berth://review?repo=OWNER/NAME&pr=N[&sha=HEX]; any
+// The box's login rule (internal/box/login.go, internal/prreview): a local
+// part of letters, digits and . _ + - starting with a letter or digit, and
+// a domain of at least two DNS labels; 254 characters at most.
+const EMAIL = /^[A-Za-z0-9][A-Za-z0-9_+-]*(\.[A-Za-z0-9_+-]+)*@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+
+export function validEmail(s: string): boolean {
+  const at = s.indexOf("@");
+  return s.length > 0 && s.length <= 254 && at > 0 && at <= 64 && EMAIL.test(s);
+}
+
+export const MAX_PATH = 512;
+
+// validPath is a page on the worktree's own host: one the login route's
+// next takes unchanged (safeNext), with no space, at most MAX_PATH long.
+// Like the proxy's SafeNext, it looks through up to four layers of
+// percent-encoding ("/%252F%252Fevil").
+export function validPath(p: string): boolean {
+  if (p.length === 0 || p.length > MAX_PATH || p.includes(" ") || safeNext(p) !== p) return false;
+  let s = p;
+  for (let i = 0; i < 4; i++) {
+    let d: string;
+    try {
+      d = decodeURIComponent(s);
+    } catch {
+      return false;
+    }
+    if (d === s) return true;
+    if (!d.startsWith("/") || d.startsWith("//") || d.includes("\\") || d.includes("://") || /[\u0000-\u001f\u007f]/.test(d)) return false;
+    s = d;
+  }
+  return false;
+}
+
+// parseReviewLink reads berth://review?repo=OWNER/NAME&pr=N[&sha=HEX]
+// [&as=EMAIL][&path=/x]; any
 // other parameter, one given twice, a fragment or a value out of shape makes
 // it undefined.
 export function parseReviewLink(raw: string): ReviewRef | undefined {
@@ -55,7 +97,7 @@ export function parseReviewLink(raw: string): ReviewRef | undefined {
     } catch {
       return undefined;
     }
-    if (!["repo", "pr", "sha"].includes(key) || seen.has(key)) return undefined;
+    if (!["repo", "pr", "sha", "as", "path"].includes(key) || seen.has(key)) return undefined;
     seen.set(key, value);
   }
   const repo = seen.get("repo");
@@ -63,7 +105,11 @@ export function parseReviewLink(raw: string): ReviewRef | undefined {
   if (!repo || !validRepo(repo) || !pr) return undefined;
   const sha = seen.get("sha");
   if (sha !== undefined && !/^[0-9a-f]{7,40}$/i.test(sha)) return undefined;
-  return { repo, pr, ...(sha ? { sha: sha.toLowerCase() } : {}) };
+  const as = seen.get("as");
+  if (as !== undefined && !validEmail(as)) return undefined;
+  const path = seen.get("path");
+  if (path !== undefined && !validPath(path)) return undefined;
+  return { repo, pr, ...(sha ? { sha: sha.toLowerCase() } : {}), ...(as ? { as } : {}), ...(path ? { path } : {}) };
 }
 
 // parseReviewRef takes what someone pasted or typed: a review link, or
@@ -77,7 +123,15 @@ export function parseReviewRef(raw: string): ReviewRef | undefined {
   return pr ? { repo: m[1], pr } : undefined;
 }
 
-// reviewLink is the link to paste in a PR's description or a chat.
-export function reviewLink(repo: string, pr: number): string {
-  return `berth://review?repo=${repo}&pr=${pr}`;
+// escape keeps / and @ readable and escapes what a query value needs to,
+// as internal/prreview's LinkFor does.
+const escape = (s: string) => encodeURIComponent(s).replace(/%2F/gi, "/").replace(/%40/gi, "@");
+
+// reviewLink is the link to paste in a PR's description or a chat; with
+// as and path it opens logged in as that dev user, at that page.
+export function reviewLink(repo: string, pr: number, open: { as?: string; path?: string } = {}): string {
+  let link = `berth://review?repo=${repo}&pr=${pr}`;
+  if (open.as) link += `&as=${escape(open.as)}`;
+  if (open.path) link += `&path=${escape(open.path)}`;
+  return link;
 }

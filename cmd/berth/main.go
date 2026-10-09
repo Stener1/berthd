@@ -62,7 +62,7 @@ Boxes
   berth kit add|apply|list|save …        Set projects up the same way on every box; see berth kit help
   berth team show|setup|status|retry …   Set a box up the way your team's are, from <org>/.berth
                                          on GitHub (read with gh); see berth team help
-  berth review OWNER/NAME#N [--box BOX] [--yes] [--json]
+  berth review OWNER/NAME#N [--box BOX] [--as EMAIL] [--path /x] [--yes] [--json]
                                          Open a teammate's PR on your box, at the commit
                                          shown, set up by your team's kit; see berth review help
   berth edit BOX/PROJECT[/WT] [FILE[:LINE[:COL]]] [--in EDITOR]

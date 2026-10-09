@@ -45,6 +45,7 @@ import { AutoFixItems } from "@/components/sidebar/autofix-items";
 import { boxHasRuns } from "@/lib/runs";
 import { openUpdate, reviewOf } from "@/lib/pr-review";
 import { copyReviewLink } from "@/views/pr-review/copy-link";
+import { loginUserLabel, useLoginConfig } from "@/lib/login-users";
 import { entryKey, useReview } from "@/views/review/review-store";
 import { SessionActionItems } from "@/components/orchestrate/session-actions";
 import { confirm, copy } from "@/components/sidebar/confirm";
@@ -389,7 +390,11 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
   // their own box: a review's PR, or the PR its branch has, if any.
   const review = reviewOf(wt);
   const knownPr = useReview.getState().prs[entryKey(box, wt.path)];
-  if (review || (!wt.main && wt.branch && knownPr !== null)) items.push(item("Copy review link", <GitPullRequestIcon />, () => void copyReviewLink(box, loc, wt)));
+  if (review || (!wt.main && wt.branch && knownPr !== null)) {
+    items.push(item("Copy review link", <GitPullRequestIcon />, () => void copyReviewLink(box, loc, wt)));
+    // The same link, opening logged in as one of the project's dev users.
+    items.push({ type: "sub", label: "Copy review link as…", icon: <span className="size-4" />, items: () => <ReviewLinkAsItems box={box} loc={loc} wt={wt} /> });
+  }
   if (review) items.push(item("Update review to latest…", <span className="size-4" />, () => openUpdate(box, loc, wt)));
 
   const danger: Action[] = [];
@@ -487,6 +492,12 @@ export function removeWorktree(box: string, loc: Location, wt: Worktree) {
 }
 
 // RunItems are a worktree's services, loaded when the Run submenu opens.
+function ReviewLinkAsItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
+  const login = useLoginConfig(box, loc.name);
+  if (!login?.users?.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-xs">{loc.name} lists no dev users to log in as.</div>;
+  return <ActionItems items={login.users.map((u) => item(loginUserLabel(u), <span className="size-4" />, () => void copyReviewLink(box, loc, wt, { as: u.email })))} />;
+}
+
 function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
   const [list, setList] = useState<WorktreeService[]>();
   const [error, setError] = useState<string>();
