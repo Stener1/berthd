@@ -18,6 +18,7 @@ import (
 
 	"github.com/cosscom/shipyard/internal/doctor"
 	"github.com/cosscom/shipyard/internal/events"
+	"github.com/cosscom/shipyard/internal/proxy"
 )
 
 // Doer sends a request to a box: a wire.Client from a laptop, or a Local
@@ -431,4 +432,39 @@ func (l *Local) DoWithHeader(ctx context.Context, method, path string, body io.R
 		req.Header[k] = v
 	}
 	return l.http.Do(req)
+}
+
+// Login runs a worktree's login for email (login.go) and returns the
+// cookies to set. A refusal is a *proxy.LoginError with the box's status.
+func (c *Client) Login(ctx context.Context, location, worktree, email string) (proxy.LoginResult, error) {
+	b, _ := json.Marshal(map[string]string{"email": email})
+	header := http.Header{"Content-Type": {"application/json"}}
+	if validOrigin.MatchString(c.Origin) {
+		header.Set(OriginHeader, c.Origin)
+	}
+	resp, err := c.Doer.DoWithHeader(ctx, http.MethodPost, "/v1/worktrees/"+url.PathEscape(location)+"/"+url.PathEscape(worktree)+"/login", bytes.NewReader(b), header)
+	if err != nil {
+		return proxy.LoginResult{}, &proxy.LoginError{Status: http.StatusBadGateway, Msg: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var e struct {
+			Error string `json:"error"`
+		}
+		msg := "box replied " + resp.Status
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e) == nil && e.Error != "" {
+			msg = e.Error
+		}
+		status := http.StatusBadGateway
+		switch resp.StatusCode {
+		case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict:
+			status = resp.StatusCode
+		}
+		return proxy.LoginResult{}, &proxy.LoginError{Status: status, Msg: msg}
+	}
+	var out proxy.LoginResult
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return proxy.LoginResult{}, &proxy.LoginError{Status: http.StatusBadGateway, Msg: "the box's answer was not a login"}
+	}
+	return out, nil
 }

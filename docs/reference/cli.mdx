@@ -165,7 +165,7 @@ See [orchestration](/guides/orchestration) and
 
 | Command | What it does |
 | --- | --- |
-| `berth browser open BOX/LOC/WT [PATH\|URL] [--size WxH\|PRESET] [--scale N]` | Open the worktree's page in its [agent browser](/guides/agent-browser) and print a compact snapshot |
+| `berth browser open BOX/LOC/WT [PATH\|URL] [--as EMAIL] [--path /x] [--size WxH\|PRESET] [--scale N]` | Open the worktree's page in its [agent browser](/guides/agent-browser) and print a compact snapshot; `--as` logs it in as one of the project's [dev users](/guides/kits#personas-logging-in-as-a-dev-user) first |
 | `berth browser resize BOX/LOC/WT WxH\|PRESET [--scale N]` | Set its page's [size](/guides/agent-browser#size): 1920x1080 by default, `phone` (390x844), `tablet`, `laptop`; kept until changed |
 | `berth browser snapshot\|click\|fill\|press\|select\|hover\|check\|wait\|shot\|console\|network\|eval\|status\|close BOX/LOC/WT …` | Drive it; each prints a short text |
 | `berth browser list BOX [--json]` | Browsers running on the box |

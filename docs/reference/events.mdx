@@ -102,6 +102,7 @@ Shipyard reads the terminal and sends these itself with `origin: "screen"` and
 | `browser.failed` | `location`, `name`, `path`, `reason`: `sandbox` (Chromium's sandbox can't start; see [agent browser](/guides/agent-browser#when-ubuntu-blocks-it)) or `error` |
 | `browser.navigated` | `location`, `name`, `path`, `url`: the [agent browser](/guides/agent-browser) loaded a page |
 | `browser.shot` | `location`, `name`, `path`, `file`, `url` |
+| `worktree.login` | `location`, `worktree`, `email`, `ok`: a worktree was logged in as a [dev user](/guides/kits#personas-logging-in-as-a-dev-user), from the laptop's `/__berth/login`, `berthd browser open --as` (origin is the caller's) or `berthd shots compare --as` (origin `shots`). `email` is empty when it wasn't a valid address. Never a cookie |
 | `notify` | `title`, `body`, `flow`, `path`, `location`: a flow's or the guard's notification |
 | `guard.acted` | `action`, `location`, `name`, `path`, `services`, `sessions`, `memory_percent`, `reason` |
 | `process.stopped` | `id`, `text`: a browser (or a session) was stopped from the [box's browsers](/guides/agent-browser#every-browser-on-a-box) |
@@ -186,6 +187,7 @@ exits non-zero refuses it with what it printed. Gates in a laptop's
 | `before:browser.open` | `location`, `name`, `path`, `url`: an agent browser opening a page |
 | `before:browser.eval`, `before:browser.watch` | `location`, `name`, `path`: running JavaScript in it, watching it live |
 | `before:browser.allow` | `origin`: letting agents' browsers load a public origin |
+| `before:worktree.login` | `location`, `worktree`, `email`: logging a worktree in as a dev user from the laptop (`/__berth/login`) |
 | `before:process.stop` | `id`: stopping a browser or session from the box's browsers list |
 | `before:kit.install` | `location`, `kit`, `source` |
 | `before:kit.remove` | `location` |

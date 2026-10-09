@@ -59,6 +59,16 @@ const shopKit: KitInfo = {
       },
     ],
     hooks: [{ on: "before:worktree.create", run: "test \"$BERTH_BRANCH\" != main || { echo 'Make a branch, not main'; exit 1; }" }],
+
+    // Seeded users a worktree's pages can be opened logged in as.
+    login: {
+      script: "scripts/login.sh",
+      users: [
+        { email: "pro@acme.test", label: "Pro user" },
+        { email: "admin@acme.test", label: "Team admin" },
+        { email: "free@acme.test" },
+      ],
+    },
   },
   origin: "user",
   source: { src: "https://github.com/acme/kits/tree/main/shop-dev", commit: "4f2a9c1e8b7d3a6f5e4c2b1a0d9e8f7c6b5a4d3e", fetched: daysAgo(2) },

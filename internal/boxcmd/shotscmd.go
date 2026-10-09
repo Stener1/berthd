@@ -16,14 +16,14 @@ import (
 //
 //	shots compare [LOC/WT] [--pages / /login] [--sizes 375 768 1280]
 //	              [--base main|turn-start|accepted|NAME] [--mask SEL]...
-//	              [--color-scheme light|dark|both] [--title T] [--note N] [--new]
+//	              [--color-scheme light|dark|both] [--as EMAIL] [--title T] [--note N] [--new]
 //	shots baseline [LOC/WT] [--name turn-start] [--pages …] [--sizes …] [--color-scheme …]
 //	shots accept [LOC/WT] ARTIFACT
 //
 // A flag takes every word after it up to the next flag, so the lists read
 // as you would say them; "/,/login" works too.
 
-const shotsUsage = "shots compare [LOC/WT] [--pages / /login] [--sizes 375 768 1280] [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both] [--title T] [--note N] [--new]  ·  shots baseline [LOC/WT] [--name turn-start]  ·  shots accept [LOC/WT] ID"
+const shotsUsage = "shots compare [LOC/WT] [--pages / /login] [--sizes 375 768 1280] [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both] [--as EMAIL] [--title T] [--note N] [--new]  ·  shots baseline [LOC/WT] [--name turn-start] [--as EMAIL]  ·  shots accept [LOC/WT] ID"
 
 func shotsArgs(args []string) (pos []string, lists map[string][]string, err error) {
 	lists = map[string][]string{}
@@ -32,7 +32,7 @@ func shotsArgs(args []string) (pos []string, lists map[string][]string, err erro
 		if strings.HasPrefix(a, "--") {
 			name, val, has := strings.Cut(strings.TrimPrefix(a, "--"), "=")
 			switch name {
-			case "pages", "sizes", "mask", "base", "title", "note", "name", "color-scheme":
+			case "pages", "sizes", "mask", "base", "title", "note", "name", "color-scheme", "as":
 				cur = name
 				if _, ok := lists[name]; !ok {
 					lists[name] = nil
@@ -98,6 +98,10 @@ func shotsCmd(ctx context.Context, c *box.Client, sub string, args []string, out
 			return l[k][0]
 		}
 		return ""
+	}
+	req.As = one("as")
+	if req.As != "" && !box.ValidLoginEmail(req.As) {
+		return fmt.Errorf("--as takes an email, such as pro@acme.test; %q isn't one", req.As)
 	}
 	base := "/v1/worktrees/" + url.PathEscape(loc) + "/" + url.PathEscape(wt) + "/shots/"
 	var res box.ShotsResult

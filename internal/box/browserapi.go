@@ -15,8 +15,9 @@ import (
 
 // The browser API, per worktree:
 //
-//	POST /v1/worktrees/{loc}/{wt}/browser/open      {url, size, scale}: a path, a URL, or "" for the
-//	     worktree's own; size (1280x800, phone) and scale resize it first
+//	POST /v1/worktrees/{loc}/{wt}/browser/open      {url, size, scale, as}: a path, a URL, or "" for the
+//	     worktree's own; size (1280x800, phone) and scale resize it first; as
+//	     logs it in as that email first (login.go)
 //	POST /v1/worktrees/{loc}/{wt}/browser/resize    {size, scale}: kept for the worktree, applied now
 //	     if its browser runs
 //	POST /v1/worktrees/{loc}/{wt}/browser/act       {action, target, value}
@@ -76,6 +77,7 @@ func (b *Box) browserOpen(w http.ResponseWriter, r *http.Request) error {
 		URL   string `json:"url"`
 		Size  string `json:"size"`
 		Scale string `json:"scale"`
+		As    string `json:"as"`
 	}
 	decode(r, &req)
 	loc, wt, err := b.browserTarget(r)
@@ -118,6 +120,22 @@ func (b *Box) browserOpen(w http.ResponseWriter, r *http.Request) error {
 	br, _, _, err := b.browserFor(r, true)
 	if err != nil {
 		return err
+	}
+	if req.As != "" {
+		// Logged in first, as the laptop's login route does: the
+		// worktree's login runs, its cookies go in for the worktree's
+		// host, and the page opens (where the login says, without a path).
+		site := worktreeURL(b.Name, loc.Name, wt)
+		login, err := b.loginIn(r.Context(), origin(r), loc, wt, req.As)
+		if err != nil {
+			return err
+		}
+		if err := setLoginCookies(r.Context(), br.cdp, br.session, site, login.Cookies); err != nil {
+			return err
+		}
+		if strings.TrimSpace(req.URL) == "" && login.Redirect != "" {
+			target = strings.TrimSuffix(site, "/") + login.Redirect
+		}
 	}
 	res, err := br.Open(r.Context(), target)
 	if err != nil {
@@ -457,6 +475,7 @@ func (b *Box) mountBrowser(route func(string, func(http.ResponseWriter, *http.Re
 	route("POST "+p+"close", b.browserClose)
 	route("GET "+p+"screencast", b.browserScreencast)
 	route("GET "+p+"shots/{name}", b.browserShotFile)
+	route("POST /v1/worktrees/{loc}/{wt}/login", b.postLogin)
 	route("GET /v1/browsers", b.listBrowsers)
 	route("POST /v1/browser/allow", b.browserAllow)
 	route("GET /v1/browser/health", b.browserHealth)
