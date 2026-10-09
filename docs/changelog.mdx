@@ -10,6 +10,11 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
+
+- **The Review in Shipyard button is for UI work.** berthd adds it only to a
+  PR whose files change something a browser shows, agents add it only for
+  such changes, and the button is the words alone, without a mark.
+
 - **Team setup uses the clones you already have.** Before cloning a repo,
   Shipyard looks for one on the box: a project you added already, or a
   clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,
@@ -60,12 +65,6 @@ again.
   `berthd shots compare --as EMAIL` shoots both sides logged in. A link
   works too: `http://WT.LOC.BOX.localhost:1377/__berth/login?as=EMAIL&next=/path`.
   See [kits](/guides/kits#personas-logging-in-as-a-dev-user).
-
-## Unreleased
-
-- **The Review in Shipyard button is for UI work.** berthd adds it only to a
-  PR whose files change something a browser shows, agents add it only for
-  such changes, and the button is the words alone, without a mark.
 
 ## v0.3.12
 
