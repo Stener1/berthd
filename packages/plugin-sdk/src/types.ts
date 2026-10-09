@@ -93,6 +93,35 @@ export interface Status {
   forwards: ForwardStatus[];
   routes: Route[];
   proxy: { port: number; url_port: number; error?: string };
+  // Orgs of the person's projects that publish a team setup they haven't
+  // accepted; older agents leave it out.
+  team_suggestions?: TeamSuggestion[];
+}
+
+// A team setup the laptop noticed: <org>/.berth, which the person can
+// read, from the org one or more of their projects come from.
+export interface TeamSuggestion {
+  org: string;
+  // The setup's own name ("Acme").
+  name: string;
+  // "<org>/.berth".
+  repo: string;
+  projects: TeamSuggestProject[];
+}
+
+export interface TeamSuggestProject {
+  box: string;
+  location: string;
+  repo: string;
+  // team.json names the repository.
+  listed: boolean;
+  // What its setup brings, in a few words: "per-worktree databases",
+  // "services", "Log in as…", "review links".
+  sets_up: string[];
+  // team.json gives the repo a kit, which can be taken on its own ("Just
+  // the kit"); kit_applied: the project follows it already.
+  kit?: boolean;
+  kit_applied?: boolean;
 }
 
 export interface Worktree {

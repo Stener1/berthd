@@ -193,6 +193,11 @@ export function OrgHeader({ view, compact, badge, from }: { view: TeamView; comp
             Opened from a link · <span className="truncate font-mono">{link ? `berth://team?src=${source.key}` : `berth://team?org=${org.login}`}</span>
           </p>
         )}
+        {from === "suggestion" && (
+          <p data-testid="team-suggested" className="mb-3 inline-flex max-w-full items-center gap-1.5 truncate rounded-full border bg-card px-2.5 py-0.5 text-muted-foreground text-xs">
+            Suggested because your projects come from {org.login} · nothing runs until you choose
+          </p>
+        )}
         <div className="flex items-start gap-4 @max-[819px]:gap-3">
           <OrgAvatar org={org} size={compact ? 40 : 52} className="@max-[819px]:size-10!" />
           <div className="min-w-0 flex-1">

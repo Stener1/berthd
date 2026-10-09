@@ -220,6 +220,9 @@ type Status struct {
 	Forwards []ForwardStatus `json:"forwards"`
 	Routes   []Route         `json:"routes"`
 	Proxy    ProxyStatus     `json:"proxy"`
+	// TeamSuggestions are orgs of the person's projects that publish a team
+	// setup they haven't accepted (teamsuggest.go).
+	TeamSuggestions []TeamSuggestion `json:"team_suggestions"`
 }
 
 type Agent struct {
@@ -246,6 +249,8 @@ type Agent struct {
 	// under way that a restart waits for (restart.go).
 	startedAs startedAs
 	work      workSet
+	// suggest is what team suggestions know (teamsuggest.go).
+	suggest teamSuggest
 
 	// ctx lives as long as the agent; forwards added through the API run under
 	// it rather than under the request that created them.
@@ -359,6 +364,7 @@ func Run(ctx context.Context, cfg Config) error {
 	go a.routeLoop(ctx)
 	go a.keepLocalBoxCurrent(ctx)
 	go a.watchTeamUpdates(ctx)
+	go a.watchTeamSuggestions(ctx)
 	a.hooks = &hooks.Runner{Path: filepath.Join(cfg.UserDir, "hooks.json"), PluginsDir: filepath.Join(cfg.UserDir, "plugins"), Log: cfg.Log}
 	go a.hooks.Run(ctx, &a.bus)
 
@@ -932,9 +938,10 @@ func (a *Agent) removeForward(id string) (Forward, error) {
 func (a *Agent) status() Status {
 	settings := a.routeSettings()
 	hosts := a.configHosts()
+	suggestions := a.TeamSuggestions()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := Status{Boxes: []BoxStatus{}, Forwards: []ForwardStatus{}, Routes: []Route{}, Proxy: a.proxySt}
+	s := Status{Boxes: []BoxStatus{}, Forwards: []ForwardStatus{}, Routes: []Route{}, Proxy: a.proxySt, TeamSuggestions: suggestions}
 	if routes, err := a.routes.list(); err == nil && routes != nil {
 		s.Routes = routes
 	}

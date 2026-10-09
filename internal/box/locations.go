@@ -48,6 +48,9 @@ type Location struct {
 	// else one found in the repository (CheckFrom "config" or "detected").
 	Check     string `json:"check,omitempty"`
 	CheckFrom string `json:"check_from,omitempty"`
+	// KitTeam is the org whose team setup the location's kit comes from,
+	// when it does.
+	KitTeam string `json:"kit_team,omitempty"`
 }
 
 type Worktree struct {
@@ -388,6 +391,9 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 
 func describe(ctx context.Context, s savedLocation) Location {
 	loc := Location{Name: s.Name, Path: s.Path, Scripts: scriptsFor(s)}
+	if s.Kit != nil && s.Kit.Team != nil {
+		loc.KitTeam = s.Kit.Team.Org
+	}
 	repo, trust, _ := repoLayer(s)
 	loc.RepoTrust = trust.State
 	out, err := git(ctx, "-C", s.Path, "worktree", "list", "--porcelain")

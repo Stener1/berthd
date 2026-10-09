@@ -68,6 +68,22 @@ func (g *GitHub) SignIn(login string) {
 	os.WriteFile(p, []byte(login), 0o600)
 }
 
+// Fail makes every gh api call fail with msg, as gh does offline ("error
+// connecting to api.github.com"); "" makes them answer again.
+func (g *GitHub) Fail(msg string) {
+	p := filepath.Join(g.Root, ".fail")
+	if msg == "" {
+		os.Remove(p)
+		return
+	}
+	os.WriteFile(p, []byte(msg), 0o644)
+}
+
+// User makes owner a person's account, with no org.json.
+func (g *GitHub) User(owner string) {
+	os.MkdirAll(filepath.Join(g.Root, owner), 0o755)
+}
+
 // Org makes owner an org with a name and verified flag.
 func (g *GitHub) Org(owner, name string, verified bool) {
 	os.MkdirAll(filepath.Join(g.Root, owner), 0o755)

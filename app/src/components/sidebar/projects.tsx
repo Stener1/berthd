@@ -11,6 +11,7 @@ import {
   SquareTerminalIcon,
   Trash2Icon,
   WorkflowIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
@@ -39,6 +40,8 @@ import { removalLabel, removalOf, useRemoval, useRemovals } from "@/lib/removing
 import { WorktreeNameField } from "@/components/sidebar/rename-worktree";
 import { renameKey, startRenamingWorktree, stopRenamingWorktree, useRenamingWorktree, worktreeLabel } from "@/lib/worktree-names";
 import { below, MAX_INDENT, nest, prune, size, type TreeNode } from "@/lib/worktree-tree";
+import { useTeamSuggestions } from "@/lib/team-suggest";
+import { orgName, suggestionFor } from "@/lib/team-suggest-model";
 
 // Projects lists repositories, as Orca does: one group per repository on a
 // box (the same repository on two boxes is two groups, told apart by the
@@ -275,6 +278,7 @@ function RepoGroup({ repo, chip, prefs, update }: { repo: Repo; chip: boolean; p
             </Tip>
             <LeadIcon sessions={!all && main ? mainSessions : []} data={data} icon={<FolderGitIcon />} />
             <span className="min-w-0 truncate">{loc.name}</span>
+            <TeamSuggestMark places={[{ box: box.name, location: loc.name }]} />
             {chip && <BoxChip box={box} />}
             <span className="ml-auto" />
             {!all && main && <Glyphs sessions={mainSessions} data={data} />}
@@ -833,6 +837,7 @@ function ProjectGroup({ project: p, chips, prefs, update }: { project: Project; 
             </Tip>
             <LeadIcon sessions={!all ? glyphSessions : []} data={boxes[def.box.name]} icon={<FolderGitIcon />} />
             <span className="min-w-0 truncate">{p.name}</span>
+            <TeamSuggestMark places={p.members.map((m) => ({ box: m.box.name, location: m.loc.name }))} />
             {chips && (
               <span className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
                 {p.members.slice(0, 3).map((m) => (
@@ -947,6 +952,24 @@ function SetupMark({ box, wt }: { box: string; wt: Worktree }) {
       <span className="flex shrink-0 items-center gap-1 text-[10px] text-destructive-foreground">
         <span className="size-1.5 rounded-full bg-destructive" />
         {archive ? "archive failed" : WORKTREE_WORDS["setup-failed"].lower}
+      </span>
+    </Tip>
+  );
+}
+
+// TeamSuggestMark is a project row's quiet note that its org publishes a
+// team setup the person hasn't looked at (lib/team-suggest.ts): one small
+// muted icon, and the row's menu says the rest.
+function TeamSuggestMark({ places }: { places: { box: string; location: string }[] }) {
+  const list = useTeamSuggestions();
+  if (!list.length) return null;
+  const found = places.map((p) => suggestionFor(list, p.box, p.location)).find(Boolean);
+  if (!found) return null;
+  const name = orgName(found.suggestion);
+  return (
+    <Tip label={`${name} has a team setup for this project. Review it from the project's menu.`} side="right">
+      <span data-testid="team-suggest-mark" role="img" aria-label={`${name} has a team setup`} className="inline-flex shrink-0 items-center text-muted-foreground/60">
+        <UsersRoundIcon className="size-3" />
       </span>
     </Tip>
   );

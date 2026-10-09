@@ -21,6 +21,7 @@ import { KitSection } from "@/views/project/kit-section";
 import { KitLayer, LayeredScript, Section, SourceBadge } from "@/views/project/parts";
 import { LoginSection } from "@/views/project/login-section";
 import { ReviewButtonSection } from "@/views/project/review-button-section";
+import { TeamSuggestLine } from "@/views/project/team-suggest-line";
 import { ServicesSection } from "@/views/project/services-section";
 import { ProjectTeamKeys } from "@/views/team/team-keys-note";
 import { clean, useProjectConfig } from "@/views/project/use-project-config";
@@ -160,6 +161,7 @@ export function ProjectView({ box, location }: { box: string; location: string }
             ) : (
               <KitLayer.Provider value={{ config: kit?.config, name: kit?.name }}>
                 <RepoTrustBanner box={box} location={location} config={config} onChanged={() => void reload()} />
+                <TeamSuggestLine box={box} location={location} />
                 <KitSection box={box} location={location} kit={kit} onChanged={() => void reload()} />
                 <Section id="scripts" title="Setup & teardown" description="Run in a new worktree after it is made, and before one is removed. A failing teardown keeps the worktree.">
                   <div className="divide-y divide-border/70">

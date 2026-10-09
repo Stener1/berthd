@@ -38,6 +38,9 @@ type KitSource struct {
 	Src     string    `json:"src"`
 	Commit  string    `json:"commit,omitempty"`
 	Fetched time.Time `json:"fetched"`
+	// Team is set for a team setup's kit taken on its own (teamkit.go): it
+	// is read again from that team setup's newer commits.
+	Team *box.KitTeam `json:"team,omitempty"`
 }
 
 // KitInfo describes a kit for listing and review.
@@ -336,7 +339,7 @@ func copyTree(src, dst string) error {
 func kitInstall(k KitInfo) (box.KitInstall, error) {
 	in := box.KitInstall{Kit: k.Kit, Files: map[string]string{}, Hash: k.Hash}
 	if k.Source != nil {
-		in.Source = k.Source.Src
+		in.Source, in.Team = k.Source.Src, k.Source.Team
 	} else {
 		in.Source = k.Origin
 	}
@@ -498,6 +501,21 @@ func (a *Agent) kitRoutes(mux *http.ServeMux) {
 		k, ok := a.kit(r.PathValue("id"))
 		if !ok || k.Source == nil || k.Origin != "user" {
 			writeError(w, http.StatusBadRequest, "only kits added from a link can be updated from it")
+			return
+		}
+		// A team setup's kit is read again from the setup's newest commit.
+		if k.Source.Team != nil {
+			g, err := newGH()
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			nk, changed, err := a.updateTeamKit(r.Context(), g, k)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"kit": nk, "changed": changed})
 			return
 		}
 		tmp := filepath.Join(a.cfg.Dir, "kit-fetch")

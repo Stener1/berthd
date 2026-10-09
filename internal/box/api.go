@@ -169,6 +169,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("PUT /v1/phone", b.putPhone)
 	route("GET /v1/kits", b.listKits)
 	route("PUT /v1/locations/{name}/kit", b.putKit)
+	route("POST /v1/locations/{name}/team-kit", b.postTeamKit)
 	route("DELETE /v1/locations/{name}/kit", b.deleteKit)
 	route("GET /v1/env", b.getBoxEnv)
 	route("PUT /v1/env", b.putBoxEnv)

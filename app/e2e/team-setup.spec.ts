@@ -56,6 +56,7 @@ test("a berth://team link opens the org's setup, read like its repo on GitHub", 
   await expect(checklist(page)).toContainText("You have access to all 3 repos");
   // The new box is picked: the one with no projects yet.
   await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
 });
 
 test("without the GitHub CLI, the page says how to install it", async ({ app }) => {
@@ -285,6 +286,9 @@ test("an org without .berth: its repos, the Shipyard-configured ones picked", as
 test("a repo already cloned on the box: Found … · Use this, or Clone a fresh copy", async ({ app }) => {
   const { page } = app;
   await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
   const shop = page.getByTestId("found-shop");
   await expect(shop).toContainText("Found ~/work/acme-shop, a clone of acme/shop (on branch feat/x, 3 uncommitted changes)");
   // Uncommitted changes: a fresh clone until you say otherwise.
@@ -313,6 +317,9 @@ test("a repo already cloned on the box: Found … · Use this, or Clone a fresh 
 test("a found clone that is behind offers Pull as a button of its own", async ({ app }) => {
   const { page } = app;
   await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
   const review = page.getByTestId("found-review-website");
   await expect(review).toContainText("2 commits behind its upstream");
   await review.getByRole("button", { name: "Pull" }).click();
@@ -323,6 +330,9 @@ test("a found clone that is behind offers Pull as a button of its own", async ({
 test("a repo set up from a clone you have runs in place, and its worktree waits for its first open", async ({ app }) => {
   const { page } = app;
   await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
   await page.getByTestId("use-shop").click();
   await page.getByTestId("fresh-website").click();
   await startRun(page);

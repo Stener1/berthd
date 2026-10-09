@@ -1,3 +1,4 @@
+import { TeamKitSheet } from "@/views/team/team-kit-sheet";
 import { lazy, Suspense, useEffect } from "react";
 
 import { AddLocationDialog } from "@/components/add-location-dialog";
@@ -201,6 +202,7 @@ export default function App() {
           <ConfirmHost />
           <ErrorDetailsHost />
           <AddToBoxDialog />
+          <TeamKitSheet />
           <PluginConsentDialog />
           <CustomizeSidebarSheet />
           <ShortcutsSheet />

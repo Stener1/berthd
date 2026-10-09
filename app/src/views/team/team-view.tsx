@@ -22,12 +22,13 @@ import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { TeamDone } from "@/views/team/team-done";
 import { TeamFiles } from "@/views/team/team-files";
 import { FoundClones } from "@/views/team/team-found";
+import { KitChoices } from "@/views/team/team-kit-sheet";
 import { GitHubMark, OrgAvatar, OrgHeader, Section } from "@/views/team/team-parts";
 import { Plan } from "@/views/team/team-plan";
 import { Checklist, RunCard } from "@/views/team/team-rail";
 import { ViewHeader } from "@/views/view-header";
 
-type From = "onboarding" | "addbox" | "link" | "sidebar" | "palette";
+type From = "onboarding" | "addbox" | "link" | "sidebar" | "palette" | "suggestion";
 
 // TeamSetupView is Team setup as one page: the org's .berth, read like its
 // repo on GitHub, what you'll get with every command a click away, and a
@@ -485,6 +486,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       <OrgHeader view={view} from={from} badge={updating ? <span className="rounded-full bg-info/10 px-2.5 py-1 font-medium text-info-foreground text-xs">Update · {view.update!.from} → {view.update!.to}</span> : undefined} />
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_300px] gap-8 px-8 pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:px-5 @max-[819px]:pt-4">
         <div className="min-w-0 @max-[819px]:order-2">
+          {!live && !updating && <KitChoices view={view} box={box} />}
           <Plan view={(live ? live.onepassword_skipped : skipping) ? { ...view, steps: view.steps?.filter((s) => s.id !== "1password") } : view} skipOP={live ? live.onepassword_skipped : skipping} run={live} box={box} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} onRetry={retry} onOpenTerminal={openTerminal} onOpenSession={openSession} onStartOn={startOn} onFiles={() => setFiles(true)} update={updating ? view.update : undefined} use={use} onUse={onUse} onPull={(x, c) => pull(x.repo, c)} />
         </div>
         <div className="@max-[819px]:order-1">

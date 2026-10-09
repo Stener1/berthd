@@ -1030,6 +1030,8 @@ func (a *Agent) checkTeamUpdates(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	// Team kits taken on their own follow their team setup's commits too.
+	a.checkTeamKits(ctx, g)
 	for _, acc := range a.allAccepted() {
 		var s team.Setup
 		if json.Unmarshal(acc.Setup, &s) == nil && !s.NotifyUpdates() {
@@ -1061,6 +1063,8 @@ func (a *Agent) teamRoutes(mux *http.ServeMux) {
 		writeJSON(w, http.StatusOK, res)
 	})
 	a.teamSetupRoutes(mux)
+	a.teamSuggestRoutes(mux)
+	a.teamKitRoutes(mux)
 	// The team setups this laptop accepted, each with how it stands on its
 	// box when the box is online.
 	mux.HandleFunc("GET /v1/team", func(w http.ResponseWriter, r *http.Request) {

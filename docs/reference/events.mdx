@@ -122,7 +122,7 @@ events.
 | `process.stopped` | `id`, `text`: a browser (or a session) was stopped from the [box's browsers](/guides/agent-browser#every-browser-on-a-box) |
 | `config.changed` | what changed: `location`, `flows`, `env` or `guard`; with `location`, `trust` (`trusted` or `untrusted`) when the repository's config was trusted or no longer is |
 | `hooks.changed` | |
-| `kit.installed` | `location`, `kit`, `version`, `source`, `warnings` |
+| `kit.installed` | `location`, `kit`, `version`, `source`, `warnings`; for a team setup's kit taken on its own ([just the kit](/guides/team-setup#just-the-kit)) also `org`, `commit`, `keys`, `init`, `first_open` |
 | `kit.removed` | `location`, `kit` |
 | `team.started` | `team`, `name`, `commit`: a [team setup](/guides/team-setup) started on the box |
 | `team.step` | `team`, `step`, `state` (`running`, `waiting`, `done`, `skipped`, `failed`), `secs`, `code` (GitHub's device code, while the box signs in) |
@@ -166,8 +166,9 @@ runs, so `flow` and `scope` name one flow.
 | `queue.changed` | `queued`, `failed` |
 | `queue.delivered` | `id`, `box`, `session`, `attempts` |
 | `queue.failed` | `id`, `box`, `session`, `reason` (never the prompt) |
-| `kit.added` | `kit`, `source` |
+| `kit.added` | `kit`, `source`; for a team setup's kit also `team`, and `from` and `to` when a newer commit of `.berth` changed it |
 | `team.accepted` | `org`, `team`, `box`, `commit`: a team setup was sent to a box |
+| `team.suggestions` | `orgs`: the orgs of your projects that publish a team setup you haven't accepted changed ([how Shipyard notices](/guides/team-setup#how-shipyard-notices-your-teams-setup)) |
 | `team.update` | `org`, `name`, `from`, `to`, `changes`, `sudo`: a newer commit of a team setup this laptop accepted, to review; once per commit |
 | `app.changed` | `key`: an app settings document changed |
 | `hooks.changed` | |
