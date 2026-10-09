@@ -607,6 +607,14 @@ func sameDir(a, b string) bool {
 
 var stateOf = map[string]string{adapters.Ready: "idle", adapters.Started: "running", adapters.Waiting: "waiting", adapters.Finished: "finished", adapters.Exited: "exited"}
 
+// notifyAfterHooks says whether a finished event is Codex's notify for a
+// session whose hooks have said a prompt started. Notify comes at the end
+// of each of Codex's messages, not only the turn's, so there its Stop hook
+// ends the turn. A Codex without hooks still ends turns with notify.
+func notifyAfterHooks(s *sessTrack, typ string, data map[string]any) bool {
+	return typ == adapters.Finished && str(data, "via") == "notify" && s.SawStart
+}
+
 func (t *Turns) agentEvent(e events.Event) {
 	s, ambiguous := t.resolve(e)
 	if s == nil {
@@ -620,6 +628,9 @@ func (t *Turns) agentEvent(e events.Event) {
 			t.trimDirs()
 			t.bump()
 		}
+		return
+	}
+	if notifyAfterHooks(s, e.Type, e.Data) {
 		return
 	}
 	source := str(e.Data, "source")
@@ -644,6 +655,11 @@ func (t *Turns) agentEvent(e events.Event) {
 			s.set("idle", e)
 		}
 	case adapters.Started:
+		// A question the agent's own hook reported is answered when the
+		// agent says so (a tool, a prompt), not when its screen changes.
+		if source == "screen" && cur != nil && cur.State == "waiting" && lastWait(cur) == "question" {
+			return
+		}
 		signal := str(e.Data, "signal")
 		switch {
 		case source == "send":
@@ -709,6 +725,9 @@ func (t *Turns) agentEvent(e events.Event) {
 		}
 		s.set("waiting", e)
 	case adapters.Finished:
+		// A turn that ends on its own question (Codex's async question box
+		// returns at once, then the turn stops) still waits for the answer.
+		asked := cur != nil && cur.State == "waiting" && source == "" && lastWait(cur) == "question"
 		if cur != nil {
 			if source == "screen" || source == "reconcile" {
 				cur.Fidelity = "screen" // its end was read off the screen
@@ -720,6 +739,10 @@ func (t *Turns) agentEvent(e events.Event) {
 			}
 		}
 		s.Reconcile = false
+		if asked {
+			s.set("waiting", e)
+			break
+		}
 		s.set("finished", e)
 		t.kickInbox()
 	case adapters.Exited:
@@ -803,10 +826,12 @@ func (t *Turns) kickInbox() {
 }
 
 // Redundant says whether an agent event would change nothing: a tool use
-// while the agent is already working. Those are frequent, so the box does
-// not publish them.
+// while the agent is already working, which is frequent, or Codex's notify
+// once its hooks are heard (notifyAfterHooks). The box does not publish
+// them.
 func (t *Turns) Redundant(typ string, data map[string]any) bool {
-	if typ != adapters.Started || str(data, "signal") != "tool" {
+	tool := typ == adapters.Started && str(data, "signal") == "tool"
+	if !tool && typ != adapters.Finished {
 		return false
 	}
 	t.mu.Lock()
@@ -816,6 +841,9 @@ func (t *Turns) Redundant(typ string, data map[string]any) bool {
 	s := t.sess[name]
 	if s == nil {
 		return false
+	}
+	if !tool {
+		return notifyAfterHooks(s, typ, data)
 	}
 	return s.State == "running"
 }
@@ -1652,4 +1680,12 @@ func (t *Turns) waitSessionState(ctx context.Context, name string, want map[stri
 		case <-ch:
 		}
 	}
+}
+
+// lastWait is the reason of the turn's latest wait, or "".
+func lastWait(tr *Turn) string {
+	if n := len(tr.Waits); n > 0 {
+		return tr.Waits[n-1].Reason
+	}
+	return ""
 }

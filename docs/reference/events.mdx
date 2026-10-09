@@ -42,7 +42,7 @@ and dashes.
 | Event | Data |
 | --- | --- |
 | `agent.ready` | `path`, `agent`, `session` (when the hook knows it) and the tool's own id (below): a new agent at its prompt. After a finished turn [turn check](/concepts/sessions-and-agents#agent-state) judged unfinished, with `source: "turncheck"`, `choice: "working"` and `seq` |
-| `agent.started` | the same, with `signal`: `prompt` (working on a prompt) or `tool` (working again after an approval). For an agent that cannot say it started, Shipyard sends it at the send, with `source: "send"` and `turn` |
+| `agent.started` | the same, with `signal`: `prompt` (working on a prompt) or `tool` (working again after an approval or an answer). For an agent that cannot say it started, Shipyard sends it at the send, with `source: "send"` and `turn` |
 | `agent.waiting` | the same, with `reason` (`permission`, `question`): needs you. At a startup question Shipyard sends it itself, with `reason: "startup question"`; after a finished turn [turn check](/concepts/sessions-and-agents#agent-state) judged to need you, with `reason: "turn check"`, `source: "turncheck"` and Jev's `choice` (`needs_input` or `blocked`) |
 | `agent.finished` | the same: done with its turn; `status: "error"` when it ended on a failure |
 | `agent.exited` | the same: the agent itself quit |
@@ -64,9 +64,12 @@ Cursor `conversation_id` and `status`). A hook names the Shipyard session it
 runs in as `session`, from `$BERTH_SESSION`. Hooks spooled while berthd was
 down carry `spooled: true` and the time they ran. Shipyard does not publish a
 tool use (`agent.started` with `signal: "tool"`) for an agent that is
-already working: it would change nothing. When an agent's hooks cannot tell,
-Shipyard reads the terminal and sends these itself with `origin: "screen"` and
-`source: "screen"`. See [turns](/concepts/sessions-and-agents#turns).
+already working: it would change nothing. Nor does it publish Codex's
+`notify` (`agent.finished` with `via: "notify"`) once the session's hooks
+have said a prompt started: notify comes at the end of each of Codex's
+messages, and its `Stop` hook ends the turn. When an agent's hooks cannot
+tell, Shipyard reads the terminal and sends these itself with
+`origin: "screen"` and `source: "screen"`. See [turns](/concepts/sessions-and-agents#turns).
 
 ### Locations and worktrees
 
