@@ -199,9 +199,11 @@ can come from anyone, so it carries no authority:
 
 - **Read strictly.** It names a repository (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`)
   and a positive PR number, and at most a head commit, which only warns
-  when it is not the head. Any other parameter, one given twice, or a value
-  out of shape makes it no link: no command, path, setting or variable is
-  ever read from one.
+  when it is not the head, a dev user to open it logged in as (used only
+  when the project's trusted login lists them) and a page on the
+  worktree's own address. Any other parameter, one given twice, or a value
+  out of shape makes it no link: no command, file path, setting or variable
+  is ever read from one.
 - **Never run on open.** Opening it shows the review sheet and nothing
   else. Nothing is fetched to a box or run until you press **Review**, which
   checks everything again; `berth review` asks unless given `--yes`.

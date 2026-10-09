@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ type reviewBox struct {
 	updated   []box.ReviewUpdate
 	review    *box.ReviewMark
 	setupHits int
+	login     *box.ReviewLogin
 }
 
 func (rb *reviewBox) routes(s *wire.Server) {
@@ -46,10 +48,11 @@ func (rb *reviewBox) routes(s *wire.Server) {
 		rb.mu.Lock()
 		rb.setupHits++
 		rb.withhold = strings.Split(r.URL.Query().Get("withhold"), ",")
+		login := rb.login
 		rb.mu.Unlock()
 		json.NewEncoder(w).Encode(box.ReviewSetup{Location: r.PathValue("name"), From: "kit", Kit: &box.ReviewKit{ID: "acme-shop", Name: "Acme shop"}, RepoConfig: "none",
 			Script: "yarn install && yarn db:create", Services: []box.ReviewService{{Name: "web", Title: "Next.js", Run: "yarn dev", Autostart: true}},
-			Watch: []string{"config/*.yml"}, Secrets: box.ReviewSecrets{Shared: []string{"STRIPE_KEY"}, Withheld: []string{"MAIL_API_KEY"}}, IdleDays: 7, Existing: []box.ReviewEntry{}})
+			Watch: []string{"config/*.yml"}, Secrets: box.ReviewSecrets{Shared: []string{"STRIPE_KEY"}, Withheld: []string{"MAIL_API_KEY"}}, IdleDays: 7, Existing: []box.ReviewEntry{}, Login: login})
 	}))
 	s.Handle("POST /v1/reviews", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req box.ReviewOpen
@@ -304,4 +307,76 @@ func TestReviewRoutesNeedGitHub(t *testing.T) {
 	if code != http.StatusPreconditionFailed || !strings.Contains(raw, "gh_signed_out") {
 		t.Fatalf("%d %s", code, raw)
 	}
+}
+
+func TestAReviewLinkCanOpenLoggedInAtAPageWhenTheProjectAllows(t *testing.T) {
+	w := newReviewWorld(t)
+	link := "berth://review?repo=acme/shop&pr=42&as=pro@acme.test&path=/event-types"
+	login := func(sh ReviewSheet) *ReviewBoxLogin {
+		if len(sh.Boxes) != 1 {
+			t.Fatalf("boxes: %+v", sh.Boxes)
+		}
+		return sh.Boxes[0].Login
+	}
+	// No login on the box: it opens anyway, without logging in.
+	_, sh, _ := w.plan(t, map[string]string{"link": link})
+	if !sh.Verdict.Allowed || sh.Login == nil || sh.Login.As != "pro@acme.test" || sh.Login.Path != "/event-types" || sh.Link != link {
+		t.Fatalf("sheet: %+v %+v", sh.Verdict, sh.Login)
+	}
+	if l := login(sh); l == nil || l.Allowed || l.Reason != "acme/shop has no login set up on this box, so it opens without logging in" {
+		t.Fatalf("no login config: %+v", l)
+	}
+	// A user the project doesn't list.
+	w.box.mu.Lock()
+	w.box.login = &box.ReviewLogin{Users: []string{"admin@acme.test"}}
+	w.box.mu.Unlock()
+	_, sh, _ = w.plan(t, map[string]string{"link": link})
+	if l := login(sh); l == nil || l.Allowed || l.Reason != "pro@acme.test isn't one of acme/shop's login users, so it opens without logging in" || !sh.Verdict.Allowed {
+		t.Fatalf("not listed: %+v %+v", l, sh.Verdict)
+	}
+	// Open still makes the review, and opens the page without a login.
+	code, body := uiPost(t, w.a, "/v1/pr-review/open", w.tok, ReviewOpenRequest{Repo: "acme/shop", PR: 42, SHA: w.head, Box: "devbox", As: "pro@acme.test", Path: "/event-types"})
+	var opened ReviewOpened
+	json.Unmarshal([]byte(body), &opened)
+	if code != 200 || !regexp.MustCompile(`^http://review-42\.shop\.devbox\.localhost:\d+/event-types$`).MatchString(opened.Open) || strings.Contains(opened.Open, "__berth") {
+		t.Fatalf("open, not allowed: %d %s", code, body)
+	}
+	// A listed user: through the login route.
+	w.box.mu.Lock()
+	w.box.login = &box.ReviewLogin{Users: []string{"pro@acme.test"}}
+	w.box.mu.Unlock()
+	_, sh, _ = w.plan(t, map[string]any{"repo": "acme/shop", "pr": 42, "as": "pro@acme.test", "path": "/event-types"})
+	if l := login(sh); l == nil || !l.Allowed {
+		t.Fatalf("listed: %+v", l)
+	}
+	code, body = uiPost(t, w.a, "/v1/pr-review/open", w.tok, ReviewOpenRequest{Repo: "acme/shop", PR: 42, SHA: w.head, Box: "devbox", As: "pro@acme.test", Path: "/event-types"})
+	json.Unmarshal([]byte(body), &opened)
+	if code != 200 || !regexp.MustCompile(`^http://review-42\.shop\.devbox\.localhost:\d+/__berth/login\?as=pro%40acme\.test&next=%2Fevent-types$`).MatchString(opened.Open) {
+		t.Fatalf("open, allowed: %d %s", code, opened.Open)
+	}
+	// The box was asked for nothing more: as and path never reach it.
+	for _, o := range w.box.opened {
+		if strings.Contains(string(mustJSONAgent(o)), "event-types") || strings.Contains(string(mustJSONAgent(o)), "pro@acme.test") {
+			t.Fatalf("sent to the box: %+v", o)
+		}
+	}
+	// Junk in either refuses the whole link.
+	for _, bad := range []map[string]any{
+		{"link": "berth://review?repo=acme/shop&pr=42&as=a@b.c;rm"},
+		{"link": "berth://review?repo=acme/shop&pr=42&path=//evil.example"},
+		{"repo": "acme/shop", "pr": 42, "path": "https://evil.example"},
+		{"repo": "acme/shop", "pr": 42, "as": "pro@acme.test\nx"},
+	} {
+		if code, _, e := w.plan(t, bad); code != 400 || e["code"] != "bad_link" {
+			t.Errorf("%v: %d %v", bad, code, e)
+		}
+	}
+	if code, _ := uiPost(t, w.a, "/v1/pr-review/open", w.tok, ReviewOpenRequest{Repo: "acme/shop", PR: 42, SHA: w.head, Box: "devbox", Path: "//evil.example"}); code != 400 {
+		t.Fatalf("open with a bad path: %d", code)
+	}
+}
+
+func mustJSONAgent(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }

@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon, ExternalLinkIcon, FileWarningIcon, GitBranchIcon, GitPullRequestIcon, HandIcon, KeyRoundIcon, LinkIcon, ServerIcon, UserRoundXIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon, FileWarningIcon, GitBranchIcon, GitPullRequestIcon, HandIcon, KeyRoundIcon, LinkIcon, LogInIcon, ServerIcon, UserRoundXIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "@/components/error-note";
@@ -9,12 +9,14 @@ import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPop
 import { Skeleton } from "@/components/ui/skeleton";
 import { openBrowserAt } from "@/lib/actions";
 import { ApiError, type Worktree } from "@/lib/api";
-import { hostSuffix, worktreeHost } from "@/lib/browser-url";
+import { loginUrl, safeNext } from "@/lib/login-url";
+import { worktreeOrigin } from "@/lib/login-users";
 import { copyText } from "@/lib/clipboard";
 import { plainError } from "@/lib/errors";
 import { useEventLog } from "@/lib/events";
 import { openUrl } from "@/lib/open-url";
-import { associationWords, closeReviewSheet, openReviewSheet, prReviewApi, type ReviewBox, type ReviewOpened, type ReviewSheet, type SetupChange, shortSha, usePrReview } from "@/lib/pr-review";
+import { reviewLink } from "@/lib/review-link";
+import { associationWords, closeReviewSheet, loginLine, openReviewSheet, prReviewApi, type ReviewBox, type ReviewOpened, type ReviewSheet, type SetupChange, shortSha, usePrReview } from "@/lib/pr-review";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { openPanel, selectWorktree, wsKey } from "@/lib/workspaces";
@@ -55,7 +57,7 @@ function Body() {
     const asked = req.target
       ? { repo: req.ref.repo, pr: req.ref.pr, box: req.target.box }
       : {
-          link: `berth://review?repo=${req.ref.repo}&pr=${req.ref.pr}${req.ref.sha ? `&sha=${req.ref.sha}` : ""}`,
+          link: `${reviewLink(req.ref.repo, req.ref.pr, { as: req.ref.as, path: req.ref.path })}${req.ref.sha ? `&sha=${req.ref.sha}` : ""}`,
         };
     prReviewApi.plan(client, asked).then(
       (p) => {
@@ -91,6 +93,8 @@ function Body() {
               pr: plan.pr,
               sha: plan.head.sha,
               box: picked.box,
+              ...(plan.login?.as ? { as: plan.login.as } : {}),
+              ...(plan.login?.path ? { path: plan.login.path } : {}),
             });
       await useStore.getState().refreshBox(opened.box, ["locations", "services"]);
       setPhase((p) => (p.kind === "running" ? { ...p, opened } : p));
@@ -364,6 +368,7 @@ const FROM: Record<ReviewBox["setup"]["from"], (b: ReviewBox) => string> = {
 function OnYourBox({ plan, picked, onPick }: { plan: ReviewSheet; picked: ReviewBox; onPick(b: string): void }) {
   const s = picked.setup;
   const several = plan.boxes.length > 1;
+  const opens = loginLine(plan, picked);
   return (
     <>
       <Section
@@ -410,6 +415,12 @@ function OnYourBox({ plan, picked, onPick }: { plan: ReviewSheet; picked: Review
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+          {opens && (
+            <div data-testid="pr-review-login" data-allowed={opens.allowed} className="flex items-start gap-2 px-3.5 py-2.5 text-xs leading-relaxed">
+              <LogInIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <span className={cn(!opens.allowed && "text-muted-foreground")}>{opens.text}</span>
             </div>
           )}
           <p className="px-3.5 py-2 text-muted-foreground text-xs leading-relaxed">
@@ -512,9 +523,9 @@ function Progress({ plan, box, phase, update }: { plan: ReviewSheet; box: Review
   useEffect(() => {
     if (ready && opened && !update && !finished.current) {
       finished.current = true;
-      finish(opened, false);
+      finish(opened, false, openAt(plan, box));
     }
-  }, [ready, opened, update]);
+  }, [ready, opened, update, plan, box]);
 
   return (
     <section data-testid="pr-review-progress" className="space-y-3">
@@ -532,7 +543,7 @@ function Progress({ plan, box, phase, update }: { plan: ReviewSheet; box: Review
       {phase.error && <ErrorText className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-destructive-foreground text-sm" text={phase.error} />}
       {setupFailed && <p className="text-muted-foreground text-xs">Its setup failed; the notification has its output. The worktree is there to look at.</p>}
       {opened && !ready && !update && (
-        <Button size="sm" variant="outline" onClick={() => finish(opened, false)}>
+        <Button size="sm" variant="outline" onClick={() => finish(opened, false, openAt(plan, box))}>
           <LinkIcon /> Open it now
         </Button>
       )}
@@ -540,9 +551,16 @@ function Progress({ plan, box, phase, update }: { plan: ReviewSheet; box: Review
   );
 }
 
+// openAt is how the link asked to open the review, as far as the box's
+// project allows: logged in only when its trusted login lists the user.
+function openAt(plan: ReviewSheet, box: ReviewBox): { as?: string; path?: string } {
+  return { as: plan.login?.as && box.login?.allowed ? plan.login.as : undefined, path: plan.login?.path };
+}
+
 // finish closes the sheet and opens the review: the worktree, its dev
-// server in a Browser tab, and its Diff beside it.
-function finish(opened: ReviewOpened, update: boolean) {
+// server in a Browser tab (through the login route when the link asked for
+// a user the project allows, at the link's page), and its Diff beside it.
+function finish(opened: ReviewOpened, update: boolean, at: { as?: string; path?: string } = {}) {
   closeReviewSheet();
   const st = useStore.getState();
   const wt: Worktree = opened.worktree;
@@ -555,8 +573,9 @@ function finish(opened: ReviewOpened, update: boolean) {
   };
   selectWorktree(ref);
   if (update) return;
-  const host = worktreeHost(ref);
-  openBrowserAt(host ? `http://${host}${hostSuffix(st.status?.proxy.url_port)}/` : "", { kind: "tab" }, wsKey(opened.box, wt.path));
+  const origin = worktreeOrigin(ref, st.status?.proxy.url_port);
+  const url = !origin ? "" : at.as ? loginUrl(origin, at.as, at.path) : `${origin}${safeNext(at.path)}`;
+  openBrowserAt(url, { kind: "tab" }, wsKey(opened.box, wt.path));
   whenPanel("diff", "diff", () => openPanel("diff", "diff", "Diff", { split: "row" }));
 }
 

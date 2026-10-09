@@ -43,6 +43,36 @@ In the sidebar a review is named **Review: #42 Fix checkout rounding**, with
 a small PR badge. Its menu has **Copy review link**, which every worktree
 whose branch has a PR offers too.
 
+## Opening logged in, at a page
+
+A link can also say how the review opens once it is ready: logged in as one
+of the project's [dev users](/guides/kits#personas-logging-in-as-a-dev-user),
+at a page:
+
+```
+berth://review?repo=acme/shop&pr=42&as=pro@acme.test&path=/event-types
+```
+
+From the terminal: `berth review acme/shop#42 --as pro@acme.test --path /event-types`,
+and `berth review link acme/shop#42 --as pro@acme.test` prints such a link.
+The worktree menu's **Copy review link as…** lists the project's users.
+
+The sheet says what it will do: **Opens /event-types, logged in as
+pro@acme.test**. Both are requests, never authority:
+
+- `as` must be a plain email address, and it logs in only when the
+  project's login on that box (its kit, the box's own config, or the main
+  checkout's trusted `.berth/config.json`, never the PR's) lists it, or
+  takes any user. Otherwise the sheet says so ("pro@acme.test isn't one of
+  acme/shop's login users, so it opens without logging in") and the review
+  opens without logging in. It is never a reason to refuse the review.
+- `path` must be a page on the worktree's own address: it starts with one
+  `/`, with no scheme, host, backslash or control character, however it is
+  encoded, and at most 512 characters.
+- Anything else in either makes the whole link no link. Neither changes
+  what is fetched, set up or trusted; they only decide where the Browser
+  tab opens.
+
 ## Who can be reviewed this way
 
 The link says only which repository and which PR. Everything else is

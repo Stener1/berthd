@@ -75,3 +75,55 @@ test("the link someone shares reads back as itself", () => {
   assert.equal(link, "berth://review?repo=acme/shop&pr=42");
   assert.deepEqual(parseReviewLink(link), { repo: "acme/shop", pr: 42 });
 });
+
+test("a link can ask to open logged in as a dev user, at a page", () => {
+  assert.deepEqual(parseReviewLink("berth://review?repo=acme/web&pr=7&as=pro@acme.test&path=/event-types"), { repo: "acme/web", pr: 7, as: "pro@acme.test", path: "/event-types" });
+  assert.deepEqual(parseReviewLink("berth://review?repo=acme/web&pr=7&as=pro%40acme.test&path=%2Forders%3Ftab%3D2"), { repo: "acme/web", pr: 7, as: "pro@acme.test", path: "/orders?tab=2" });
+  assert.deepEqual(parseReviewLink("berth://review?repo=acme/web&pr=7&path=/"), { repo: "acme/web", pr: 7, path: "/" });
+  assert.deepEqual(parseReviewLink("berth://review?repo=acme/web&pr=7&as=team.lead%2Bqa@acme.test"), { repo: "acme/web", pr: 7, as: "team.lead+qa@acme.test" });
+  // The link reviewLink makes reads back the same; the default has neither.
+  for (const open of [{ as: "team.lead+qa@acme.test", path: "/orders?tab=2" }, { as: "pro@acme.test" }, { path: "/event-types" }]) {
+    const back = parseReviewLink(reviewLink("acme/web", 7, open));
+    assert.equal(back?.as, open.as);
+    assert.equal(back?.path, open.path);
+  }
+  assert.equal(reviewLink("acme/web", 7, { as: "team.lead+qa@acme.test", path: "/orders?tab=2" }), "berth://review?repo=acme/web&pr=7&as=team.lead%2Bqa@acme.test&path=/orders%3Ftab%3D2");
+  assert.equal(reviewLink("acme/web", 7), "berth://review?repo=acme/web&pr=7");
+});
+
+test("as and path refuse anything else, and the whole link with them", () => {
+  const base = "berth://review?repo=acme/web&pr=7&";
+  for (const q of [
+    "as=a@b.c;rm",
+    "as=a@b.c%3Brm%20-rf",
+    "as=a@b.c%0Aecho",
+    "as=a@b.c%0D%0Aecho",
+    "as=-x@acme.test",
+    "as=pro",
+    "as=pro@acme",
+    "as=pro@acme.test&as=admin@acme.test",
+    "as=",
+    `as=${"a".repeat(250)}@acme.test`,
+    "as=pro@acme.test%00",
+    "as=%60id%60@acme.test",
+    "path=//evil.example",
+    "path=%2F%2Fevil.example",
+    "path=/%2F%2Fevil.example",
+    "path=/%252F%252Fevil.example",
+    "path=https://evil.example",
+    "path=https%3A%2F%2Fevil.example",
+    "path=event-types",
+    "path=/%5Cevil.example",
+    "path=/a%0Ab",
+    "path=/a%09b",
+    "path=/a%20b",
+    "path=/x&path=/y",
+    "path=",
+    `path=/${"a".repeat(512)}`,
+    "path=/x#frag",
+    "as=pro@acme.test#x",
+    "login=pro@acme.test",
+  ]) {
+    assert.equal(parseReviewLink(base + q), undefined, q);
+  }
+});

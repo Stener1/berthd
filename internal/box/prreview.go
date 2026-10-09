@@ -126,11 +126,21 @@ type ReviewSetup struct {
 	Hooks          int             `json:"hooks"`
 	Ports          int             `json:"ports"`
 	// Watch are the files the kit says affect setup.
-	Watch    []string      `json:"watch,omitempty"`
-	Secrets  ReviewSecrets `json:"secrets"`
-	IdleDays int           `json:"idle_days"`
+	Watch   []string      `json:"watch,omitempty"`
+	Secrets ReviewSecrets `json:"secrets"`
+	// Login is the project's trusted login: the users a review may open
+	// logged in as. nil without one.
+	Login    *ReviewLogin `json:"login,omitempty"`
+	IdleDays int          `json:"idle_days"`
 	// Existing are the reviews already on the box for this location.
 	Existing []ReviewEntry `json:"existing"`
+}
+
+// ReviewLogin is a project's login as a review link may use it: the users'
+// emails, and whether any email is taken.
+type ReviewLogin struct {
+	Users []string `json:"users"`
+	Any   bool     `json:"any,omitempty"`
 }
 
 type ReviewKit struct {
@@ -677,6 +687,14 @@ func (b *Box) ReviewSetupFor(ctx context.Context, location string, withhold []st
 		out.Services = append(out.Services, ReviewService{Name: s.Name, Title: s.Title, Run: s.Run, Autostart: s.Autostart})
 	}
 	out.MatchesDefault = configMatchesDefault(ctx, loc.Path, loc.DefaultBranch)
+	// The login as every worktree of the project has it: the kit's, the
+	// box's own, or the main checkout's trusted config, never a worktree's.
+	if l := cfg.Effective.Login; l != nil && (len(l.Users) > 0 || l.Any) {
+		out.Login = &ReviewLogin{Users: []string{}, Any: l.Any}
+		for _, u := range l.Users {
+			out.Login.Users = append(out.Login.Users, u.Email)
+		}
+	}
 	withheld := withheldFor(withhold, b.teamAskKeys(loc.Path))
 	out.Secrets = ReviewSecrets{Shared: []string{}, Withheld: []string{}}
 	boxEnv, _ := loadBoxEnv(b.EnvFile)

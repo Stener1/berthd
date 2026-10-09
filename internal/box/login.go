@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"github.com/cosscom/shipyard/internal/agentpath"
 	"github.com/cosscom/shipyard/internal/events"
 	"github.com/cosscom/shipyard/internal/proxy"
+	"github.com/cosscom/shipyard/internal/prreview"
 )
 
 // Logging a worktree in as a dev user. A project's kit, or its config,
@@ -85,7 +85,6 @@ func (u *LoginUser) UnmarshalJSON(b []byte) error {
 
 const (
 	maxLoginUsers  = 50
-	maxEmailLength = 254
 	maxLoginLabel  = 48
 	maxLoginOutput = 64 << 10
 )
@@ -93,23 +92,12 @@ const (
 // loginTimeout bounds a login script; tests shorten it.
 var loginTimeout = 30 * time.Second
 
-// emailPattern is a conservative subset of RFC 5321 addresses: a local
-// part of letters, digits and . _ + - that starts with a letter or digit
-// (so it never reads as a flag), with no dot at its end or two in a row,
-// and a domain of at least two DNS labels.
-var emailPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_+-]*(\.[A-Za-z0-9_+-]+)*@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
-
-// ValidLoginEmail reports whether s is an email a login takes.
-func ValidLoginEmail(s string) bool {
-	if len(s) == 0 || len(s) > maxEmailLength {
-		return false
-	}
-	local, _, ok := strings.Cut(s, "@")
-	if !ok || len(local) > 64 {
-		return false
-	}
-	return emailPattern.MatchString(s)
-}
+// ValidLoginEmail reports whether s is an email a login takes: a
+// conservative subset of RFC 5321 addresses, a local part of letters,
+// digits and . _ + - that starts with a letter or digit (so it never reads
+// as a flag), with no dot at its end or two in a row, and a domain of at
+// least two DNS labels. Review links (prreview) hold to the same rule.
+func ValidLoginEmail(s string) bool { return prreview.ValidEmail(s) }
 
 func (c *LoginConfig) validate() error {
 	if _, err := cleanKitPath(c.Script); err != nil || strings.TrimSpace(c.Script) == "" || filepath.IsAbs(c.Script) {

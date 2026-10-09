@@ -33,6 +33,9 @@ export interface ReviewBox {
   secrets: { shared: string[]; withheld: string[] };
   idle_days: number;
   existing?: { worktree: string; sha: string };
+  // Whether this box's project lets the review open logged in as the
+  // link's user, and if not why (it opens anyway, without logging in).
+  login?: { allowed: boolean; reason?: string };
 }
 
 export type SetupChangeKind = "berth" | "scripts" | "dependencies" | "lockfile" | "docker" | "compose" | "migrations" | "env" | "githooks" | "kit";
@@ -64,6 +67,8 @@ export interface ReviewSheet {
   box?: string;
   changes: SetupChange[];
   files: number;
+  // The link's as and path: how to open the review once it is ready.
+  login?: { as?: string; path?: string };
 }
 
 export interface ReviewMark {
@@ -87,6 +92,8 @@ export interface ReviewOpened {
   location: string;
   worktree: Worktree;
   review: ReviewMark;
+  // Where to open it: through the login route when allowed, else the page.
+  open?: string;
 }
 
 export interface ReviewStatus {
@@ -108,8 +115,8 @@ export interface ReviewTarget {
 }
 
 export const prReviewApi = {
-  plan: (c: Client, req: { link?: string; repo?: string; pr?: number; box?: string }) => c.laptop<ReviewSheet>("POST", "/v1/pr-review/plan", req),
-  open: (c: Client, req: { repo: string; pr: number; sha: string; box: string }) => c.laptop<ReviewOpened>("POST", "/v1/pr-review/open", req),
+  plan: (c: Client, req: { link?: string; repo?: string; pr?: number; box?: string; as?: string; path?: string }) => c.laptop<ReviewSheet>("POST", "/v1/pr-review/plan", req),
+  open: (c: Client, req: { repo: string; pr: number; sha: string; box: string; as?: string; path?: string }) => c.laptop<ReviewOpened>("POST", "/v1/pr-review/open", req),
   update: (c: Client, req: ReviewTarget & { sha: string }) => c.laptop<ReviewOpened>("POST", "/v1/pr-review/update", req),
   status: (c: Client, t: ReviewTarget) => c.laptop<ReviewStatus>("GET", `/v1/pr-review/status?${new URLSearchParams({ box: t.box, location: t.location, worktree: t.worktree })}`),
 };
@@ -220,4 +227,16 @@ export function openUpdate(box: string, loc: Location, wt: Worktree) {
   openReviewSheet({ repo: r.repo, pr: r.pr }, { mode: "update", target: { box, location: loc.name, worktree: wt.name } });
 }
 
-export const linkFor = (r: Pick<ReviewMark, "repo" | "pr">) => reviewLink(r.repo, r.pr);
+export const linkFor = (r: Pick<ReviewMark, "repo" | "pr">, open: { as?: string; path?: string } = {}) => reviewLink(r.repo, r.pr, open);
+
+// loginLine says how a ready review opens, for the sheet: "Opens
+// /event-types, logged in as pro@acme.test", or why it opens without
+// logging in. undefined when the link asked for neither.
+export function loginLine(plan: Pick<ReviewSheet, "login">, box?: Pick<ReviewBox, "login">): { text: string; allowed: boolean } | undefined {
+  const l = plan.login;
+  if (!l || (!l.as && !l.path)) return undefined;
+  const page = l.path || "/";
+  if (!l.as) return { text: `Opens ${page}`, allowed: true };
+  if (box?.login?.allowed) return { text: `Opens ${page}, logged in as ${l.as}`, allowed: true };
+  return { text: `Opens ${page}. ${box?.login?.reason ?? `${l.as} can't be logged in on this box, so it opens without logging in`}.`, allowed: false };
+}
