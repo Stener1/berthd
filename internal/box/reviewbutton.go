@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -85,6 +86,26 @@ type ReviewButtonMark struct {
 	Skipped  string `json:"skipped,omitempty"`
 	// Checked is the last look at GitHub.
 	Checked time.Time `json:"checked,omitzero"`
+	// NoUIAt is the PR's head commit when its files showed nothing a
+	// browser shows: it is looked at again once the PR moves on.
+	NoUIAt string `json:"no_ui_at,omitempty"`
+}
+
+// uiFile says whether a changed file can change what a page shows: the
+// button is for pull requests a reviewer looks at in a browser.
+func uiFile(name string) bool {
+	n := strings.ToLower(name)
+	switch path.Ext(n) {
+	case ".tsx", ".jsx", ".vue", ".svelte", ".astro", ".html", ".htm", ".css", ".scss", ".sass", ".less", ".styl", ".mdx",
+		".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".woff", ".woff2":
+		return true
+	}
+	for _, dir := range []string{"components/", "pages/", "views/", "layouts/", "styles/", "public/", "locales/", "i18n/"} {
+		if strings.HasPrefix(n, dir) || strings.Contains(n, "/"+dir) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ReviewButtons) read() map[string]*ReviewButtonMark {
@@ -282,6 +303,7 @@ type ghPull struct {
 	Association string  `json:"author_association"`
 	Head        struct {
 		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
 		Repo *struct {
 			FullName string `json:"full_name"`
 		} `json:"repo"`
@@ -499,6 +521,33 @@ func (b *Box) reviewButtonOne(ctx context.Context, tg buttonTarget, now time.Tim
 	if skip != "" {
 		set(func(x *ReviewButtonMark) { x.Repo, x.PR, x.Done, x.Skipped = repo, pr.Number, true, skip })
 		return calls, false
+	}
+	// Only for UI work, unless someone asked for this PR's button
+	// (berthd review-button). A PR is looked at again when it moves on.
+	if !m.WantSet {
+		if pr.Head.SHA != "" && pr.Head.SHA == m.NoUIAt {
+			set(func(*ReviewButtonMark) {})
+			return calls, false
+		}
+		var files []struct {
+			Filename string `json:"filename"`
+		}
+		calls++
+		if err := s.gh(ctx, tg.wt.Path, nil, &files, "api", fmt.Sprintf("repos/%s/pulls/%d/files?per_page=100", repo, pr.Number)); err != nil {
+			set(func(x *ReviewButtonMark) { x.Repo, x.PR = repo, pr.Number })
+			return calls, false
+		}
+		ui := false
+		for _, f := range files {
+			if uiFile(f.Filename) {
+				ui = true
+				break
+			}
+		}
+		if !ui {
+			set(func(x *ReviewButtonMark) { x.Repo, x.PR, x.NoUIAt = repo, pr.Number, pr.Head.SHA })
+			return calls, false
+		}
 	}
 	nl := "\n"
 	if strings.Contains(pr.body(), "\r\n") {

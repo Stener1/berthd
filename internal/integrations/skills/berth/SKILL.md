@@ -118,9 +118,12 @@ in the app or with `berth location config BOX/LOC --trust HASH`.
 
 ## Review links for the PRs you open
 
-When you open a pull request from a berth worktree, end its description with
-a **Review in Shipyard** button, so a teammate opens it on their own box in
-one click, set up by the team's kit. GitHub drops `berth://` links, so the
+When a pull request you open from a berth worktree changes something a
+reviewer would look at in a browser (pages, components, styles, copy, UI
+behaviour), end its description with a **Review in Shipyard** button, so a
+teammate opens it on their own box in one click, set up by the team's kit,
+at the page it changes. Leave it out of PRs with nothing to see: backend,
+API, infrastructure, tests or docs alone. GitHub drops `berth://` links, so the
 button goes through berthd.app, which opens the review in Shipyard:
 
 ```md
