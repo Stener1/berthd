@@ -136,6 +136,16 @@ type Requirements struct {
 	OS     string             `json:"os"`
 	Tmux   ToolRequirement    `json:"tmux"`
 	Agents []AgentRequirement `json:"agents"`
+	// Tools are the ones asked for with ?tool=NAME (a kit's requires),
+	// looked for as the box user's login shell finds them.
+	Tools []NamedTool `json:"tools,omitempty"`
+}
+
+// NamedTool is one tool asked for, and whether the box has it.
+type NamedTool struct {
+	Tool  string `json:"tool"`
+	Found bool   `json:"found"`
+	Path  string `json:"path,omitempty"`
 }
 
 type ToolRequirement struct {
@@ -250,6 +260,13 @@ func (b *Box) requirements(w http.ResponseWriter, r *http.Request) error {
 			a.Found, a.Path, a.Install = true, path, ""
 		}
 		req.Agents = append(req.Agents, a)
+	}
+	for _, t := range r.URL.Query()["tool"] {
+		if !toolName.MatchString(t) {
+			return badRequest("%q is not a tool name", t)
+		}
+		p, ok := findTool(r.Context(), t)
+		req.Tools = append(req.Tools, NamedTool{Tool: t, Found: ok, Path: p})
 	}
 	writeJSON(w, req)
 	return nil

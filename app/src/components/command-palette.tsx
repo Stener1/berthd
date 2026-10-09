@@ -1,3 +1,4 @@
+import { currentSuggestions, reviewSuggestion } from "@/lib/team-suggest";
 import {
   BellIcon,
   BellOffIcon,
@@ -234,6 +235,8 @@ export function CommandPalette() {
       { value: "settings", label: "Settings", icon: slot(<SettingsIcon />), run: go(() => st.setView({ kind: "settings" })) },
       { value: "add-box", label: "Add a box…", icon: slot(<ServerIcon />), run: go(openAddBox) },
       { value: "team setup github org berth workspace kit onboarding", label: "Team setup…", icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", from: "palette" })) },
+      // The orgs the laptop noticed publish one (lib/team-suggest.ts).
+      ...currentSuggestions().map((s) => ({ value: `team setup for ${s.org} ${s.name} suggested github org`, label: `Team setup for ${s.org}`, detail: s.repo, icon: slot(<UsersIcon />), run: go(() => reviewSuggestion(s)) })),
       // A link to a team setup pasted here opens it.
       ...(q.includes("/") && teamRef(q) && isLink(teamRef(q)!)
         ? [{ value: `team setup link ${q}`, label: "Open team setup from link", detail: teamRef(q), search: q, icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", org: teamRef(q), from: "palette" })) }]

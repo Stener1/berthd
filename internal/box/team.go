@@ -959,9 +959,14 @@ func (b *Box) setUpProject(ctx context.Context, tb TeamBundle, p TeamProjectPlan
 	}
 	if p.Kit != nil && trust != RepoTrustTrusted {
 		// A location that was there already keeps a kit of its own.
-		if saved, err := b.Locations.saved(name); err == nil && existed && saved.Kit != nil && saved.Kit.ID != p.Kit.Kit.ID {
+		saved, err := b.Locations.saved(name)
+		switch {
+		case err == nil && existed && saved.Kit != nil && saved.Kit.ID != p.Kit.Kit.ID:
 			warnings = append(warnings, fmt.Sprintf("it keeps its own kit, %s; the team's kit (%s) can replace it in Project settings", saved.Kit.Name, p.Kit.Kit.Name))
-		} else {
+		case err == nil && saved.Kit != nil && saved.Kit.ID == p.Kit.Kit.ID && p.Kit.Hash != "" && saved.Kit.Hash == p.Kit.Hash:
+			// The team's kit is there already, as it is now (taken on its
+			// own earlier, "Just the kit"): kept, not applied again.
+		default:
 			res, err := b.InstallKit(ctx, name, *p.Kit)
 			if err != nil {
 				return fmt.Errorf("kit %s: %w", p.Kit.Kit.ID, err)

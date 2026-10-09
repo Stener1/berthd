@@ -5,6 +5,7 @@ import { TaskComposer } from "@/components/conversation/task-composer";
 import { cn } from "@/lib/utils";
 import { usePrefs } from "@/lib/prefs";
 import { HomeGrid } from "@/views/home/widgets/grid";
+import { TeamSuggestCards } from "@/views/home/team-suggest-card";
 
 // HomeView is the workspace before any worktree is open: one composer to
 // start work (lib/composer), then the person's own grid of widgets
@@ -32,6 +33,7 @@ export function HomeView() {
           )}
           <h1 className={cn("mb-4 text-balance text-center font-heading font-semibold text-2xl tracking-tight", labs && "[text-shadow:0_0_6px_var(--background),0_0_16px_var(--background)]")}>What should your agents work on?</h1>
           <TaskComposer autoFocus />
+          <TeamSuggestCards />
         </div>
         <div className="relative mx-auto w-full max-w-[1180px] px-6 pb-12">
           <HomeGrid />

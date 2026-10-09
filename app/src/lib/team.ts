@@ -294,6 +294,38 @@ export interface SetupRequest {
   use?: Record<string, string>;
 }
 
+// TeamKitPlan is "Just the kit" before it runs (internal/agent/teamkit.go):
+// a project's kit from the team setup, for a project already on the box,
+// without the setup's box steps, sudo, clone or 1Password.
+export interface TeamKitPlan {
+  org: TeamOrg;
+  name: string;
+  commit: string;
+  short: string;
+  box: string;
+  location: string;
+  project: string;
+  repo: string;
+  kit: { ref: string; id: string; name: string; description?: string; hash: string };
+  sets_up: string[];
+  // The kit's tools, checked on the box (found is absent when it didn't say).
+  requires: { tool: string; hint?: string; found?: boolean }[];
+  // The project's shared keys and its init: each off unless chosen.
+  keys: { name: string; onepassword: boolean; used_by: string[] }[];
+  init?: { script: string; detail?: string };
+  replaces?: string;
+  applied?: boolean;
+  worktrees: number;
+  warnings: string[];
+}
+
+export interface TeamKitResult {
+  kit: { id: string; name: string };
+  warnings: string[];
+  first_open: number;
+  session?: string;
+}
+
 const enc = encodeURIComponent;
 
 export const teamApi = {
@@ -310,6 +342,8 @@ export const teamApi = {
   // Fast-forwards a found clone that is behind: a button of its own, never
   // part of using it.
   pull: (c: Client, org: string, box: string, repo: string, path: string) => c.laptop<ExistingClone>("POST", `/v1/team/${enc(org)}/pull`, { box, repo, path }),
+  kitPlan: (c: Client, org: string, box: string, location: string) => c.laptop<TeamKitPlan>("GET", `/v1/team/${enc(org)}/kit?box=${enc(box)}&location=${enc(location)}`),
+  applyKit: (c: Client, org: string, req: { box: string; location: string; commit: string; hash: string; keys?: boolean; init?: boolean }) => c.laptop<TeamKitResult>("POST", `/v1/team/${enc(org)}/kit`, req),
   retry: (c: Client, org: string, box: string, from: string) => c.laptop<TeamStatus>("POST", `/v1/team/${enc(org)}/retry`, { box, from }),
   update: (c: Client, org: string) => c.laptop<TeamUpdate | { update: null }>("GET", `/v1/team/${enc(org)}/update`),
   accepted: async (c: Client) => (await c.laptop<Accepted[] | null>("GET", "/v1/team")) ?? [],
@@ -344,7 +378,7 @@ export { isLink, teamRef, validOrg } from "@/lib/team-ref";
 // ——— live state ———
 
 // Where the page was opened from, which it says (a link names the org).
-export type TeamFrom = "onboarding" | "addbox" | "link" | "sidebar" | "palette";
+export type TeamFrom = "onboarding" | "addbox" | "link" | "sidebar" | "palette" | "suggestion";
 
 interface TeamState {
   github?: GitHubState;
@@ -489,6 +523,12 @@ export function handleTeamEvent(e: BerthEvent) {
   const d = (e.data ?? {}) as { team?: string; org?: string; project?: string; state?: string; location?: string };
   if (e.type === "team.update" && d.org) {
     void loadTeams();
+    return;
+  }
+  // The laptop noticed (or stopped suggesting) an org's team setup
+  // (lib/team-suggest.ts): its status says which.
+  if (e.type === "team.suggestions") {
+    void useStore.getState().refreshStatus();
     return;
   }
   if (e.type === "box.connected") {

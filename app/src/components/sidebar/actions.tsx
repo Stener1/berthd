@@ -36,6 +36,8 @@ import {
   UnplugIcon,
   WorkflowIcon,
   WrenchIcon,
+  BellOffIcon,
+  UsersRoundIcon,
 } from "lucide-react";
 import { type ComponentProps, createContext, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -77,6 +79,10 @@ import { boxLoad } from "@/components/sidebar/box-load";
 import { kitsApi } from "@/lib/kits";
 import { deriveProjects, type Member, type Project, projectActions as groupActions, useProjectsDoc } from "@/lib/project-groups";
 import { reloadKits, useKits } from "@/views/kits/kits-store";
+import { useTeam } from "@/lib/team";
+import { copyTeamLink, dismissSuggestion, projectSuggestion, reviewSuggestion } from "@/lib/team-suggest";
+import { orgName } from "@/lib/team-suggest-model";
+import { openTeamKit } from "@/views/team/team-kit-sheet";
 
 // The sidebar's actions are defined once and drawn into either menu: the
 // ⋯ button on a row, or the row's right-click menu. Both show the same
@@ -548,6 +554,35 @@ function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }
 
 const githubSlug = (loc: Location) => (loc.slug && loc.remote && /github\.com/i.test(loc.remote) ? loc.slug : undefined);
 
+// teamActions are a project's team setup: when the laptop noticed that its
+// org publishes one the person hasn't accepted, a quiet way to review it or
+// to never hear of it again; and, for any org whose setup exists, the link
+// that opens it, to send a teammate.
+function teamActions(members: { box: string; loc: Location }[]): Action[] {
+  const found = members.map((m) => projectSuggestion(m.box, m.loc.name)).find(Boolean);
+  const out: Action[] = [];
+  let org = found?.suggestion.org;
+  if (found) {
+    const s = found.suggestion;
+    out.push(item(`${orgName(s)} has a team setup`, <UsersRoundIcon />, () => reviewSuggestion(s, found.project.box), { hint: "Review…" }));
+    // Or just this project's kit from it, without the box steps.
+    if (found.project.kit && !found.project.kit_applied) {
+      const p = found.project;
+      out.push(item(`Use ${s.org}'s kit for this project…`, <PackageIcon />, () => openTeamKit({ org: s.org, name: orgName(s), box: p.box, location: p.location })));
+    }
+    out.push(item(`Don't suggest again for ${s.org}`, <BellOffIcon />, () => void dismissSuggestion(s)));
+  } else {
+    // Set up from its org's own .berth on this laptop.
+    const owners = new Set(members.map((m) => githubSlug(m.loc)?.split("/")[0]?.toLowerCase()).filter(Boolean));
+    org = useTeam.getState().accepted.find((a) => owners.has(a.org.toLowerCase()) && (a.key ?? a.org).toLowerCase() === a.org.toLowerCase())?.org;
+  }
+  if (org) {
+    const o = org;
+    out.push(item("Copy team setup link", <LinkIcon />, () => copyTeamLink(o)));
+  }
+  return out.length ? [sep, ...out] : [];
+}
+
 // projectActions is everything a repository row offers.
 export function projectActions(box: string, loc: Location): Action[] {
   const st = useStore.getState();
@@ -559,6 +594,7 @@ export function projectActions(box: string, loc: Location): Action[] {
   items.push(
     item("New task…", <GitBranchPlusIcon />, () => st.openNewWorktree({ box, location: loc.name }), { shortcut: "⌘N" }),
     item("Project settings", <Settings2Icon />, () => st.setView({ kind: "project", box, location: loc.name })),
+    ...teamActions([{ box, loc }]),
     sep,
     item("Copy path", <CopyIcon />, () => copy(loc.path, "path")),
   );
@@ -738,6 +774,7 @@ export function projectGroupActions(p: Project): Action[] {
       items: p.members.map((m) => item(m.box.name, slot(<ServerIcon />), () => st.setView({ kind: "project", box: m.box.name, location: m.loc.name }))),
     });
   } else if (def) items.push(item("Project settings", <Settings2Icon />, () => st.setView({ kind: "project", box: def.box.name, location: def.loc.name })));
+  items.push(...teamActions(p.members.map((m) => ({ box: m.box.name, loc: m.loc }))));
 
   // How Shipyard shows it: its name, its section, and which projects it joins.
   const organise: Action[] = [

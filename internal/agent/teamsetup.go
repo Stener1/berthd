@@ -132,6 +132,9 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 			if err != nil {
 				return tb, &r, cleanup, err
 			}
+			// The team's kit says so; a project that took it on its own
+			// already keeps it as it is (box/team.go).
+			in.Team = &box.KitTeam{Org: r.org.Login, Commit: r.commit.SHA, Project: v.ID}
 			plan.Kit = &in
 		}
 		if k, ok := r.setup.Keys[v.ID]; ok {
@@ -283,6 +286,8 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 			}
 		}
 		a.publish(Event{Type: "team.accepted", Data: map[string]any{"org": org, "team": tb.ID, "box": req.Box, "commit": tb.Commit}})
+		// An accepted setup is no longer suggested.
+		a.rebuildSuggestions(nil)
 		writeJSON(w, http.StatusOK, st)
 	})
 	// pull fast-forwards a clone the page found that is behind: a separate

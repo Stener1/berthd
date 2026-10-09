@@ -15,6 +15,25 @@ again.
   PR whose files change something a browser shows, agents add it only for
   such changes, and the button is the words alone, without a mark.
 
+- **Shipyard notices when your team has a setup.** If you added a project
+  from `acme` yourself and acme publishes a [team setup](/guides/team-setup),
+  Shipyard says so quietly: a small icon on the project's row and a line in
+  its menu, a line in Project settings saying what it sets up for the repo,
+  a card on Home once, and **Team setup for acme** in ⌘K. **Review…** opens
+  the setup with your project used as it is; nothing runs until you choose.
+  **Not now** and **Don't suggest again for acme** put it away. The laptop
+  checks only your projects' owners, with your own `gh`, at most daily (weekly
+  for a person's account), and never offline. The project menu also has
+  **Copy team setup link**. See
+  [how Shipyard notices your team's setup](/guides/team-setup#how-shipyard-notices-your-teams-setup).
+
+- **Just the kit from a team setup.** **Use acme's kit for this project…**
+  applies only a project's kit from `acme/.berth` to the project you have: no
+  box steps, sudo, clone or 1Password. The sheet lists the tools the kit needs
+  and whether the box has them; the shared keys and the first-time setup are
+  each an opt-in. The kit then follows the team's newer commits as an update
+  to review. See [just the kit](/guides/team-setup#just-the-kit).
+
 - **Team setup uses the clones you already have.** Before cloning a repo,
   Shipyard looks for one on the box: a project you added already, or a
   clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,

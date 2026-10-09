@@ -264,6 +264,30 @@ export const scenes: Scene[] = [
     },
   },
   {
+    // Home with a team suggestion's card, and the project's quiet mark
+    // (lib/team-suggest.ts).
+    id: "team-suggestion",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, params: { teamsuggest: "1" } });
+      await expect(app.page.getByTestId("team-suggest-card")).toBeVisible();
+      await expect(app.page.getByTestId("team-suggest-mark")).toBeVisible();
+    },
+  },
+  {
+    // Just the kit's sheet (views/team/team-kit-sheet.tsx): what the kit
+    // needs on the box, and the keys and init left unticked.
+    id: "team-kit-sheet",
+    extra: true,
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme, params: { teamsuggest: "1" } });
+      await page.getByTestId("team-suggest-mark").locator("xpath=ancestor::button[1]").click({ button: "right" });
+      await page.getByRole("menuitem", { name: /kit for this project/ }).click();
+      await expect(page.getByTestId("team-kit-requires")).toBeVisible();
+    },
+  },
+  {
     // A PR review link's sheet (views/pr-review), with setup files changed.
     id: "pr-review-sheet",
     async run(app, theme) {

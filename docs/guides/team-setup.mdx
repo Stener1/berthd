@@ -286,6 +286,79 @@ never runs by itself. Reviewing opens the same page with what changed:
 steps added or changed (one that now asks for your password is called
 out), repositories added, kits moved to a new commit, keys. **Update**, with your box's name on it, runs it; steps whose checks already pass are skipped.
 
+### How Shipyard notices your team's setup
+
+If you added a project to Shipyard yourself, say `acme/shop`, Shipyard tells
+you when acme publishes a team setup, so you don't have to know to look:
+
+- the project's row in the sidebar gets a small people icon, and its menu
+  says **Acme has a team setup · Review…**;
+- **Project settings** says what `acme/.berth` sets the project up with
+  (per-worktree databases, services, **Log in as…**, review links, as the
+  setup declares them for that repo), with **Review…** and **Not for me**;
+- **Home** shows a card once, with **Review…** and **Not now**;
+- ⌘K offers **Team setup for acme**.
+
+**Review…** opens this page on the project's box, with your project used as
+it is (**Use this**, as [above](#repositories-you-already-cloned)). Nothing
+runs until you choose. **Not now** puts the Home card away and keeps the
+quieter hints; **Don't suggest again for acme** (in the project's menu) or
+**Not for me** hides every hint for the org, and Shipyard stops asking about
+it.
+
+How it checks, and what it shares:
+
+- **Only your own projects' owners.** The laptop reads the origin remote of
+  each project on your paired boxes and keeps the owner of those on
+  `github.com` (`https`, `ssh://` and `git@github.com:` remotes alike; GitHub
+  Enterprise and other hosts are left out).
+- **With your own GitHub CLI.** It asks GitHub, as `gh` is signed in on this
+  computer, whether `<owner>/.berth` has a `team.json` you can read: one
+  request per owner, which also says whether the owner is an org or a
+  person. When the setup lists repositories you have, their kits are read
+  from it once per commit, to say what it brings them.
+- **Not often.** An owner is asked again at most once a day, a person's
+  account at most once a week, and a new owner as soon as a project of
+  theirs appears. Owners whose setup you accepted, or turned down, are never
+  asked.
+- **Quietly.** Nothing is asked when the computer is offline, and a failure
+  (offline, signed out of `gh`, rate limited) is silent and tried again
+  later, after a wait that grows.
+- **Nowhere else.** Nothing is sent anywhere but GitHub. What Shipyard
+  learnt is kept in its own state folder on this laptop, with the orgs you
+  turned down.
+
+### Just the kit
+
+You may want a project's kit from the team setup without the rest: its
+per-worktree setup (databases, services, **Log in as…**), but none of the
+box steps. **Use acme's kit for this project…** is in the project's menu
+and next to **Review…** in Project settings, and the Team setup page offers
+**Set up everything** or **Just the kit for shop** for each repo you have
+already.
+
+- **Only the kit.** It is the kit `team.json` gives the repo
+  (`projects[].kit`, a folder in `<org>/.berth` or a pinned link), read at the
+  setup's current commit, applied to the project you have. No box steps, no
+  `sudo`, no clone, no 1Password.
+- **Your worktrees.** New worktrees get its setup; the ones already there get
+  it the first time each is opened, as with
+  [repositories you already cloned](#repositories-you-already-cloned). Your
+  checkout stays as it is.
+- **What it needs.** The sheet lists the kit's `requires`, checked on the box:
+  "pg_dump missing: the full team setup installs it". The kit is applied
+  anyway; its setup may stop until the tool is there.
+- **Keys and init are yours to add.** The project's shared keys are a
+  checkbox, off unless you tick it, and the sheet says what in the kit reads
+  them; they are read with 1Password on the box. **Run acme's first-time
+  setup in your checkout** runs the project's `init`, in a terminal you can
+  watch, also off unless ticked.
+- **It follows the team.** The kit remembers which team setup and commit it
+  came from. When a newer commit of `.berth` changes it, the project's kit
+  shows an update to review in Project settings, without any box step.
+- **The rest later.** Setting up everything later uses the project and its
+  kit as they are: nothing is cloned or applied twice.
+
 ### An org with no .berth
 
 If the org has no `.berth` you can read, the page lists its repositories you

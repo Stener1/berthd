@@ -9,6 +9,7 @@ repositories on disk.
   <repo>.git/berth-noaccess           the signed-in account can't read it (404, as GitHub answers)
   <repo>.git/description              its description
   $GH_FAKE_ROOT/.auth                 signed in, as the login it holds
+  $GH_FAKE_ROOT/.fail                 every api call fails with the message it holds (offline, say)
   $GH_FAKE_LOGIN                      the login `gh auth login` signs in as (default: engineer)
   $GH_FAKE_LOG                        every call is appended to this file
 
@@ -16,7 +17,8 @@ repositories on disk.
                                       head_repo, head_branch, base; its head is refs/pull/<N>/head
   $GH_FAKE_NO_ASSOCIATION             pr view refuses the authorAssociation field, as an older gh would
 
-Commands: --version, auth status|login|setup-git|token, api PATH, pr view N -R REPO --json FIELDS,
+Commands: --version, auth status|login|setup-git|token, api PATH, api graphql (the one query team
+suggestions ask: an owner's kind and <owner>/.berth's team.json), pr view N -R REPO --json FIELDS,
 pr diff N -R REPO.
 """
 import base64
@@ -224,6 +226,39 @@ def api(path):
     not_found()
 
 
+def graphql(args):
+    """The owner query of team suggestions (internal/agent/teamsuggest.go): the
+    owner's kind and, when this account can read it, <owner>/.berth's
+    team.json. As GitHub does, a repository that isn't there (or can't be
+    read) is null with a NOT_FOUND error, and gh exits 1 after printing it."""
+    fields = {}
+    for i, a in enumerate(args):
+        if a in ("-f", "-F", "--raw-field", "--field") and i + 1 < len(args):
+            k, _, v = args[i + 1].partition("=")
+            fields[k] = v
+    if "repositoryOwner" not in fields.get("query", ""):
+        sys.stderr.write("fake gh: unknown graphql query\n")
+        sys.exit(2)
+    owner = fields.get("owner", "")
+    d = os.path.join(ROOT, owner)
+    if not owner or not os.path.isdir(d):
+        out({"data": {"repositoryOwner": None}})
+    kind = "Organization" if os.path.exists(os.path.join(d, "org.json")) else "User"
+    node = {"__typename": kind, "login": owner, "repository": None}
+    rd = repo_dir(owner, ".berth")
+    if not rd:
+        sys.stdout.write(json.dumps({"data": {"repositoryOwner": node}, "errors": [
+            {"type": "NOT_FOUND", "path": ["repositoryOwner", "repository"],
+             "message": "Could not resolve to a Repository with the name '%s/.berth'." % owner}]}) + "\n")
+        sys.stderr.write("gh: Could not resolve to a Repository with the name '%s/.berth'.\n" % owner)
+        sys.exit(1)
+    ref = default_branch(rd)
+    sha = git(rd, "rev-parse", "--verify", "--quiet", "%s:team.json" % ref)
+    data = git_bytes(rd, "show", "%s:team.json" % ref)
+    node["repository"] = {"object": {"oid": sha.strip(), "text": data.decode()} if sha and data is not None else None}
+    out({"data": {"repositoryOwner": node}})
+
+
 def pull(d, owner, name, number):
     path = os.path.join(d, "pulls", "%s.json" % number)
     if not os.path.exists(path):
@@ -325,7 +360,15 @@ def main():
             sys.exit(4)
         pr_command(args)
     if args[0] == "api" and len(args) > 1:
+        try:
+            with open(os.path.join(ROOT, ".fail")) as f:
+                sys.stderr.write(f.read().strip() + "\n")
+                sys.exit(1)
+        except OSError:
+            pass
         path = next((a for a in args[1:] if not a.startswith("-")), "")
+        if path == "graphql":
+            graphql(args[1:])
         api(path)
     sys.stderr.write("fake gh: unknown command: %s\n" % " ".join(args))
     sys.exit(2)
