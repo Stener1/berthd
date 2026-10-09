@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-FkaKob50MzZrdqcn60Wd25MRNc2B2L50q9MTXbf8Ri4='; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Review in Shipyard</title>
+<meta name="description" content="Opens a pull request for review on your own box, in Shipyard.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/review/review.css">
+</head>
+<body>
+<main class="rv">
+  <div class="rv-card">
+    <a class="rv-brand" href="/" aria-label="Shipyard"><svg viewBox="80 20 384 472" aria-hidden="true"><path d="M116 84 H300 a96 96 0 0 1 0 192 H116 Z M116 276 H324 a104 104 0 0 1 0 208 H116 Z" transform="translate(0,-28)" fill="none" stroke="currentColor" stroke-width="68" stroke-linejoin="round"/><circle cx="296" cy="152" r="30" fill="var(--amber)"/></svg>shipyard</a>
+
+    <section id="ok" hidden aria-labelledby="ok-title">
+      <h1 id="ok-title">Opening the pull request in Shipyard…</h1>
+      <p class="rv-lede">Shipyard opens it on your own box, at its exact commit, set up the way your team's worktrees are.</p>
+      <dl class="rv-facts">
+        <div><dt>Repository</dt><dd id="f-repo"></dd></div>
+        <div><dt>Pull request</dt><dd id="f-pr"></dd></div>
+        <div id="row-as" hidden><dt>Logged in as</dt><dd id="f-as"></dd></div>
+        <div id="row-path" hidden><dt>Page</dt><dd id="f-path"></dd></div>
+      </dl>
+      <a class="btn primary rv-open" id="open" href="/review">Open in Shipyard</a>
+      <p class="rv-alt"><a id="github" href="https://github.com/">View the pull request on GitHub</a></p>
+    </section>
+
+    <section id="bad" hidden aria-labelledby="bad-title">
+      <h1 id="bad-title">This isn't a review link Shipyard can open</h1>
+      <p class="rv-lede" id="why">It should look like https://berthd.app/review?repo=OWNER/NAME&amp;pr=N.</p>
+    </section>
+
+    <noscript><p class="rv-lede">This page checks the link and opens Shipyard with a little JavaScript. Turn it on, or open the pull request with <code>berth review OWNER/NAME#N</code>.</p></noscript>
+
+    <p class="rv-foot">Don't have Shipyard? <a href="/#install-now">Install</a></p>
+  </div>
+</main>
+<script>
+// The bounce page for "Review in Shipyard" buttons. GitHub drops berth://
+// links from PR descriptions, so the button links here, and this page opens
+// berth://review?… for it. It reads the query as strictly as the app does
+// (app/src/lib/review-link.ts, internal/prreview): a repository, a PR
+// number, at most a head commit, a login user's email and a page. Anything
+// else, or anything twice, and it opens nothing. The link it opens is built
+// again from the checked values alone, never from the query as written, and
+// nothing from the query reaches the page but as text.
+(() => {
+  "use strict";
+  const PART = /^[A-Za-z0-9._-]+$/;
+  const MAX_PR = 2147483647;
+  const MAX_PATH = 512;
+  const MAX_LINK = 512; // internal/prreview refuses longer links
+  const KEYS = ["repo", "pr", "sha", "as", "path"];
+  const EMAIL = /^[A-Za-z0-9][A-Za-z0-9_+-]*(\.[A-Za-z0-9_+-]+)*@[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+  const CONTROL = /[\u0000-\u001f\u007f]/;
+
+  const validRepo = (s) => {
+    const parts = s.split("/");
+    if (parts.length !== 2) return false;
+    const [owner, name] = parts;
+    if (!PART.test(owner) || !PART.test(name)) return false;
+    if (owner === "." || owner === ".." || name === "." || name === "..") return false;
+    return owner.length <= 39 && name.length <= 100;
+  };
+
+  const prNumber = (s) => {
+    if (!/^[1-9][0-9]{0,9}$/.test(s)) return undefined;
+    const n = Number(s);
+    return n <= MAX_PR ? n : undefined;
+  };
+
+  const validEmail = (s) => {
+    const at = s.indexOf("@");
+    return s.length > 0 && s.length <= 254 && at > 0 && at <= 64 && EMAIL.test(s);
+  };
+
+  // A page on the worktree's own host: one "/", not "//host" or "/\host",
+  // no scheme, backslash or control character, decoded or not, looking
+  // through up to four layers of percent-encoding, and no space.
+  const offHost = (p) => !p.startsWith("/") || p.startsWith("//") || p.includes("\\") || p.includes("://") || CONTROL.test(p);
+  const validPath = (p) => {
+    if (p.length === 0 || p.length > MAX_PATH || p.includes(" ") || offHost(p)) return false;
+    try {
+      const base = "http://next.invalid";
+      if (new URL(p, base).origin !== base) return false;
+    } catch {
+      return false;
+    }
+    let s = p;
+    for (let i = 0; i < 4; i++) {
+      let d;
+      try {
+        d = decodeURIComponent(s);
+      } catch {
+        return false;
+      }
+      if (d === s) return true;
+      if (offHost(d)) return false;
+      s = d;
+    }
+    return false;
+  };
+
+  // escape keeps / and @ readable, as the app's review links do.
+  const escape = (s) => encodeURIComponent(s).replace(/%2F/gi, "/").replace(/%40/gi, "@");
+
+  // reviewTarget reads ?repo=OWNER/NAME&pr=N[&sha=HEX][&as=EMAIL][&path=/x]
+  // into the berth:// link to open, or a reason (in fixed words) it can't.
+  const reviewTarget = (search) => {
+    const q = search.startsWith("?") ? search.slice(1) : search;
+    if (!q) return { why: "It names no repository or pull request." };
+    const seen = new Map();
+    for (const pair of q.split("&")) {
+      const eq = pair.indexOf("=");
+      if (!pair || eq <= 0) return { why: "Part of it isn't a name and a value." };
+      const key = pair.slice(0, eq);
+      if (!KEYS.includes(key)) return { why: "It has a parameter a review link doesn't take." };
+      if (seen.has(key)) return { why: "It gives the same parameter twice." };
+      let value;
+      try {
+        value = decodeURIComponent(pair.slice(eq + 1).replace(/\+/g, " "));
+      } catch {
+        return { why: "Part of it can't be read." };
+      }
+      seen.set(key, value);
+    }
+    const repo = seen.get("repo");
+    if (!repo || !validRepo(repo)) return { why: "It doesn't name a repository as OWNER/NAME." };
+    const pr = prNumber(seen.get("pr") ?? "");
+    if (!pr) return { why: "It doesn't name a pull request by its number." };
+    let link = `berth://review?repo=${repo}&pr=${pr}`;
+    const out = { repo, pr };
+    const sha = seen.get("sha");
+    if (sha !== undefined) {
+      if (!/^[0-9a-f]{7,40}$/i.test(sha)) return { why: "Its commit isn't a commit hash." };
+      out.sha = sha.toLowerCase();
+      link += `&sha=${out.sha}`;
+    }
+    const as = seen.get("as");
+    if (as !== undefined) {
+      if (!validEmail(as)) return { why: "Who to log in as isn't a plain email address." };
+      out.as = as;
+      link += `&as=${escape(as)}`;
+    }
+    const path = seen.get("path");
+    if (path !== undefined) {
+      if (!validPath(path)) return { why: "Its page isn't a path on the worktree's own address." };
+      out.path = path;
+      link += `&path=${escape(path)}`;
+    }
+    if (link.length > MAX_LINK) return { why: "It is longer than a review link can be." };
+    out.link = link;
+    return out;
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const t = reviewTarget(location.search);
+  if (!t.link) {
+    $("why").textContent = `${t.why} It should look like https://berthd.app/review?repo=OWNER/NAME&pr=N.`;
+    $("bad").hidden = false;
+    document.title = "Not a review link · Shipyard";
+    return;
+  }
+  const title = `Opening #${t.pr} of ${t.repo} in Shipyard…`;
+  $("ok-title").textContent = title;
+  document.title = `Review #${t.pr} of ${t.repo} · Shipyard`;
+  $("f-repo").textContent = t.repo;
+  $("f-pr").textContent = `#${t.pr}`;
+  if (t.as) {
+    $("f-as").textContent = t.as;
+    $("row-as").hidden = false;
+  }
+  if (t.path) {
+    $("f-path").textContent = t.path;
+    $("row-path").hidden = false;
+  }
+  $("open").setAttribute("href", t.link);
+  $("github").setAttribute("href", `https://github.com/${t.repo}/pull/${t.pr}`);
+  $("ok").hidden = false;
+  location.href = t.link;
+})();
+</script>
+</body>
+</html>

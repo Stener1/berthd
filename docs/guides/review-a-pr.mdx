@@ -11,8 +11,73 @@ server), with a Browser tab on its dev server and the Diff beside it.
 berth://review?repo=acme/shop&pr=42
 ```
 
-Paste one in a PR's description or a chat. From the terminal it is
+Paste one in a chat. GitHub doesn't keep `berth://` links in a PR's
+description, so there the link is a [button](#the-review-in-shipyard-button)
+that goes through berthd.app. From the terminal it is
 `berth review acme/shop#42`.
+
+## The Review in Shipyard button
+
+On GitHub, a review link is a button in the PR's description:
+
+```md
+<!-- shipyard-review-button -->
+[![Review in Shipyard](https://berthd.app/badges/review.svg)](https://berthd.app/review?repo=acme/shop&pr=42)
+<!-- /shipyard-review-button -->
+```
+
+It links to `https://berthd.app/review?repo=acme/shop&pr=42`, a static page
+that checks the link and opens `berth://review?repo=acme/shop&pr=42` in
+Shipyard. It shows the repository and PR, an **Open in Shipyard** button in
+case the browser asks first, a link to the PR on GitHub, and where to
+install Shipyard. The page:
+
+- reads the link as strictly as the app: `repo`, `pr`, and optionally
+  `sha` (a commit, only a hint), `as` (a login user's email, at most 254
+  characters) and `path` (a page on the worktree's own address, at most
+  512). Anything else, a parameter given twice, or a value out of shape,
+  and it says the link isn't one it can open, and opens nothing;
+- builds the `berth://` link again from the values it checked, never from
+  the address as written, and puts them on the page as text only;
+- runs one inline script and nothing else (its Content Security Policy
+  allows only that script, by hash), loads nothing from anywhere but
+  berthd.app, has no analytics, and sends no referrer, so the PR's link
+  doesn't travel on to GitHub.
+
+`as` and `path` open the review logged in as one of the project's
+[dev users](/guides/kits#personas-logging-in-as-a-dev-user), at that page:
+`...&as=pro%40acme.test&path=/billing`. They are requests: the review
+logs in only as a user the project's trusted login lists, and opens without
+logging in otherwise.
+
+### Adding it to every PR
+
+A project can have berthd add the button by itself. Turn it on with
+`"review_button": true` in the project's `.berth/config.json` (on the
+default branch, once your box trusts it), in **Project settings › Review
+button** for one box, or for the whole team in `team.json`'s
+[project entry](/guides/team-setup#teamjson). It is off by default, and a
+box's own setting wins over the repository's and the team's.
+
+With it on, berthd looks for a PR on each of the project's worktrees'
+branches, and the first time one has an open PR it appends the button to
+the description, after everything else, between the two marker comments.
+It does this once:
+
+- it never changes anything outside the markers, and never adds a second
+  button: a description that already has the markers, or a review link
+  someone wrote by hand, is left as it is;
+- GitHub has no way to edit a description only if nobody else just did, so
+  berthd reads it again right before writing, and when it changed, starts
+  over from the new one, once;
+- a PR from a fork, or by someone who isn't a member, owner or collaborator,
+  gets no button, as a review would refuse it;
+- `berthd review-button --as EMAIL --path /x`, in the worktree, sets the
+  button's user and page; berthd puts the new link in place between the
+  markers on its next look. `--clear` drops both.
+
+Each button berthd adds or changes is in the box's
+[journal](/reference/events#reviews) as `review.button`.
 
 ## Opening a review
 
@@ -160,6 +225,9 @@ reviewer and the keys policy), `review.updated`, `review.waiting` and
 
 ## For agents
 
-An agent that opens a PR can add its review link to the description, so a
-teammate opens it in one click: `berth://review?repo=OWNER/NAME&pr=N`, or
-`berth review link OWNER/NAME#N` on the laptop.
+An agent that opens a PR from a Shipyard worktree adds the
+[button](#the-review-in-shipyard-button) to its description, as the berth
+skill tells it, with `path` set to the main page its change affects and `as`
+to one of the project's login users (`berthd login users` lists them), or
+neither. On the laptop, `berth review link OWNER/NAME#N` prints the
+`berth://` link for a chat.

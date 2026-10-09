@@ -97,6 +97,7 @@ events.
 | `review.updated` | `location`, `name`, `path`, `repo`, `pr`, `from`, `sha`, `author`, `association`, `reviewer`: moved to a newer head the reviewer confirmed |
 | `review.waiting` | `location`, `name`, `path`, `repo`, `pr`, `reason` (`merged`, `closed`, `idle`): due for clean-up, but it has uncommitted changes or a session running, so it waits for the reviewer; once per reason |
 | `review.removed` | `location`, `name`, `path`, `repo`, `pr`, `reason`: `merged`, `closed`, `idle`, or `removed` (by hand) |
+| `review.button` | `repo`, `pr`, `location`, `worktree`, and `as` and `path` when set: berthd added the [Review in Shipyard button](/guides/review-a-pr#the-review-in-shipyard-button) to a PR's description, or put a new `as` or `path` in place |
 
 ### Automation, config and the box
 

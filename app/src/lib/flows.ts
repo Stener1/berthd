@@ -146,6 +146,9 @@ export interface RepoConfig {
   // (lib/login-url.ts). Only from trusted layers: the kit, the box's own
   // config, or the committed config once trusted.
   login?: LoginConfig;
+  // A "Review in Shipyard" button on each PR opened from the project's
+  // worktrees (box/reviewbutton.go). Off unless a layer or team.json says.
+  review_button?: boolean;
 }
 
 // LoginUser is a seeded user a worktree can be logged in as. The box always
@@ -191,6 +194,17 @@ export interface LocationConfig {
   effective: RepoConfig;
   // The project's kit, a layer between repo and local.
   kit?: InstalledKit;
+  // Whether PRs from the project's worktrees get the review button, and
+  // where that comes from; inherited is the value without this box's own
+  // setting. The team's team.json counts here, unlike in effective.
+  review_button?: ReviewButtonState;
+}
+
+export interface ReviewButtonState {
+  on: boolean;
+  from?: "box" | "repo" | "kit" | "team";
+  inherited: boolean;
+  inherited_from?: "repo" | "kit" | "team";
 }
 
 export interface ServiceStatus extends WorktreeService {

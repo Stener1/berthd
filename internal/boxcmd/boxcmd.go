@@ -46,6 +46,8 @@ var usageSections = []struct {
 		{"%[1]s worktree rm %[2]sLOC/NAME [--force]", "Remove a worktree"},
 		{"%[1]s worktree rename %[2]sLOC/NAME [TITLE]", "Give a worktree a display name (its branch and folder keep\ntheir names; no TITLE clears it)"},
 		{"%[1]s reviews%[3]s [--idle-days N] [--json]", "Pull requests opened for review here; --idle-days sets how long\none may sit unused before it is cleaned up (0: never)"},
+		{"%[1]s review-button %[2]s[LOC/WT] [--as EMAIL] [--path /x] [--clear] [--json]", "The \"Review in Shipyard\" button on the worktree's PR; --as and\n--path set what it opens with"},
+		{"%[1]s login users %[2]s[LOC[/WT]] [--json]", "Who the project's worktrees can be logged in as"},
 	}},
 	{"Agent sessions", [][2]string{
 		{"%[1]s sessions%[3]s [--json]", "List sessions"},
@@ -180,7 +182,7 @@ var Commands = map[string]int{
 	"secret": 2,
 	"runs":   1, "run": 2, "flow": 2, "browser": 2, "shots": 2,
 	"artifact": 2,
-	"reviews":  1,
+	"reviews":  1, "review-button": 1, "login": 2,
 }
 
 // Run executes args, which start with the command words, against c.
@@ -254,6 +256,10 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return shotsCmd(ctx, c, strings.TrimPrefix(cmd, "shots "), rest, out)
 	case "reviews":
 		return reviewsCmd(ctx, c, rest, out)
+	case "review-button":
+		return reviewButtonCmd(ctx, c, rest, out)
+	case "login users":
+		return loginUsersCmd(ctx, c, rest, out)
 	case "artifact add", "artifact list", "artifact ls", "artifact show", "artifact rm":
 		return artifactCmd(ctx, c, strings.TrimPrefix(cmd, "artifact "), rest, out)
 	case "run start", "run get", "run logs", "run cancel", "run approve", "run reject", "run templates":

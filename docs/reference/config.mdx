@@ -22,6 +22,7 @@ guide is in [project config](/guides/project-config).
 | `flows` | array | [Flows](#flows) for this repository's worktrees. |
 | `shots` | object | What `berthd shots compare` [shoots and diffs](#shots) by default. Read from the worktree's own file, trusted or not: it names pages and selectors and runs nothing. |
 | `login` | object | [Dev users](#login) a worktree can be logged in as, and the script that logs one in. |
+| `review_button` | boolean | Add a [Review in Shipyard button](/guides/review-a-pr#the-review-in-shipyard-button) to the description of each PR opened from the project's worktrees. Off by default; from the repository's file it applies once the box trusts it. |
 
 ### `services`
 
@@ -159,6 +160,7 @@ A location's effective config is the repository's file, then its kit's
 | `services`, `agents`, `flows` | By `name` or `id`: a later one replaces, new ones are added |
 | `hooks` | Added up: the file's, the kit's, then the box's |
 | `login` | Whole: the later one's script and users replace the earlier one's |
+| `review_button` | The later one wins if set (`false` too); with none set, the team's `team.json` decides |
 
 Only the effective flows run: a flow replaced by `id` never does, and a
 replacement with `enabled: false` switches the flow off on that box.

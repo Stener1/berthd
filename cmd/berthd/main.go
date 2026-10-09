@@ -395,6 +395,10 @@ func serve(b boxHome, args []string) error {
 	// once merged, closed or idle.
 	bx.Reviews = &box.ReviewStore{Path: filepath.Join(b.dir, "reviews.json")}
 	go bx.RunReviewSweeps(ctx)
+	// The "Review in Shipyard" button on PRs opened from worktrees of
+	// projects that turn it on.
+	bx.ReviewButtons = &box.ReviewButtons{Path: filepath.Join(b.dir, "review-buttons.json")}
+	go bx.RunReviewButtons(ctx)
 	bx.Mount(s)
 	bx.ResumeTeams()
 	// Hooks that ran while berthd was down, in order, before anything new.
