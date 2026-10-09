@@ -33,6 +33,27 @@ type TeamSetupRequest struct {
 	// allows it: op is never signed in or called for them; Keys holds the
 	// values typed for them instead, and those left blank are missing.
 	SkipOnePassword bool `json:"skip_onepassword,omitempty"`
+	// Use says, per project (its id, or its repo for Repos), which clone
+	// already on the box to use instead of cloning: a folder there, or ""
+	// for a fresh clone. A project left out gets the box's default: a
+	// Shipyard location of the same repo if there is one, else a clone.
+	Use map[string]string `json:"use,omitempty"`
+}
+
+// applyUse sets what the engineer chose for a project's clone.
+func applyUse(plan *box.TeamProjectPlan, use map[string]string) {
+	path, ok := use[plan.ID]
+	if !ok {
+		path, ok = use[plan.Repo]
+	}
+	if !ok {
+		return
+	}
+	if path == "" {
+		plan.Fresh = true
+		return
+	}
+	plan.Use = path
 }
 
 var errTeamChanged = errors.New("the team setup changed since you reviewed it; review it again")
@@ -47,6 +68,9 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 			return box.TeamBundle{}, nil, cleanup, errors.New("pick repos from an org's name, not a link")
 		}
 		tb, err := a.repoBundle(ctx, g, src.Owner, req.Repos)
+		for i := range tb.Projects {
+			applyUse(&tb.Projects[i], req.Use)
+		}
 		return tb, nil, cleanup, err
 	}
 	if req.Commit == "" {
@@ -102,6 +126,7 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 		if p.Init != "" {
 			plan.Init = cleanInside(p.Init)
 		}
+		applyUse(&plan, req.Use)
 		if v.Source == "kit" && tp.kit != nil {
 			in, err := kitInstall(tp.kit.info)
 			if err != nil {
@@ -151,11 +176,19 @@ func (a *Agent) teamBundle(ctx context.Context, g ghCLI, src team.Source, req Te
 
 var nonTeamID = regexp.MustCompile(`[^a-z0-9-]+`)
 
+// repoTeamID is the team id of an org's repos set up without a .berth.
+func repoTeamID(org string) string {
+	return strings.Trim(nonTeamID.ReplaceAllString(strings.ToLower(org), "-"), "-")
+}
+
+// repoProjectID is a picked repo's project id.
+func repoProjectID(name string) string { return team.URLSafeName(name) }
+
 // repoBundle sets up repositories an org has without a .berth: no box
 // steps but the box's GitHub sign-in, and each repository's own config,
 // trusted as shown in the picker.
 func (a *Agent) repoBundle(ctx context.Context, g ghCLI, org string, repos []string) (box.TeamBundle, error) {
-	id := strings.Trim(nonTeamID.ReplaceAllString(strings.ToLower(org), "-"), "-")
+	id := repoTeamID(org)
 	if id == "" {
 		return box.TeamBundle{}, fmt.Errorf("%q is not a GitHub org name", org)
 	}
@@ -181,7 +214,7 @@ func (a *Agent) repoBundle(ctx context.Context, g ghCLI, org string, repos []str
 		name := strings.SplitN(r.FullName, "/", 2)[1]
 		// The project's id names it on the box, in every worktree's URL:
 		// acme.com is acme-com there, cloned to ~/code/acme.com all the same.
-		id := team.URLSafeName(name)
+		id := repoProjectID(name)
 		if id == "" || seen[id] {
 			continue
 		}
@@ -251,6 +284,34 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 		a.publish(Event{Type: "team.accepted", Data: map[string]any{"org": org, "team": tb.ID, "box": req.Box, "commit": tb.Commit}})
 		writeJSON(w, http.StatusOK, st)
 	})
+	// pull fast-forwards a clone the page found that is behind: a separate
+	// button, never part of adopting it.
+	mux.HandleFunc("POST /v1/team/{org}/pull", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Box  string `json:"box"`
+			Repo string `json:"repo"`
+			Path string `json:"path"`
+		}
+		if !decodeBody(w, r, &req) {
+			return
+		}
+		src, err := team.ParseSource(r.PathValue("org"))
+		if err != nil || req.Box == "" {
+			writeError(w, http.StatusBadRequest, "say which box, repo and folder")
+			return
+		}
+		id := repoTeamID(src.Owner)
+		if acc, _ := a.accepted(src); acc != nil {
+			id = acc.ID
+		}
+		a.sync()
+		var c box.ExistingClone
+		if err := a.postToBox(r.Context(), req.Box, http.MethodPost, "/v1/team/"+url.PathEscape(id)+"/pull", map[string]string{"repo": req.Repo, "path": req.Path}, &c); err != nil {
+			writeBoxError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, c)
+	})
 	mux.HandleFunc("POST /v1/team/{org}/retry", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Box  string `json:"box"`
@@ -265,7 +326,7 @@ func (a *Agent) teamSetupRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		id := strings.Trim(nonTeamID.ReplaceAllString(strings.ToLower(src.Owner), "-"), "-")
+		id := repoTeamID(src.Owner)
 		if acc, _ := a.accepted(src); acc != nil {
 			id = acc.ID
 			if req.Box == "" {

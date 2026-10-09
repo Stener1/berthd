@@ -928,6 +928,15 @@ function SetupMark({ box, wt }: { box: string; wt: Worktree }) {
   // Setup and archive failures share a category; the title tells them apart.
   const failed = useNotifications((s) => s.notes.find((n) => n.category === "setupFailed" && !n.resolved && n.box === box && n.path === wt.path));
   if (wt.setting_up) return <span className="shrink-0 text-[10px] text-muted-foreground">{WORKTREE_WORDS["setting-up"].lower}</span>;
+  if (wt.setup_on_open && !failed) {
+    return (
+      <Tip label="It was there before Shipyard set this repo up. Its setup runs the first time you open a terminal or start an agent in it; its files are as you left them.">
+        <span data-testid="setup-on-open" className="shrink-0 text-[10px] text-muted-foreground">
+          set up on first open
+        </span>
+      </Tip>
+    );
+  }
   if (!failed) return null;
   const archive = failed.title.startsWith("Archiving");
   return (

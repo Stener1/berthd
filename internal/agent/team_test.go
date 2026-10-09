@@ -598,3 +598,60 @@ func TestSkippingOnePasswordNeverReachesOp(t *testing.T) {
 		t.Fatalf("skipping a required 1Password: %d %s", code, body)
 	}
 }
+
+func TestThePageSeesClonesTheBoxHasAndChoosesWhichToUse(t *testing.T) {
+	acmeGitHub(t)
+	b := newBox(t)
+	var asked url.Values
+	b.server.Handle("GET /v1/team/{id}/existing", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = r.URL.Query()
+		json.NewEncoder(w).Encode(box.ExistingResult{Looked: []string{"~/code", "~/work"}, Projects: []box.ExistingProject{
+			{ID: "web", Repo: "acme/web", Path: "~/code/web", Clones: []box.ExistingClone{{Path: "/home/dev/work/acme-web", Display: "~/work/acme-web", Branch: "feat/x", Dirty: 3}}},
+			{ID: "api", Repo: "acme/api", Path: "~/code/api", Clones: []box.ExistingClone{}},
+		}})
+	}))
+	var got box.TeamBundle
+	b.server.Handle("POST /v1/team", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = box.TeamBundle{}
+		json.Unmarshal(raw, &got)
+		json.NewEncoder(w).Encode(box.TeamStatus{ID: got.ID, Phase: "steps", Steps: []box.TeamStepStatus{}, Projects: []box.TeamProjectStatus{}, KeysSet: []string{}})
+	}))
+	a := startAgent(t, b.pairLaptop())
+	tok := uiToken(t, a)
+	eventually(t, "box online", func() bool { return stateOf(t, a) == StateOnline })
+	st, _ := a.client.Status(context.Background())
+	boxName := st.Boxes[0].Name
+
+	_, body := uiCall(t, a, http.MethodGet, "/v1/team/acme?box="+url.QueryEscape(boxName), tok)
+	var v TeamView
+	if err := json.Unmarshal([]byte(body), &v); err != nil || v.Commit == nil {
+		t.Fatalf("view: %s", body)
+	}
+	// The box was asked about the projects this account can read.
+	if p := strings.Join(asked["project"], " "); !strings.Contains(p, "web:acme/web:~/code/web") || strings.Contains(p, "acme/secret") {
+		t.Fatalf("asked the box about %q", p)
+	}
+	var web TeamProjectView
+	for _, p := range v.Projects {
+		if p.ID == "web" {
+			web = p
+		}
+	}
+	if len(web.Existing) != 1 || web.Existing[0].Display != "~/work/acme-web" || web.Existing[0].Dirty != 3 || v.Scanned == nil || len(v.Scanned.Looked) != 2 {
+		t.Fatalf("web's clones: %+v scanned %+v", web.Existing, v.Scanned)
+	}
+	// The choice goes to the box with the setup: web uses the clone, api
+	// is cloned fresh, tools is left to the box.
+	code, body := uiPost(t, a, "/v1/team/acme/setup", tok, TeamSetupRequest{Box: boxName, Commit: v.Commit.Short, Use: map[string]string{"web": "~/work/acme-web", "api": ""}})
+	if code != 200 {
+		t.Fatalf("setup: %d %s", code, body)
+	}
+	plans := map[string]box.TeamProjectPlan{}
+	for _, p := range got.Projects {
+		plans[p.ID] = p
+	}
+	if plans["web"].Use != "~/work/acme-web" || plans["web"].Fresh || !plans["api"].Fresh || plans["api"].Use != "" || plans["tools"].Fresh || plans["tools"].Use != "" {
+		t.Fatalf("plans: %+v", plans)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,6 +72,10 @@ type Worktree struct {
 	// Parent is the path of the worktree whose agent handed this one off,
 	// for clients to nest it under (worktreeparents.go).
 	Parent string `json:"parent,omitempty"`
+	// SetupOnOpen marks a worktree the repository had before Team setup
+	// adopted it: its per-worktree setup runs the first time a terminal or
+	// an agent starts there (firstopen.go).
+	SetupOnOpen bool `json:"setup_on_open,omitempty"`
 }
 
 var (
@@ -107,6 +112,9 @@ type savedLocation struct {
 	// Parents are the worktrees handed off from another, child path to
 	// parent path (worktreeparents.go).
 	Parents map[string]string `json:"parents,omitempty"`
+	// FirstOpen are worktrees set up the first time they are opened, by
+	// path (firstopen.go).
+	FirstOpen []string `json:"first_open,omitempty"`
 }
 
 func (l *Locations) Add(ctx context.Context, name, path string) (Location, error) {
@@ -400,6 +408,7 @@ func describe(ctx context.Context, s savedLocation) Location {
 	loc.Worktrees = parseWorktrees(out, s.Path)
 	for i := range loc.Worktrees {
 		loc.Worktrees[i].Title = s.Titles[loc.Worktrees[i].Path]
+		loc.Worktrees[i].SetupOnOpen = slices.Contains(s.FirstOpen, loc.Worktrees[i].Path)
 	}
 	withParents(loc.Worktrees, s.Parents)
 	return loc

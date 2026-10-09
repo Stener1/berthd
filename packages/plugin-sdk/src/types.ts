@@ -110,6 +110,9 @@ export interface Worktree {
   // The path of the worktree whose agent handed this one off, to nest it
   // under; another worktree of the same location.
   parent?: string;
+  // A worktree the repo had before Team setup adopted it: its setup runs
+  // the first time a terminal or an agent starts there.
+  setup_on_open?: boolean;
 }
 
 export interface Scripts {

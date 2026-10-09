@@ -11,6 +11,16 @@ again.
 
 ## Unreleased
 
+- **Team setup uses the clones you already have.** Before cloning a repo,
+  Shipyard looks for one on the box: a project you added already, or a
+  clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,
+  reading nothing else). The page shows "Found ~/work/acme-web … · Use this
+  / Clone a fresh copy", and using it changes nothing in it: no checkout,
+  stash, reset or pull, and your `.env` and uncommitted changes stay as
+  they are. Its existing worktrees show in the sidebar and are set up the
+  first time you open each. `berth team setup … --use web=PATH` does the
+  same from the command line. See
+  [repositories you already cloned](/guides/team-setup#repositories-you-already-cloned).
 - **Open a worktree logged in as a dev user.** A kit, or a project's
   config, can name a login script and the users it logs in (`"login":
   {"script", "users", "any"}`). The Browser tab's **Log in as…** menu and ⌘K
