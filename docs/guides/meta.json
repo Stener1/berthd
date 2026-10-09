@@ -17,6 +17,7 @@
     "project-config",
     "kits",
     "team-setup",
+    "review-a-pr",
     "secrets",
     "task-templates",
     "agent-integrations",

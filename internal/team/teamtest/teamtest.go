@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -143,6 +144,54 @@ func (g *GitHub) Repo(slug string, files map[string]string, o Repo) string {
 	}
 	mark("berth-private", o.Private)
 	mark("berth-noaccess", o.NoAccess)
+	return strings.TrimSpace(g.git(work, "rev-parse", "HEAD"))
+}
+
+// PR is a pull request's metadata, as gh pr view tells it.
+type PR struct {
+	Title       string `json:"title"`
+	Author      string `json:"author"`
+	Association string `json:"association"`
+	// State is OPEN (the default), CLOSED or MERGED.
+	State string `json:"state,omitempty"`
+	// Cross and HeadRepo make it a fork's.
+	Cross      bool   `json:"cross,omitempty"`
+	HeadRepo   string `json:"head_repo,omitempty"`
+	HeadBranch string `json:"head_branch,omitempty"`
+	Draft      bool   `json:"draft,omitempty"`
+}
+
+// PR opens (or moves on) pull request n of slug: a commit with files on top
+// of main, or of its head so far when it has one, at refs/pull/<n>/head.
+// It returns the head commit.
+func (g *GitHub) PR(slug string, n int, pr PR, files map[string]string) string {
+	g.t.Helper()
+	bare := g.Bare(slug)
+	work := g.t.TempDir()
+	g.git("", "clone", "-q", bare, work)
+	ref := "refs/pull/" + strconv.Itoa(n) + "/head"
+	if g.try("--git-dir", bare, "rev-parse", "--verify", "-q", ref) {
+		g.git(work, "fetch", "-q", "origin", ref)
+		g.git(work, "checkout", "-q", "FETCH_HEAD")
+	}
+	for p, c := range files {
+		full := filepath.Join(work, filepath.FromSlash(p))
+		if c == "" {
+			os.Remove(full)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	g.git(work, "add", "-A")
+	g.git(work, "-c", "user.name=dana", "-c", "user.email=dana@acme.test", "commit", "-q", "--allow-empty", "-m", "PR "+strconv.Itoa(n))
+	g.git(work, "push", "-q", "-f", "origin", "HEAD:"+ref)
+	if pr.State == "" {
+		pr.State = "OPEN"
+	}
+	os.MkdirAll(filepath.Join(bare, "pulls"), 0o755)
+	b, _ := json.Marshal(pr)
+	os.WriteFile(filepath.Join(bare, "pulls", strconv.Itoa(n)+".json"), b, 0o644)
 	return strings.TrimSpace(g.git(work, "rev-parse", "HEAD"))
 }
 

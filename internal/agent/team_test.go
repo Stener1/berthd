@@ -386,6 +386,11 @@ func TestSetupSendsTheReviewedCommitToTheBoxAndTrustsAtIt(t *testing.T) {
 	if web.Env["STRIPE_KEY"] != "op://Dev/Stripe/key" || web.Env["MAIL_KEY"] != "SG.mine" || len(web.Env) != 3 {
 		t.Fatalf("web env: %v", web.Env)
 	}
+	// The box learns which keys are the engineer's own, which a pull
+	// request opened for review never gets.
+	if len(web.Ask) != 1 || web.Ask[0] != "MAIL_KEY" {
+		t.Fatalf("web ask: %v", web.Ask)
+	}
 	api := plans["api"]
 	if api.Kit == nil || api.Kit.Kit.ID != "acme-api" || api.Kit.Hash != v.Projects[1].Kit.Hash || api.Init != "box/init-api.sh" {
 		t.Fatalf("api: %+v", api)

@@ -192,6 +192,7 @@ as shown, `--untrust` stops running it.
 | `config` | object | A `.berth/config.json`, validated by the same rules. |
 | `login` | object | The same as `config.login`, at the top for short kits; set one or the other. |
 | `files` | object | Small files inline, `{ "scripts/setup.sh": "…" }`. Paths stay inside the kit. |
+| `watch` | array | The repository's files that change how the kit sets a worktree up, as globs (`*` within a folder, `**` any folders): `["prisma/**", "scripts/setup/*"]`. A pull request that changes one says so on its [review sheet](/guides/review-a-pr). |
 
 A kit's files are copied to each box it is applied to, and
 `$BERTH_KIT_DIR` points at them. Files starting with `#!` are made

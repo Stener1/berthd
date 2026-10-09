@@ -27,6 +27,8 @@ const refreshes: [prefix: string, parts: BoxPart[]][] = [
   ["agent.", ["sessions", "stats"]],
   // A task is a new worktree and the agent in it.
   ["task.", ["locations", "sessions"]],
+  // A PR review opened, moved on or removed: its worktree and its mark.
+  ["review.", ["locations"]],
   // Agent CLIs added or found on the box: the agents it offers.
   ["agents.", ["info"]],
 ];

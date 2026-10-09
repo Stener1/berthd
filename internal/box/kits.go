@@ -32,6 +32,11 @@ type Kit struct {
 	// the box user's login shell finds them (logintools.go).
 	Requires []KitRequirement `json:"requires,omitempty"`
 	Config   RepoConfig       `json:"config"`
+	// Watch are the repository's files that change how the kit sets a
+	// worktree up (globs, ** for any folders: "prisma/**",
+	// "scripts/setup/*"), so a pull request changing them says so on its
+	// review sheet.
+	Watch []string `json:"watch,omitempty"`
 	// Login may sit at the top of kit.json too; it is config.login.
 	Login *LoginConfig `json:"login,omitempty"`
 	// Files are small files carried in kit.json itself, path → content, so
@@ -58,6 +63,7 @@ type InstalledKit struct {
 	Hash        string     `json:"hash,omitempty"`
 	Dir         string     `json:"dir"`
 	Config      RepoConfig `json:"config"`
+	Watch       []string   `json:"watch,omitempty"`
 	InstalledAt time.Time  `json:"installed_at"`
 }
 
@@ -154,7 +160,7 @@ func (b *Box) InstallKit(ctx context.Context, location string, in KitInstall) (K
 		return KitResult{}, err
 	}
 
-	installed := InstalledKit{ID: k.ID, Name: k.Name, Version: k.Version, Source: in.Source, Hash: in.Hash, Dir: dir, Config: k.Config, InstalledAt: time.Now().UTC()}
+	installed := InstalledKit{ID: k.ID, Name: k.Name, Version: k.Version, Source: in.Source, Hash: in.Hash, Dir: dir, Config: k.Config, Watch: k.Watch, InstalledAt: time.Now().UTC()}
 	if err := b.Locations.setKit(location, &installed); err != nil {
 		return KitResult{}, err
 	}
