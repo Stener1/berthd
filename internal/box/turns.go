@@ -95,6 +95,9 @@ type SessionState struct {
 	// for while it waits, when its hooks said.
 	Queued int  `json:"queued,omitempty"`
 	Ask    *Ask `json:"ask,omitempty"`
+	// Unfinished is a finished turn turn check read as work still going on
+	// without the agent: a build, a deploy, a check, or a later time.
+	Unfinished bool `json:"unfinished,omitempty"`
 }
 
 func (t Turn) open() bool {
@@ -172,6 +175,9 @@ type sessTrack struct {
 	// SoftWait marks a wait turn check read into a finished turn: it shows
 	// as waiting, but the agent takes prompts as if finished.
 	SoftWait bool `json:"soft_wait,omitempty"`
+	// Unfinished marks a finished turn turn check read as work still going
+	// on: it shows as working, but the agent takes prompts as finished.
+	Unfinished bool `json:"unfinished,omitempty"`
 
 	inbox []inboxItem
 	// screen polling, owned by the poller
@@ -393,7 +399,7 @@ func (t *Turns) newTurn(s *sessTrack, state, origin string) *Turn {
 }
 
 func (s *sessTrack) set(state string, e events.Event) {
-	s.State, s.Since, s.Seq, s.SoftWait = state, e.Time, e.Seq, false
+	s.State, s.Since, s.Seq, s.SoftWait, s.Unfinished = state, e.Time, e.Seq, false, false
 }
 
 func (s *sessTrack) end(tr *Turn, state string, e events.Event) {
@@ -646,9 +652,13 @@ func (t *Turns) agentEvent(e events.Event) {
 	switch e.Type {
 	case adapters.Ready:
 		// Turn check's "unfinished, not yours": only on the turn end it was
-		// about, as for its waits below.
-		if source == "turncheck" && (s.State != "finished" || s.Seq != seqOf(e.Data["seq"])) {
-			return
+		// about, as for its waits below. The turn stays finished.
+		if source == "turncheck" {
+			if cur != nil || s.State != "finished" || s.Seq != seqOf(e.Data["seq"]) {
+				return
+			}
+			s.Unfinished = true
+			break
 		}
 		if cur == nil {
 			s.set("idle", e)
@@ -843,7 +853,7 @@ func (t *Turns) Track(sess Session) SessionState {
 }
 
 func (s *sessTrack) snapshot() SessionState {
-	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox)}
+	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox), Unfinished: s.Unfinished}
 	if tr := s.current(); tr != nil {
 		out.Turn = tr.ID
 		if n := len(tr.Waits); tr.State == "waiting" && n > 0 && tr.Waits[n-1].End.IsZero() && tr.Waits[n-1].Ask != nil {

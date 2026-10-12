@@ -156,10 +156,12 @@ classifier on Vercel AI Gateway, with prompt training disallowed. An agent
 that asks you something, or is blocked, shows as
 **Needs you** (`agent.waiting` with `source: "turncheck"` and Jev's
 `choice`), and notifications follow; it still takes prompts as if done, so
-held prompts and other agents' reports are delivered. One that stopped with
-its work unfinished (a build still going, something to happen first, or work
-it picks up by itself) shows as **Idle** (`agent.ready` with
-`source: "turncheck"`): neither done nor yours to answer. Anything else (done,
+held prompts and other agents' reports are delivered. One that stopped while
+its work goes on without it (a build still going, something to happen first,
+or work it picks up by itself) shows as **Working** (`agent.ready` with
+`source: "turncheck"`): the session stays `finished` with `unfinished: true`,
+so it takes prompts and ends waits as done, and Done holds only work that is
+done. Anything else (done,
 an answer under 65% sure, a failed request, no answer in 10 seconds, or you
 prompting again first) leaves it **Done**; no other model is asked. Paste
 your AI Gateway key in Settings → Agents; it is kept on the box, readable

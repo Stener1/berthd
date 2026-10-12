@@ -58,6 +58,10 @@ type Session struct {
 	// hooks, when they said.
 	Queued int  `json:"queued,omitempty"`
 	Ask    *Ask `json:"ask,omitempty"`
+	// Unfinished is set on a finished agent that turn check read as still
+	// at work without it: waiting on a build, a deploy, a check, or a later
+	// time, to pick up by itself.
+	Unfinished bool `json:"unfinished,omitempty"`
 	// Service is set on a worktree service's own terminal (a service with
 	// "terminal": true): the service's name, kept as @berth_service. It is
 	// never an agent, whatever it runs.

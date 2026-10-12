@@ -431,7 +431,7 @@ func (b *Box) enrich(ctx context.Context, all []Session) []Session {
 				s.AgentState, s.StateSince = st.State, st.Since
 			}
 			s.Turn, s.StateSeq, s.Fidelity = st.Turn, st.Seq, st.Fidelity
-			s.Queued = st.Queued
+			s.Queued, s.Unfinished = st.Queued, st.Unfinished && s.AgentState == "finished"
 			if s.AgentState == "waiting" {
 				s.Ask = st.Ask
 				var choices []AskChoice

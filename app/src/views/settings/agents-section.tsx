@@ -213,7 +213,7 @@ function TurnCheck({ boxes }: { boxes: string[] }) {
   return (
     <SettingsGroup
       title="Turn check"
-      description="When an agent's turn ends, ask Jev whether it stopped to ask you something (Needs you) or with its work unfinished (Idle). When on, the box sends the turn's last prompt and reply to the checker (Vercel AI Gateway by default)."
+      description="When an agent's turn ends, ask Jev whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply to the checker (Vercel AI Gateway by default)."
     >
       {boxes.map((b) => {
         const st = cfg[b];

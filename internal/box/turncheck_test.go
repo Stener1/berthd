@@ -148,24 +148,37 @@ func TestTurnCheckMakesATurnThatAsksWait(t *testing.T) {
 	}
 }
 
-// The agent stopped with its work unfinished ("the build is still compiling,
-// I'll come back"): not done, not a question. It reads as idle, and only on
-// the turn end it was about.
-func TestTurnCheckReadsUnfinishedWorkAsIdle(t *testing.T) {
+// The agent stopped while its work goes on ("the build is still compiling,
+// I'll come back"): not done, not a question. The turn stays finished, so it
+// takes prompts and ends waits as done, but is marked unfinished, so it shows
+// as working rather than done; only on the turn end it was about.
+func TestTurnCheckMarksWorkStillGoingOnUnfinished(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Run the suite", "Backend operators are in place. Checking how enumOptions is used elsewhere…", jevSays("working", 0.92))
 	endTurn(bus, sess)
 	waitCall(t, calls)
+	unfinished := func() bool { st, _ := b.Turns.State(sess.Name); return st.Unfinished }
 	deadline := time.Now().Add(5 * time.Second)
-	for stateNow(t, b, sess.Name) != "idle" {
+	for !unfinished() {
 		if time.Now().After(deadline) {
-			t.Fatalf("state %s, want idle", stateNow(t, b, sess.Name))
+			t.Fatal("the verdict was not taken")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	if got := stateNow(t, b, sess.Name); got != "finished" || !b.Turns.Ready(sess.Name) {
+		t.Fatalf("state %s, ready %v: want finished and ready for a prompt", got, b.Turns.Ready(sess.Name))
+	}
+	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || !got.Unfinished {
+		t.Fatalf("the session reads %s, unfinished %v", got.AgentState, got.Unfinished)
+	}
+	// Its next turn starts afresh: no longer unfinished.
+	hook(bus, adapters.Started, sess.Name, sess.Dir, "claude", "signal", "prompt")
+	if unfinished() {
+		t.Fatal("still unfinished once a new turn started")
+	}
 	end := hook(bus, adapters.Finished, sess.Name, sess.Dir, "claude")
 	bus.Publish(events.Event{Type: adapters.Ready, Data: map[string]any{"session": sess.Name, "path": sess.Dir, "source": "turncheck", "seq": end.Seq - 1}})
-	if got := stateNow(t, b, sess.Name); got != "finished" {
-		t.Fatalf("a verdict on an older turn was taken: %s", got)
+	if got := stateNow(t, b, sess.Name); got != "finished" || unfinished() {
+		t.Fatalf("a verdict on an older turn was taken: %s, unfinished %v", got, unfinished())
 	}
 }
 

@@ -102,7 +102,8 @@ func (b *Box) Review(ctx context.Context, all bool) ([]ReviewItem, error) {
 		if s.Agent == "" || s.Exited {
 			continue
 		}
-		if !all && s.AgentState != "finished" && s.AgentState != "waiting" {
+		// Work turn check read as still going on is not ready for review yet.
+		if !all && (s.AgentState != "finished" && s.AgentState != "waiting" || s.Unfinished) {
 			continue
 		}
 		loc, wt, ok := b.worktreeAt(ctx, s.Dir)
