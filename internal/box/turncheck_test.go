@@ -41,9 +41,9 @@ func checkedBox(t *testing.T, enabled bool, prompt, reply string, answer http.Ha
 		answer(w, r)
 	}))
 	t.Cleanup(jev.Close)
-	old := jevURL
-	jevURL = jev.URL + "/v1/evaluate"
-	t.Cleanup(func() { jevURL = old })
+	oldJev, oldDecisions := jevURL, decisionsURL
+	jevURL, decisionsURL = jev.URL+"/v1/evaluate", jev.URL+"/v1/decisions"
+	t.Cleanup(func() { jevURL, decisionsURL = oldJev, oldDecisions })
 
 	var bx *Box
 	c, bus := servedBox(t, func(b *Box) {
@@ -54,7 +54,7 @@ func checkedBox(t *testing.T, enabled bool, prompt, reply string, answer http.Ha
 		b.TurnCheck = &TurnCheck{Path: filepath.Join(t.TempDir(), "turncheck.json"), settle: 10 * time.Millisecond, timeout: 300 * time.Millisecond}
 		bx = b
 	})
-	bx.TurnCheck.save(TurnCheckConfig{Enabled: enabled, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"})
+	bx.TurnCheck.save(TurnCheckConfig{Enabled: enabled, Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"})
 	call(t, c, "POST", "/v1/locations", "", map[string]string{"name": "shop", "path": gitRepo(t)}, nil)
 	call(t, c, "POST", "/v1/locations/shop/worktrees", "", WorktreeRequest{Name: "fix"}, nil)
 	var sess Session
@@ -250,15 +250,15 @@ func TestTurnCheckSendsTheTurnsEndsToJev(t *testing.T) {
 	}
 }
 
-// Another server that speaks Jev's shape, such as a self-hosted laya-serve:
-// its own model, no AI Gateway options, and not the key pasted for AI
+// Laya's laya-serve (or another server that speaks Jev's shape): its own
+// URL and model, no AI Gateway options, and not the key pasted for AI
 // Gateway.
 func TestTurnCheckAsksTheServerItIsGiven(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("needs_input", 0.9))
 	own := strings.TrimSuffix(jevURL, "/v1/evaluate") + "/v1/systemone"
 	b.TurnCheck.KeyPath = filepath.Join(t.TempDir(), "turncheck.key")
 	os.WriteFile(b.TurnCheck.KeyPath, []byte("vck_pasted_value\n"), 0o600)
-	b.TurnCheck.save(TurnCheckConfig{Enabled: true, URL: own, Model: "multilingual"})
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderLaya, URL: own, Model: "multilingual"})
 	endTurn(bus, sess)
 	c := waitCall(t, calls)
 	if _, has := c.body["providerOptions"]; has || c.path != "/v1/systemone" || c.body["model"] != "multilingual" || c.auth != "" {
@@ -294,19 +294,23 @@ func TestTurnCheckSettingsHoldOnlyAReference(t *testing.T) {
 		b.TurnCheck = tc
 	})
 	var bad map[string]string
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true}, &bad); status != 400 {
+	// No provider is picked for you, and AI Gateway needs a key.
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Model: "typesafe-ai/jev", Key: "env://BERTH_TEST_JEV_KEY"}, &bad); status != 400 || !strings.Contains(bad["error"], "who checks") {
+		t.Fatalf("on without a provider: %d %v", status, bad)
+	}
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Model: "typesafe-ai/jev"}, &bad); status != 400 {
 		t.Fatalf("on without a key: %d", status)
 	}
 	// No model is picked for you.
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY"}, &bad); status != 400 || !strings.Contains(bad["error"], "model") {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY"}, &bad); status != 400 || !strings.Contains(bad["error"], "model") {
 		t.Fatalf("on without a model: %d %v", status, bad)
 	}
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "vck_live_secret", Model: "typesafe-ai/jev"}, &bad); status != 400 || strings.Contains(bad["error"], "vck_live_secret") {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Key: "vck_live_secret", Model: "typesafe-ai/jev"}, &bad); status != 400 || strings.Contains(bad["error"], "vck_live_secret") {
 		t.Fatalf("a key that is not a reference: %d %v", status, bad)
 	}
 	ch, stop := bus.Subscribe()
 	defer stop()
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"}, nil); status != 200 {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"}, nil); status != 200 {
 		t.Fatalf("put: %d", status)
 	}
 	if e := <-ch; e.Type != "turncheck.changed" || e.Data["enabled"] != true {
@@ -326,36 +330,126 @@ func TestTurnCheckSettingsHoldOnlyAReference(t *testing.T) {
 	if file, _ := os.ReadFile(tc.Path); strings.Contains(string(file), "the-real-key-value") {
 		t.Fatal("the value is on disk")
 	}
-	// A server of your own may need no key; its URL must be http(s).
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, URL: "http://127.0.0.1:8000/v1/systemone", Model: "multilingual"}, nil); status != 200 {
-		t.Fatalf("own server without a key: %d", status)
+	// Laya needs no key and no model; its URL must be http(s).
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Provider: ProviderLaya, URL: "http://127.0.0.1:8000/v1/systemone"}, nil); status != 200 {
+		t.Fatalf("Laya without a key: %d", status)
 	}
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, URL: "file:///etc/passwd", Model: "multilingual"}, nil); status != 400 {
-		t.Fatalf("a file URL: %d", status)
-	}
-	// A key goes to AI Gateway alone, over https or not.
-	for _, u := range []string{"http://example.com/v1/evaluate", "https://example.com/v1/evaluate", "https://ai-gateway.vercel.sh.example.com/v1/evaluate"} {
-		if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: u, Model: "multilingual"}, nil); status != 400 {
-			t.Fatalf("a key to %s: %d", u, status)
+	for _, bad := range []TurnCheckConfig{
+		{Enabled: true, Provider: ProviderLaya},
+		{Enabled: true, Provider: ProviderLaya, URL: "file:///etc/passwd"},
+		{Enabled: true, Provider: "anthropic", Model: "m"},
+		// A key goes only to AI Gateway or OpenAI, at their own URL.
+		{Enabled: true, Provider: ProviderLaya, Key: "env://BERTH_TEST_JEV_KEY", URL: "https://example.com/v1/systemone"},
+		{Enabled: true, Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY", URL: "https://example.com/v1/evaluate", Model: "typesafe-ai/jev"},
+		{Enabled: true, Provider: ProviderOpenAI, Key: "env://BERTH_TEST_JEV_KEY", URL: "https://api.openai.com.example.com/v1/decisions", Model: "gpt-6-luna"},
+	} {
+		if status := call(t, c, "PUT", "/v1/turncheck", "", bad, nil); status != 400 {
+			t.Fatalf("%+v: %d", bad, status)
 		}
+	}
+	// A reference set for one provider isn't kept for another.
+	var st TurnCheckStatus
+	call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"}, nil)
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Provider: ProviderOpenAI, Key: "env://BERTH_TEST_JEV_KEY", Model: "gpt-6-luna"}, &st); status != 200 || st.Key != "" {
+		t.Fatalf("switching provider: %d %+v", status, st)
 	}
 }
 
 // The simple way: a key pasted in Settings, kept on the box (0600) and
 // never answered.
-// A key goes to AI Gateway alone. turncheck.json is a file on the box, so
-// an agent could name its own server there with a reference to a secret:
-// that server is never asked, and the secret never resolved for it.
-func TestTurnCheckSendsAKeyOnlyToTheGateway(t *testing.T) {
+// A key goes only to its provider's own URL. turncheck.json is a file on
+// the box, so an agent could name its own server there with a reference to
+// a secret: as a Laya server it is never asked, and a hosted provider
+// ignores a URL and asks its own.
+func TestTurnCheckSendsAKeyOnlyToItsProvider(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("needs_input", 0.9))
 	own := strings.TrimSuffix(jevURL, "/v1/evaluate") + "/collect"
 	for _, u := range []string{own, strings.Replace(own, "http:", "https:", 1)} {
-		b.TurnCheck.save(TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: u, Model: "typesafe-ai/jev"})
+		b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderLaya, Key: "env://BERTH_TEST_JEV_KEY", URL: u})
 		endTurn(bus, sess)
 		time.Sleep(300 * time.Millisecond)
 		if len(calls) != 0 {
 			t.Fatalf("%s was asked: %+v", u, <-calls)
 		}
+	}
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Key: "env://BERTH_TEST_JEV_KEY", URL: own, Model: "typesafe-ai/jev"})
+	endTurn(bus, sess)
+	if c := waitCall(t, calls); c.path != "/v1/evaluate" {
+		t.Fatalf("asked %s", c.path)
+	}
+}
+
+// OpenAI's Decisions API: one choice question over the turn as one text,
+// with OpenAI's key, and its answer read for the probability of its choice.
+func TestTurnCheckAsksOpenAIDecisions(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Both are in. Should the filter default to AND or OR?", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"answers":[{"type":"choice","name":"status","choice":"needs_input","probabilities":[{"value":"needs_input","probability":0.88},{"value":"done","probability":0.12}],"confidence":0.8}]}`)
+	})
+	t.Setenv("BERTH_TEST_OPENAI_KEY", "sk-openai-test")
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderOpenAI, Key: "env://BERTH_TEST_OPENAI_KEY", Model: "gpt-6-luna"})
+	ch, stop := bus.Subscribe()
+	defer stop()
+	endTurn(bus, sess)
+	c := waitCall(t, calls)
+	qs, _ := c.body["questions"].([]any)
+	q, _ := qs[0].(map[string]any)
+	choices, _ := q["choices"].([]any)
+	input, _ := c.body["input"].(string)
+	if c.path != "/v1/decisions" || c.auth != "Bearer sk-openai-test" || c.body["model"] != "gpt-6-luna" || q["type"] != "choice" || q["name"] != "status" || len(choices) != len(jevCriteria) {
+		t.Fatalf("asked %s with %q: %v", c.path, c.auth, c.body)
+	}
+	if !strings.Contains(input, "User request: Add the operators") || !strings.Contains(input, "Agent response: Both are in.") {
+		t.Fatalf("input %q", input)
+	}
+	if _, has := c.body["providerOptions"]; has {
+		t.Fatal("AI Gateway's options sent to OpenAI")
+	}
+	deadline := time.After(5 * time.Second)
+	for e := (events.Event{}); e.Type != adapters.Waiting; {
+		select {
+		case e = <-ch:
+		case <-deadline:
+			t.Fatal("no agent.waiting")
+		}
+	}
+}
+
+func TestDecisionsVerdictReadsOnlyItsAnswer(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"answers":[{"type":"choice","name":"status","choice":"blocked","probabilities":[{"value":"blocked","probability":0.7}]}]}`: "blocked 0.70",
+		`{"answers":[{"type":"refusal","name":"status"}]}`:                                                                           "unusable",
+		`{"answers":[{"type":"choice","name":"status","choice":"maybe","probabilities":[{"value":"maybe","probability":0.9}]}]}`:     "unusable",
+		`{"answers":[{"type":"choice","name":"status","choice":"done","probabilities":[{"value":"working","probability":0.9}]}]}`:    "unusable",
+		`{"answers":[{"type":"choice","name":"other","choice":"done","probabilities":[{"value":"done","probability":0.9}]}]}`:        "unusable",
+		`{"answers":{"status":{"choice":"done"}}}`:                                                                                   "unusable",
+	} {
+		choice, p, err := decisionsVerdict([]byte(in))
+		got := "unusable"
+		if err == nil {
+			got = fmt.Sprintf("%s %.2f", choice, p)
+		}
+		if got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Each provider keeps its own key: one pasted for AI Gateway is never sent
+// to OpenAI.
+func TestTurnCheckKeepsAKeyPerProvider(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("needs_input", 0.9))
+	b.TurnCheck.KeyPath = filepath.Join(t.TempDir(), "turncheck.key")
+	os.WriteFile(b.TurnCheck.KeyPath, []byte("vck_gateway_key\n"), 0o600)
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderOpenAI, Model: "gpt-6-luna"})
+	endTurn(bus, sess)
+	time.Sleep(300 * time.Millisecond)
+	if len(calls) != 0 {
+		t.Fatalf("OpenAI was asked with %q", (<-calls).auth)
+	}
+	os.WriteFile(filepath.Join(filepath.Dir(b.TurnCheck.KeyPath), "turncheck-openai.key"), []byte("sk-openai-pasted\n"), 0o600)
+	endTurn(bus, sess)
+	if c := waitCall(t, calls); c.path != "/v1/decisions" || c.auth != "Bearer sk-openai-pasted" {
+		t.Fatalf("asked %s with %q", c.path, c.auth)
 	}
 }
 
@@ -400,7 +494,7 @@ func TestTurnCheckIsSetFromALaptopOnly(t *testing.T) {
 	if err := c.Call(ctx, "GET", "/v1/turncheck", nil, nil); err == nil || !strings.Contains(err.Error(), "paired laptop") {
 		t.Fatalf("get: %v", err)
 	}
-	err := c.Call(ctx, "PUT", "/v1/turncheck", TurnCheckConfig{Enabled: true, Key: "op://Private/aws/secret", URL: "https://collect.example/v1/evaluate", Model: "m"}, nil)
+	err := c.Call(ctx, "PUT", "/v1/turncheck", TurnCheckConfig{Enabled: true, Provider: ProviderLaya, URL: "https://collect.example/v1/systemone"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "paired laptop") {
 		t.Fatalf("put: %v", err)
 	}
@@ -421,7 +515,7 @@ func TestTurnCheckKeepsAPastedKeyOnTheBox(t *testing.T) {
 		}
 	}
 	var st TurnCheckStatus
-	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, &st); status != 200 || !st.KeySet || !st.Enabled {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "provider": "gateway", "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, &st); status != 200 || !st.KeySet || !st.Enabled {
 		t.Fatalf("pasting a key: %d %+v", status, st)
 	}
 	if fi, err := os.Stat(tc.KeyPath); err != nil || fi.Mode().Perm() != 0o600 {
@@ -434,11 +528,11 @@ func TestTurnCheckKeepsAPastedKeyOnTheBox(t *testing.T) {
 		t.Fatalf("get: %s", raw)
 	}
 	// The last one set wins: a reference removes the pasted key.
-	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key": "env://BERTH_TEST_JEV_KEY"}, &st); status != 200 || st.KeySet {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "provider": "gateway", "model": "typesafe-ai/jev", "key": "env://BERTH_TEST_JEV_KEY"}, &st); status != 200 || st.KeySet {
 		t.Fatalf("a reference: %d %+v", status, st)
 	}
-	call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, nil)
-	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": false, "remove_key": true}, &st); status != 200 || st.KeySet {
+	call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "provider": "gateway", "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, nil)
+	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": false, "provider": "gateway", "remove_key": true}, &st); status != 200 || st.KeySet {
 		t.Fatalf("remove: %d %+v", status, st)
 	}
 	if _, err := os.Stat(tc.KeyPath); !os.IsNotExist(err) {
@@ -450,7 +544,7 @@ func TestTurnCheckSendsThePastedKey(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("done", 0.9))
 	b.TurnCheck.KeyPath = filepath.Join(t.TempDir(), "turncheck.key")
 	os.WriteFile(b.TurnCheck.KeyPath, []byte("vck_pasted_value\n"), 0o600)
-	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Model: "typesafe-ai/jev"})
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Model: "typesafe-ai/jev"})
 	endTurn(bus, sess)
 	if c := waitCall(t, calls); c.auth != "Bearer vck_pasted_value" {
 		t.Fatalf("authorization %q", c.auth)

@@ -32,18 +32,19 @@ again.
   off, earlier turns and permission mode included. Needs the box upgraded.
 
 - **Turn check: a turn that ends on a question needs you.** Off by
-  default; turned on for a box in Settings → Agents, with a model you
-  choose on Vercel AI Gateway (or another server that answers the same
-  evaluate request), berthd asks about each finished Claude Code or Codex
-  turn: one that asks you something or is blocked shows as **Needs you**,
-  one that stopped while its work goes on without it (a build, a deploy, a
-  later time) as **Working**. A failed or unsure answer, or work that is
-  done, leaves it Done. It sends the turn's prompt (its first 4,000
-  characters, looked for further back when a long turn's tool calls pushed
-  it out of view), the end of its reply and the session's title, with
-  anything that looks like a secret taken out first. It is set only from a
-  paired laptop, never from the box's own socket, and a key goes to AI
-  Gateway alone.
+  default; turned on for a box in Settings → Agents, berthd asks a
+  decision model you pick about each finished Claude Code or Codex turn:
+  **Jev on Vercel AI Gateway**, **OpenAI Decisions** (`gpt-6-luna`), or
+  **Laya** on a server you run, which keeps turns on your machines. One
+  that asks you something or is blocked shows as **Needs you**, one that
+  stopped while its work goes on without it (a build, a deploy, a later
+  time) as **Working**. A failed or unsure answer, or work that is done,
+  leaves it Done. It sends the turn's prompt (its first 4,000 characters,
+  looked for further back when a long turn's tool calls pushed it out of
+  view), the end of its reply and the session's title, with anything that
+  looks like a secret taken out first. It is set only from a paired laptop,
+  never from the box's own socket; each provider's key is kept apart and
+  goes only to that provider.
 
 - **Labs: a structured Claude agent opens in Claude Code's own terminal and
   comes back.** The Terminal switch on a structured agent's pane stops it and

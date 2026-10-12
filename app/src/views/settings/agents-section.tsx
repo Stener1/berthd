@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
 import { useMinute } from "@/components/notifications/notification-center";
+import { PickOne } from "@/components/pick-one";
 import { SkillsPanel } from "@/components/skills/skills-panel";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -17,7 +18,7 @@ import { openUrl } from "@/lib/open-url";
 import { endSnooze, setRemind, useSkillsNotice } from "@/lib/skills-notice";
 import { neverRemind, untilText } from "@/lib/skills-notice-model";
 import { NONE, useStore } from "@/lib/store";
-import { ownServer, type TurnCheckChange, type TurnCheckConfig, type TurnCheckStatus, turnCheckApi } from "@/lib/turncheck";
+import { layaPlaceholder, type TurnCheckChange, type TurnCheckConfig, type TurnCheckProvider, type TurnCheckStatus, turnCheckApi, turnCheckProviders, turnCheckReady } from "@/lib/turncheck";
 import { Segmented } from "@/views/settings/controls";
 import { Code, SettingsGroup, SettingsPage, SettingsRow } from "@/views/settings/rows";
 
@@ -213,7 +214,7 @@ function TurnCheck({ boxes }: { boxes: string[] }) {
   return (
     <SettingsGroup
       title="Turn check"
-      description="When an agent's turn ends, ask a model you choose whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply, and the session's title, to Vercel AI Gateway, capped and with anything that looks like a secret taken out."
+      description="When an agent's turn ends, ask a decision model you choose whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply, and the session's title, to the provider you pick, capped and with anything that looks like a secret taken out."
     >
       {boxes.map((b) => {
         const st = cfg[b];
@@ -231,60 +232,103 @@ function TurnCheck({ boxes }: { boxes: string[] }) {
 }
 
 function TurnCheckBox({ box, st, busy, save }: { box: string; st: TurnCheckStatus; busy: boolean; save: (c: TurnCheckChange) => Promise<boolean> }) {
+  const p = st.provider;
+  const info = p ? turnCheckProviders[p] : undefined;
   const [value, setValue] = useState("");
   const [ref, setRef] = useState(st.key ?? "");
   useEffect(() => setRef(st.key ?? ""), [st.key]);
   const [model, setModel] = useState(st.model ?? "");
   useEffect(() => setModel(st.model ?? ""), [st.model]);
-  const config: TurnCheckConfig = { enabled: st.enabled, key: st.key, url: st.url, model: st.model };
-  const hasKey = st.key_set || !!st.key || ownServer(st);
-  const keyText = st.key ? <Code>{st.key}</Code> : st.key_set ? `Key saved on ${box}` : hasKey ? "Your own server" : "Save a key first";
+  const [server, setServer] = useState(st.url ?? "");
+  useEffect(() => setServer(st.url ?? ""), [st.url]);
+  const config: TurnCheckConfig = { enabled: st.enabled, provider: p, key: st.key, url: st.url, model: st.model };
+  const description = !p
+    ? "Choose who checks turns"
+    : p === "laya"
+      ? st.url
+        ? <Code>{st.url}</Code>
+        : "Set your Laya server's address"
+      : !st.model
+        ? "Choose a model"
+        : st.key
+          ? <Code>{st.key}</Code>
+          : st.key_set
+            ? `${info?.keyName} key saved on ${box}`
+            : "Save a key first";
+  const choose = (v: TurnCheckProvider | "") => {
+    // Off until turned on again: a new provider is a new place turns go.
+    if (v && v !== p) void save({ enabled: false, provider: v, model: turnCheckProviders[v].model });
+  };
   return (
     <div data-testid={`turncheck-${box}`}>
-      <SettingsRow label={box} description={st.model ? keyText : "Choose a model first"}>
+      <SettingsRow label={box} description={description}>
         {st.key_set && (
-          <Button size="xs" variant="ghost" disabled={busy} onClick={() => void save({ ...config, enabled: st.enabled && (!!st.key || ownServer(st)), remove_key: true })}>
+          <Button size="xs" variant="ghost" disabled={busy} onClick={() => void save({ ...config, enabled: st.enabled && !!st.key, remove_key: true })}>
             Remove
           </Button>
         )}
-        <Switch checked={st.enabled} disabled={busy || (!st.enabled && (!hasKey || !st.model))} onCheckedChange={(v) => void save({ ...config, enabled: v })} aria-label={`Check finished turns on ${box}`} />
+        <Switch checked={st.enabled} disabled={busy || (!st.enabled && !turnCheckReady(st))} onCheckedChange={(v) => void save({ ...config, enabled: v })} aria-label={`Check finished turns on ${box}`} />
       </SettingsRow>
       <div className="flex flex-col gap-2 px-4 pb-3">
-        {/* No model is chosen for you: your transcripts, your choice. */}
-        <div className="flex gap-2">
-          <Input size="sm" value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model, as AI Gateway names it" className="font-mono text-xs [&_input::placeholder]:font-sans" aria-label={`Model that checks turns on ${box}`} />
-          <Button size="sm" variant="outline" disabled={busy || model.trim() === (st.model ?? "")} onClick={() => void save({ ...config, enabled: st.enabled && !!model.trim(), model: model.trim() || undefined })}>
-            Save
-          </Button>
-        </div>
-        {!st.key_set && (
+        {/* No provider or model is chosen for you: your transcripts, your choice. */}
+        <PickOne<TurnCheckProvider | ""> label={`Who checks turns on ${box}`} value={p ?? ""} options={(Object.keys(turnCheckProviders) as TurnCheckProvider[]).map((v) => ({ value: v, label: turnCheckProviders[v].label }))} onChange={choose} />
+        {p === "laya" && (
           <div className="flex gap-2">
-            <Input size="sm" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Paste your key" className="font-mono [&_input::placeholder]:font-sans" aria-label={`AI Gateway key for ${box}`} />
-            <Button size="sm" variant="outline" disabled={busy || !value.trim()} onClick={async () => (await save({ ...config, key: undefined, key_value: value.trim() })) && setValue("")}>
+            <Input size="sm" value={server} onChange={(e) => setServer(e.target.value)} placeholder={layaPlaceholder} className="font-mono text-xs" aria-label={`Laya server on ${box}`} />
+            <Button size="sm" variant="outline" disabled={busy || server.trim() === (st.url ?? "")} onClick={() => void save({ ...config, enabled: st.enabled && !!server.trim(), url: server.trim() || undefined })}>
               Save
             </Button>
           </div>
         )}
-        <p className="text-muted-foreground text-xs">
-          <button type="button" onClick={() => void openUrl("https://vercel.com/docs/ai-gateway")} className="underline underline-offset-2 hover:text-foreground">
-            Create an API key in Vercel's AI Gateway
-          </button>
-          . It stays on {box}, readable by you alone, and goes only to AI Gateway.
-        </p>
-        <Collapsible>
-          <CollapsibleTrigger className="group flex items-center gap-1.5 text-muted-foreground text-xs hover:text-foreground">
-            <ChevronRightIcon className="size-3.5 transition-transform group-data-panel-open:rotate-90" />
-            Use a secret reference instead
-          </CollapsibleTrigger>
-          <CollapsiblePanel>
-            <div className="mt-2 flex gap-2">
-              <Input size="sm" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="op://vault/item/field or env://NAME" className="font-mono text-xs" aria-label={`Key reference on ${box}`} />
-              <Button size="sm" variant="outline" disabled={busy || ref.trim() === (st.key ?? "")} onClick={() => void save({ ...config, key: ref.trim() || undefined })}>
-                Save
-              </Button>
-            </div>
-          </CollapsiblePanel>
-        </Collapsible>
+        {p && (
+          <div className="flex gap-2">
+            <Input size="sm" value={model} onChange={(e) => setModel(e.target.value)} placeholder={p === "laya" ? "Model (optional): english, multilingual or typed-decisions" : "Model"} className="font-mono text-xs [&_input::placeholder]:font-sans" aria-label={`Model that checks turns on ${box}`} />
+            <Button size="sm" variant="outline" disabled={busy || model.trim() === (st.model ?? "")} onClick={() => void save({ ...config, enabled: st.enabled && (p === "laya" || !!model.trim()), model: model.trim() || undefined })}>
+              Save
+            </Button>
+          </div>
+        )}
+        {p === "laya" && (
+          <p className="text-muted-foreground text-xs">
+            Run{" "}
+            <button type="button" onClick={() => void openUrl("https://huggingface.co/convaiinnovations/laya")} className="underline underline-offset-2 hover:text-foreground">
+              Laya
+            </button>
+            's <Code>laya-serve</Code> (<Code>pip install "laya[serve]"</Code>) where {box} can reach it. Turns stay on your machines, and it gets no key. One on {box} itself or a private address needs that address in <Code>allow_outbound</Code> in <Code>~/.berth/network.json</Code>.
+          </p>
+        )}
+        {info?.keyName && (
+          <>
+            {!st.key_set && (
+              <div className="flex gap-2">
+                <Input size="sm" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Paste your key" className="font-mono [&_input::placeholder]:font-sans" aria-label={`${info.keyName} key for ${box}`} />
+                <Button size="sm" variant="outline" disabled={busy || !value.trim()} onClick={async () => (await save({ ...config, key: undefined, key_value: value.trim() })) && setValue("")}>
+                  Save
+                </Button>
+              </div>
+            )}
+            <p className="text-muted-foreground text-xs">
+              <button type="button" onClick={() => info.keyLink && void openUrl(info.keyLink)} className="underline underline-offset-2 hover:text-foreground">
+                {info.keyHelp}
+              </button>
+              . It stays on {box}, readable by you alone, and goes only to {info.keyName}.
+            </p>
+            <Collapsible>
+              <CollapsibleTrigger className="group flex items-center gap-1.5 text-muted-foreground text-xs hover:text-foreground">
+                <ChevronRightIcon className="size-3.5 transition-transform group-data-panel-open:rotate-90" />
+                Use a secret reference instead
+              </CollapsibleTrigger>
+              <CollapsiblePanel>
+                <div className="mt-2 flex gap-2">
+                  <Input size="sm" value={ref} onChange={(e) => setRef(e.target.value)} placeholder="op://vault/item/field or env://NAME" className="font-mono text-xs" aria-label={`Key reference on ${box}`} />
+                  <Button size="sm" variant="outline" disabled={busy || ref.trim() === (st.key ?? "")} onClick={() => void save({ ...config, key: ref.trim() || undefined })}>
+                    Save
+                  </Button>
+                </div>
+              </CollapsiblePanel>
+            </Collapsible>
+          </>
+        )}
       </div>
     </div>
   );

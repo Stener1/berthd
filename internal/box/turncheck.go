@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,26 +30,31 @@ import (
 // asks you something ("go ahead?") or stopped with its work unfinished.
 // With turn check on, berthd reads the turn's last prompt and reply from
 // the agent's transcript (Claude Code's or Codex's), with the session's
-// title as its objective, and asks the model you chose on Vercel AI
-// Gateway's evaluate endpoint (Jev's request and answer) whether the agent
-// needs you. A confident yes is published as agent.waiting, so the session
-// shows as Needs you everywhere. Anything else (off, no key or model, a
-// failed, late or unsure answer) leaves the session finished: no other
-// model is asked. It is off by default, set only from a paired laptop, and
-// it is the one time berthd itself sends a session's words off the box:
-// capped, and with what looks like a secret taken out. Any server that
-// speaks the same request and answer can stand in for AI Gateway, such as
-// a self-hosted laya-serve; it never gets a key.
+// title as its objective, and asks the decision model you chose whether the
+// agent needs you: Jev on Vercel AI Gateway, OpenAI's Decisions API, or
+// Laya on a server you run. A confident yes is published as agent.waiting,
+// so the session shows as Needs you everywhere. Anything else (off, no
+// provider, key or model, a failed, late or unsure answer) leaves the
+// session finished: no other model is asked. It is off by default, set only
+// from a paired laptop, and it is the one time berthd itself sends a
+// session's words off the box: capped, and with what looks like a secret
+// taken out. A key goes only to the provider it was given for, at that
+// provider's own URL; a server of your own never gets one.
 
 // TurnCheckConfig is turncheck.json.
 type TurnCheckConfig struct {
 	Enabled bool `json:"enabled"`
-	// Key names the AI Gateway key as a secret reference (op://… or
+	// Provider is who checks a turn (ProviderGateway, ProviderOpenAI or
+	// ProviderLaya), with no default: you choose it.
+	Provider string `json:"provider,omitempty"`
+	// Key names the provider's key as a secret reference (op://… or
 	// env://NAME), never the key itself; without one, the key pasted in
-	// Settings (KeyPath) is used. Either goes to AI Gateway alone.
+	// Settings for that provider is used. Either goes to that provider's
+	// own URL alone.
 	Key string `json:"key,omitempty"`
-	// URL is where to ask; empty is AI Gateway. Model is which model, and
-	// has no default: you choose it.
+	// URL is a server of your own, for Laya; the hosted providers have
+	// their own. Model is which model: AI Gateway and OpenAI need one, and
+	// Laya picks its own when there is none.
 	URL   string `json:"url,omitempty"`
 	Model string `json:"model,omitempty"`
 }
@@ -60,8 +68,9 @@ type TurnCheckStatus struct {
 
 // TurnCheck classifies a box's finished turns, when turned on.
 type TurnCheck struct {
-	// Path is turncheck.json in ~/.berth; KeyPath the pasted key, in the
-	// box's state directory (0600).
+	// Path is turncheck.json in ~/.berth; KeyPath the key pasted for AI
+	// Gateway, in the box's state directory (0600), with OpenAI's beside it
+	// (keyPath).
 	Path, KeyPath string
 	Log           *log.Logger
 
@@ -73,11 +82,35 @@ type TurnCheck struct {
 	mu sync.Mutex
 }
 
-// jevGateway is AI Gateway's evaluate endpoint, and jevURL where a check
-// with no URL of its own goes (a test's server in tests).
-const jevGateway = "https://ai-gateway.vercel.sh/v1/evaluate"
+// The providers a turn can be checked by.
+const (
+	// ProviderGateway is Jev on Vercel AI Gateway's evaluate endpoint.
+	ProviderGateway = "gateway"
+	// ProviderOpenAI is OpenAI's Decisions API.
+	ProviderOpenAI = "openai"
+	// ProviderLaya is Laya's laya-serve (or another server that answers
+	// Jev's request) that you run, at the config's URL, with no key.
+	ProviderLaya = "laya"
+)
 
-var jevURL = jevGateway
+// jevGateway and openAIDecisions are the hosted providers' endpoints, and
+// jevURL and decisionsURL where a check asks them (a test's server in
+// tests).
+const (
+	jevGateway      = "https://ai-gateway.vercel.sh/v1/evaluate"
+	openAIDecisions = "https://api.openai.com/v1/decisions"
+)
+
+var jevURL, decisionsURL = jevGateway, openAIDecisions
+
+// keyed says whether a provider takes a key: the hosted ones, each at its
+// own URL.
+func keyed(provider string) bool {
+	return provider == ProviderGateway || provider == ProviderOpenAI
+}
+
+// providerName is how Settings and errors name a provider.
+var providerName = map[string]string{ProviderGateway: "AI Gateway", ProviderOpenAI: "OpenAI", ProviderLaya: "your Laya server"}
 
 const (
 	turnCheckTimeout = 10 * time.Second
@@ -108,14 +141,6 @@ var jevCriteria = map[string]string{
 	"idle":          "There is no clear active objective.",
 }
 
-// gateway says whether the config asks the default gateway, AI Gateway:
-// the one server a key goes to, and the one that takes providerOptions.
-// Another server may refuse fields it doesn't know, and gets no key, so a
-// URL put in turncheck.json can't collect one.
-func (cfg TurnCheckConfig) gateway() bool {
-	return cfg.URL == "" || cfg.URL == jevGateway
-}
-
 func (c *TurnCheck) load() TurnCheckConfig {
 	var cfg TurnCheckConfig
 	if b, err := os.ReadFile(c.Path); err == nil {
@@ -124,12 +149,29 @@ func (c *TurnCheck) load() TurnCheckConfig {
 	return cfg
 }
 
-// storedKey is the pasted key, or "" when there is none.
-func (c *TurnCheck) storedKey() string {
+// keyPath is where the key pasted for provider is kept, or "" for one
+// that takes none: each provider's apart, so a key is never sent to
+// another.
+func (c *TurnCheck) keyPath(provider string) string {
 	if c.KeyPath == "" {
 		return ""
 	}
-	b, err := os.ReadFile(c.KeyPath)
+	switch provider {
+	case ProviderGateway:
+		return c.KeyPath
+	case ProviderOpenAI:
+		return filepath.Join(filepath.Dir(c.KeyPath), "turncheck-openai.key")
+	}
+	return ""
+}
+
+// storedKey is the key pasted for provider, or "" when there is none.
+func (c *TurnCheck) storedKey(provider string) string {
+	path := c.keyPath(provider)
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -137,7 +179,8 @@ func (c *TurnCheck) storedKey() string {
 }
 
 func (c *TurnCheck) status() TurnCheckStatus {
-	return TurnCheckStatus{TurnCheckConfig: c.load(), KeySet: c.storedKey() != ""}
+	cfg := c.load()
+	return TurnCheckStatus{TurnCheckConfig: cfg, KeySet: c.storedKey(cfg.Provider) != ""}
 }
 
 func (c *TurnCheck) save(cfg TurnCheckConfig) error {
@@ -208,30 +251,37 @@ func (c *TurnCheck) check(ctx context.Context, b *Box, name string, seq int64) e
 		return nil
 	}
 	c.mu.Lock()
-	cfg, stored := c.load(), c.storedKey()
+	cfg := c.load()
+	stored := c.storedKey(cfg.Provider)
 	c.mu.Unlock()
 	if !cfg.Enabled {
 		return nil
 	}
-	if cfg.Model == "" {
-		return errors.New("no model is chosen")
-	}
-	// A key, pasted or a reference, goes to AI Gateway alone. Settings
-	// refuses a reference with another URL; the file may still say so.
+	// A key, pasted or a reference, goes only to the provider it is for,
+	// at that provider's own URL. Settings refuses a reference with a
+	// server of your own; the file may still say so.
 	var key string
 	switch {
-	case !cfg.gateway():
+	case cfg.Provider == ProviderLaya:
 		if cfg.Key != "" {
-			return errors.New("a key goes only to AI Gateway, and another server is set")
+			return errors.New("a key goes only to AI Gateway or OpenAI, and a server of your own is set")
 		}
-	case cfg.Key != "":
-		if key, err = b.secrets().Resolve(ctx, cfg.Key, LoadOpEnv(b.EnvFile), false); err != nil {
-			return fmt.Errorf("the key: %w", err)
+		if cfg.URL == "" {
+			return errors.New("no server is set")
 		}
-	default:
-		if key = stored; key == "" {
+	case keyed(cfg.Provider):
+		if cfg.Model == "" {
+			return errors.New("no model is chosen")
+		}
+		if cfg.Key != "" {
+			if key, err = b.secrets().Resolve(ctx, cfg.Key, LoadOpEnv(b.EnvFile), false); err != nil {
+				return fmt.Errorf("the key: %w", err)
+			}
+		} else if key = stored; key == "" {
 			return errors.New("no key is set")
 		}
+	default:
+		return errors.New("no provider is chosen")
 	}
 	prompt := lastPrompt(page.Items)
 	if prompt == "" {
@@ -245,7 +295,7 @@ func (c *TurnCheck) check(ctx context.Context, b *Box, name string, seq int64) e
 	if what := LooksLikeSecret([]byte(objective + "\n" + prompt + "\n" + reply)); what != "" {
 		return fmt.Errorf("the turn still holds %s", what)
 	}
-	choice, p, err := c.askJev(ctx, b, cfg, key, objective, prompt, reply)
+	choice, p, err := c.ask(ctx, b, cfg, key, objective, prompt, reply)
 	if err != nil {
 		return err
 	}
@@ -319,23 +369,21 @@ func itemOffset(id string) (int64, bool) {
 	return n, err == nil && n > 0
 }
 
-// askJev sends the turn to Jev (or the server cfg names) and returns its
-// choice and how sure it is. Errors never contain what was sent or
-// answered.
-func (c *TurnCheck) askJev(ctx context.Context, b *Box, cfg TurnCheckConfig, key, objective, prompt, reply string) (string, float64, error) {
-	ask := map[string]any{
-		"model": cfg.Model,
-		"state": map[string]string{
-			"session_objective": objective,
-			"user_request":      prompt,
-			"agent_response":    reply,
-		},
-		"questions": map[string]any{
-			"status": map[string]any{"type": "choice", "instructions": jevInstructions, "criteria": jevCriteria},
-		},
-	}
-	if cfg.gateway() {
-		ask["providerOptions"] = map[string]any{"gateway": map[string]any{"disallowPromptTraining": true}}
+// ask sends the turn to the provider cfg names and returns its choice and
+// how sure it is. Errors never contain what was sent or answered.
+func (c *TurnCheck) ask(ctx context.Context, b *Box, cfg TurnCheckConfig, key, objective, prompt, reply string) (string, float64, error) {
+	var (
+		to   string
+		ask  map[string]any
+		read func([]byte) (string, float64, error)
+	)
+	switch cfg.Provider {
+	case ProviderOpenAI:
+		to, ask, read = decisionsURL, decisionsRequest(cfg.Model, objective, prompt, reply), decisionsVerdict
+	case ProviderGateway:
+		to, ask, read = jevURL, jevRequest(cfg, objective, prompt, reply), jevVerdict
+	default:
+		to, ask, read = cfg.URL, jevRequest(cfg, objective, prompt, reply), jevVerdict
 	}
 	body, err := json.Marshal(ask)
 	if err != nil {
@@ -344,15 +392,12 @@ func (c *TurnCheck) askJev(ctx context.Context, b *Box, cfg TurnCheckConfig, key
 	timeout := orDefault(c.timeout, turnCheckTimeout)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, firstNonEmpty(cfg.URL, jevURL), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, to, bytes.NewReader(body))
 	if err != nil {
 		return "", 0, err
 	}
 	client := b.outboundPolicy().client(timeout)
 	if key != "" {
-		if u, err := url.Parse(cfg.URL); cfg.URL != "" && (err != nil || u.Scheme != "https") {
-			return "", 0, errors.New("a key goes only to an https URL")
-		}
 		req.Header.Set("Authorization", "Bearer "+key)
 		// A redirect is not followed with the key: it could lead anywhere.
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -373,7 +418,82 @@ func (c *TurnCheck) askJev(ctx context.Context, b *Box, cfg TurnCheckConfig, key
 	if resp.StatusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("the server answered %s", resp.Status)
 	}
-	return jevVerdict(answer)
+	return read(answer)
+}
+
+// jevRequest is the turn as Jev's request, for AI Gateway and for Laya.
+func jevRequest(cfg TurnCheckConfig, objective, prompt, reply string) map[string]any {
+	ask := map[string]any{
+		"state": map[string]string{
+			"session_objective": objective,
+			"user_request":      prompt,
+			"agent_response":    reply,
+		},
+		"questions": map[string]any{
+			"status": map[string]any{"type": "choice", "instructions": jevInstructions, "criteria": jevCriteria},
+		},
+	}
+	if cfg.Model != "" {
+		ask["model"] = cfg.Model
+	}
+	if cfg.Provider == ProviderGateway {
+		ask["providerOptions"] = map[string]any{"gateway": map[string]any{"disallowPromptTraining": true}}
+	}
+	return ask
+}
+
+// decisionsRequest is the same question for OpenAI's Decisions API: one
+// choice question over the turn, given as one text.
+func decisionsRequest(model, objective, prompt, reply string) map[string]any {
+	choices := make([]map[string]string, 0, len(jevCriteria))
+	for _, v := range slices.Sorted(maps.Keys(jevCriteria)) {
+		choices = append(choices, map[string]string{"value": v, "description": jevCriteria[v]})
+	}
+	return map[string]any{
+		"model": model,
+		"input": "Session objective: " + objective + "\n\nUser request: " + prompt + "\n\nAgent response: " + reply,
+		"questions": []map[string]any{{
+			"type": "choice", "name": "status", "choices": choices,
+			"instructions": strings.Replace(jevInstructions, "Treat the state as", "Treat the input as", 1),
+		}},
+	}
+}
+
+// decisionsVerdict reads the status answer of OpenAI's Decisions API: its
+// choice, and the probability it gave that choice.
+func decisionsVerdict(answer []byte) (string, float64, error) {
+	var doc struct {
+		Answers []struct {
+			Type          string `json:"type"`
+			Name          string `json:"name"`
+			Choice        string `json:"choice"`
+			Probabilities []struct {
+				Value       string  `json:"value"`
+				Probability float64 `json:"probability"`
+			} `json:"probabilities"`
+		} `json:"answers"`
+	}
+	if json.Unmarshal(answer, &doc) != nil {
+		return "", 0, errors.New("the answer is not a decision")
+	}
+	for _, a := range doc.Answers {
+		if a.Name != "status" {
+			continue
+		}
+		if a.Type == "refusal" {
+			return "", 0, errors.New("the model refused to answer")
+		}
+		if _, known := jevCriteria[a.Choice]; a.Type != "choice" || !known {
+			break
+		}
+		for _, p := range a.Probabilities {
+			if p.Value == a.Choice && p.Probability >= 0 && p.Probability <= 1 {
+				return a.Choice, p.Probability, nil
+			}
+		}
+		break
+	}
+	return "", 0, errors.New("the answer is not a decision")
 }
 
 // jevVerdict reads answers.status: its choice, and the probability of that
@@ -448,8 +568,17 @@ func (b *Box) putTurnCheck(w http.ResponseWriter, r *http.Request) error {
 	if req.KeyValue != "" {
 		req.Key = ""
 	}
-	removeKey := req.RemoveKey || (req.Key != "" && tc.storedKey() != "")
-	hasKey := req.KeyValue != "" || (!removeKey && tc.storedKey() != "")
+	req.Provider = strings.TrimSpace(req.Provider)
+	if _, ok := providerName[req.Provider]; req.Provider != "" && !ok {
+		return badRequest("the provider must be gateway, openai or laya")
+	}
+	if prev := tc.load(); prev.Provider != req.Provider && req.Key == prev.Key {
+		// A reference was given for the provider it was set with.
+		req.Key = ""
+	}
+	stored := tc.storedKey(req.Provider)
+	removeKey := req.RemoveKey || (req.Key != "" && stored != "")
+	hasKey := req.KeyValue != "" || (!removeKey && stored != "")
 	if req.Key != "" && !IsSecretRef(req.Key) {
 		// Not echoed: it may be the key itself.
 		return badRequest("the key must be a secret reference, op://vault/item/field or env://NAME, not the key itself")
@@ -468,25 +597,35 @@ func (b *Box) putTurnCheck(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Model) > 200 {
 		return badRequest("that model name is too long")
 	}
-	if req.Key != "" && !req.gateway() {
-		return badRequest("a key goes only to AI Gateway; another server gets none")
+	if req.Provider == "" && (req.Enabled || req.Key != "" || req.KeyValue != "") {
+		return badRequest("choose who checks turns: AI Gateway, OpenAI or your own Laya server")
 	}
-	if req.Enabled && req.Model == "" {
-		return badRequest("choose the model that checks turns")
+	if req.URL != "" && req.Provider != ProviderLaya {
+		return badRequest("a URL is only for a Laya server of your own; %s has its own", providerName[req.Provider])
 	}
-	if req.Enabled && req.Key == "" && !hasKey && req.gateway() {
-		return badRequest("turn check needs your AI Gateway key, or a reference to it")
+	if (req.Key != "" || req.KeyValue != "") && !keyed(req.Provider) {
+		return badRequest("a key goes only to AI Gateway or OpenAI; a server of your own gets none")
 	}
-	if req.KeyValue != "" && tc.KeyPath == "" {
+	if req.Enabled {
+		switch {
+		case req.Provider == ProviderLaya && req.URL == "":
+			return badRequest("turn check needs your Laya server's URL")
+		case keyed(req.Provider) && req.Model == "":
+			return badRequest("choose the model that checks turns")
+		case keyed(req.Provider) && req.Key == "" && !hasKey:
+			return badRequest("turn check needs your %s key, or a reference to it", providerName[req.Provider])
+		}
+	}
+	if req.KeyValue != "" && tc.keyPath(req.Provider) == "" {
 		return httpError{http.StatusNotImplemented, "this box cannot keep a key; use a secret reference"}
 	}
 	// What changes, never a key's value.
-	data := map[string]any{"enabled": req.Enabled, "url": req.URL, "model": req.Model, "key": req.Key, "key_pasted": req.KeyValue != "", "key_removed": removeKey}
+	data := map[string]any{"enabled": req.Enabled, "provider": req.Provider, "url": req.URL, "model": req.Model, "key": req.Key, "key_pasted": req.KeyValue != "", "key_removed": removeKey}
 	if err := b.before(r, "turncheck.change", data); err != nil {
 		return err
 	}
 	if req.KeyValue != "" {
-		if err := statefile.Write(tc.KeyPath, []byte(req.KeyValue+"\n")); err != nil {
+		if err := statefile.Write(tc.keyPath(req.Provider), []byte(req.KeyValue+"\n")); err != nil {
 			return errors.New("the key could not be saved on the box")
 		}
 	}
@@ -494,8 +633,8 @@ func (b *Box) putTurnCheck(w http.ResponseWriter, r *http.Request) error {
 	if err := tc.save(req.TurnCheckConfig); err != nil {
 		return err
 	}
-	if removeKey && tc.KeyPath != "" {
-		if err := os.Remove(tc.KeyPath); err != nil && !os.IsNotExist(err) {
+	if path := tc.keyPath(req.Provider); removeKey && path != "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

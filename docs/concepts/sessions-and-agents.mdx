@@ -148,35 +148,39 @@ approve a permission, the tool it allowed running says the agent is working
 again.
 
 An agent's hooks say its turn finished whether it is done or asks you
-something ("go ahead?"). **Turn check**,
-off by default and turned on per box in Settings → Agents, tells these
-apart for Claude Code and Codex: when a turn ends normally, berthd sends the
-turn's last prompt (looking back past a long turn's tool calls) and reply
-from the agent's transcript, and the session's title as its objective, to
-the model you choose on Vercel AI Gateway's evaluate endpoint, with prompt
-training disallowed. No model is chosen for you; one that answers Jev's
-evaluate request, such as `typesafe-ai/jev`, is needed. The prompt is capped
-at 4,000 characters, the reply at its last 12,000, and what looks like a
-secret is taken out of all three first. An agent
-that asks you something, or is blocked, shows as
-**Needs you** (`agent.waiting` with `source: "turncheck"` and the model's
-`choice`), and notifications follow; it still takes prompts as if done, so
-held prompts and other agents' reports are delivered. One that stopped while
-its work goes on without it (a build still going, something to happen first,
-or work it picks up by itself) shows as **Working** (`agent.ready` with
-`source: "turncheck"`): the session stays `finished` with `unfinished: true`,
-so it takes prompts and ends waits as done, and Done holds only work that is
-done. Anything else (done,
-an answer under 65% sure, a failed request, no answer in 10 seconds, or you
-prompting again first) leaves it **Done**; no other model is asked. Choose
-the model and paste your AI Gateway key in Settings → Agents, which only a
-paired laptop can change; the key is kept on the box, readable by you
-alone, and sent only to AI Gateway. A [secret reference](/guides/secrets)
-(`op://…`, or `env://NAME` from berthd's own environment) is the
-alternative. Any server that answers the same request can be set in
-`turncheck.json` with `url` (e.g. a self-hosted laya-serve); it never gets a
-key, and one on a private address needs it in `allow_outbound` in
-`~/.berth/network.json`.
+something ("go ahead?"). **Turn check**, off by default and turned on per
+box in Settings → Agents, tells these apart for Claude Code and Codex: when
+a turn ends normally, berthd sends the turn's last prompt (looking back past
+a long turn's tool calls) and reply from the agent's transcript, and the
+session's title as its objective, to the decision model you pick. Nothing
+is picked for you:
+
+| Provider | Where turns go | Key | Model |
+| --- | --- | --- | --- |
+| **Jev on AI Gateway** | Vercel AI Gateway's evaluate endpoint, prompt training disallowed | Your AI Gateway key | `typesafe-ai/jev` |
+| **OpenAI Decisions** | OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta) | Your OpenAI API key | `gpt-6-luna` |
+| **Laya, your own server** | [Laya](https://huggingface.co/convaiinnovations/laya)'s `laya-serve` (`pip install "laya[serve]"`), or another server that answers Jev's request, at the address you give | None | Optional: `english`, `multilingual` or `typed-decisions`; Laya picks one by itself |
+
+The prompt is capped at 4,000 characters, the reply at its last 12,000, and
+what looks like a secret is taken out of all three first. An agent that
+asks you something, or is blocked, shows as **Needs you**
+(`agent.waiting` with `source: "turncheck"` and the model's `choice`), and
+notifications follow; it still takes prompts as if done, so held prompts
+and other agents' reports are delivered. One that stopped while its work
+goes on without it (a build still going, something to happen first, or
+work it picks up by itself) shows as **Working** (`agent.ready` with
+`source: "turncheck"`): the session stays `finished` with
+`unfinished: true`, so it takes prompts and ends waits as done, and Done
+holds only work that is done. Anything else (done, an answer under 65%
+sure, a failed request, no answer in 10 seconds, or you prompting again
+first) leaves it **Done**; no other model is asked.
+
+Settings → Agents, which only a paired laptop can change, keeps a key per
+provider on the box, readable by you alone, and sends each only to its own
+provider; a [secret reference](/guides/secrets) (`op://…`, or `env://NAME`
+from berthd's own environment) is the alternative. Laya gets no key. A Laya
+server on the box itself or on a private address needs that address in
+`allow_outbound` in `~/.berth/network.json`.
 
 ### Turns
 

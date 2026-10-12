@@ -1,19 +1,23 @@
 import type { Client } from "@/lib/api";
 
-// Turn check (see internal/box/turncheck.go): when on, a box asks the model
-// you choose on Vercel AI Gateway (or the Jev-compatible server url names)
-// whether a finished turn needs you. A pasted key is kept on the box and
-// never comes back; key is only ever a secret reference. Only a paired
-// laptop reads or sets it.
+// Turn check (see internal/box/turncheck.go): when on, a box asks the
+// decision model you chose whether a finished turn needs you: Jev on Vercel
+// AI Gateway, OpenAI's Decisions API, or Laya on a server you run. A pasted
+// key is kept on the box, one per provider, and never comes back; key is
+// only ever a secret reference. Only a paired laptop reads or sets it.
+
+export type TurnCheckProvider = "gateway" | "openai" | "laya";
 
 export interface TurnCheckConfig {
   enabled: boolean;
+  provider?: TurnCheckProvider;
   key?: string;
   url?: string;
   model?: string;
 }
 
 export interface TurnCheckStatus extends TurnCheckConfig {
+  // Whether a key is kept for the chosen provider.
   key_set: boolean;
 }
 
@@ -27,10 +31,21 @@ export const turnCheckApi = {
   put: (c: Client, box: string, change: TurnCheckChange) => c.box<TurnCheckStatus>(box, "PUT", "turncheck", change),
 };
 
-const gateway = "https://ai-gateway.vercel.sh/v1/evaluate";
+// What Settings shows for each provider. model is the one it serves today,
+// filled in when you pick the provider; keyName and keyHelp are for the
+// hosted ones, which take a key. Laya takes none.
+export const turnCheckProviders: Record<TurnCheckProvider, { label: string; model?: string; keyName?: string; keyHelp?: string; keyLink?: string }> = {
+  gateway: { label: "Jev on AI Gateway", model: "typesafe-ai/jev", keyName: "AI Gateway", keyHelp: "Create an API key in Vercel's AI Gateway", keyLink: "https://vercel.com/docs/ai-gateway" },
+  openai: { label: "OpenAI Decisions", model: "gpt-6-luna", keyName: "OpenAI", keyHelp: "Create an OpenAI API key", keyLink: "https://platform.openai.com/api-keys" },
+  laya: { label: "Laya, your own server" },
+};
 
-// ownServer says whether a check asks a server other than AI Gateway, which
-// gets no key: by its URL, as the box decides.
-export function ownServer(c: TurnCheckConfig) {
-  return !!c.url && c.url !== gateway;
+export const layaPlaceholder = "http://127.0.0.1:8000/v1/systemone";
+
+// turnCheckReady says whether a box has all it needs to be turned on, as
+// the box decides.
+export function turnCheckReady(st: TurnCheckStatus) {
+  if (st.provider === "laya") return !!st.url;
+  if (st.provider === "gateway" || st.provider === "openai") return !!st.model && (st.key_set || !!st.key);
+  return false;
 }
