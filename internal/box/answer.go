@@ -487,7 +487,8 @@ func readForm(sc string) formView {
 		m := formRowRe.FindStringSubmatch(l)
 		if m == nil {
 			if len(f.rows) == 0 && !f.review {
-				words = append(words, l)
+				// Claude Code draws a question that wraps with a bar down its left.
+				words = append(words, strings.TrimPrefix(strings.TrimSpace(l), "│"))
 			}
 			continue
 		}
