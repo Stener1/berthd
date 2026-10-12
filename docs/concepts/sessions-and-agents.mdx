@@ -151,8 +151,9 @@ An agent's hooks say its turn finished whether it is done or asks you
 something ("go ahead?"). **Turn check**,
 off by default and turned on per box in Settings → Agents, tells these
 apart for Claude Code and Codex: when a turn ends normally, berthd sends the
-turn's last prompt and reply from the agent's transcript to Jev, a
-classifier on Vercel AI Gateway, with prompt training disallowed. An agent
+turn's last prompt (looking back past a long turn's tool calls) and reply
+from the agent's transcript, and the session's title as its objective, to
+Jev, a classifier on Vercel AI Gateway, with prompt training disallowed. An agent
 that asks you something, or is blocked, shows as
 **Needs you** (`agent.waiting` with `source: "turncheck"` and Jev's
 `choice`), and notifications follow; it still takes prompts as if done, so

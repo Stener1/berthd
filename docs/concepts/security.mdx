@@ -282,7 +282,7 @@ output. That data is only ever text:
   never puts them in an event.
 - [Turn check](/concepts/sessions-and-agents#agent-state), off by default,
   is the one time berthd sends a session's words off the box: each finished
-  turn's last prompt and reply, to Vercel AI Gateway (prompt training
+  turn's last prompt and reply and the session's title, to Vercel AI Gateway (prompt training
   disallowed) or the server set in `turncheck.json`. Its key, pasted (kept
   in the state directory, 0600) or a secret reference, is never answered or
   logged, and is sent only over https; a pasted key goes only to AI Gateway.

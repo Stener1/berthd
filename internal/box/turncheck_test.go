@@ -394,3 +394,29 @@ func TestTurnCheckSendsThePastedKey(t *testing.T) {
 		t.Fatalf("authorization %q", c.auth)
 	}
 }
+
+// A turn longer than a page of the transcript (here hundreds of tool calls)
+// still sends Jev its prompt, from further back, and the session's title as
+// the objective, so Jev never judges a reply on its own.
+func TestTurnCheckSendsTheLongTurnsPromptAndTheObjective(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, "Migrate the gateway", "Started", jevSays("done", 0.9))
+	if err := b.Sessions.SetTitle(context.Background(), sess.Name, "Migrate the MCP gateway"); err != nil {
+		t.Fatal(err)
+	}
+	rec := filepath.Join(transcript.ClaudeDir(sess.Dir), "conv.jsonl")
+	at := time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
+	line := func(v map[string]any) string { b, _ := json.Marshal(v); return string(b) + "\n" }
+	var lines strings.Builder
+	for i := range 200 {
+		id := fmt.Sprintf("t%d", i)
+		lines.WriteString(line(map[string]any{"type": "assistant", "timestamp": at, "message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Step %d", i)}, {"type": "tool_use", "id": id, "name": "Bash", "input": map[string]any{"command": "true"}}}}}))
+		lines.WriteString(line(map[string]any{"type": "user", "timestamp": at, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id, "content": "ok"}}}}))
+	}
+	lines.WriteString(line(map[string]any{"type": "assistant", "timestamp": at, "message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Migrated, and the old services are gone."}}}}))
+	appendTo(t, rec, lines.String())
+	endTurn(bus, sess)
+	state, _ := waitCall(t, calls).body["state"].(map[string]any)
+	if state["user_request"] != "Migrate the gateway" || state["session_objective"] != "Migrate the MCP gateway" || state["agent_response"] != "Migrated, and the old services are gone." {
+		t.Fatalf("state %v", state)
+	}
+}
