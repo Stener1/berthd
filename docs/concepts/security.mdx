@@ -282,10 +282,17 @@ output. That data is only ever text:
   never puts them in an event.
 - [Turn check](/concepts/sessions-and-agents#agent-state), off by default,
   is the one time berthd sends a session's words off the box: each finished
-  turn's last prompt and reply and the session's title, to Vercel AI Gateway (prompt training
-  disallowed) or the server set in `turncheck.json`. Its key, pasted (kept
-  in the state directory, 0600) or a secret reference, is never answered or
-  logged, and is sent only over https; a pasted key goes only to AI Gateway.
+  turn's last prompt (its first 4,000 characters) and the end of its reply
+  and the session's title, to the model you chose on Vercel AI Gateway
+  (prompt training disallowed) or the server set in `turncheck.json`.
+  Before anything goes, what looks like a secret is replaced with what kind
+  it was, by the same patterns that refuse an [artifact](/guides/artifacts);
+  a turn that still holds one isn't sent. It is set from a paired laptop
+  only: `GET` and `PUT /v1/turncheck` refuse the box's own socket, so an
+  agent on the box can't read where turns go or send them elsewhere. Its
+  key, pasted (kept in the state directory, 0600) or a secret reference, is
+  never answered or logged, and goes only to AI Gateway: a server named in
+  `turncheck.json` gets none, and a reference beside one is refused.
 
 ## The phone
 

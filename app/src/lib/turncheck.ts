@@ -1,9 +1,10 @@
 import type { Client } from "@/lib/api";
 
-// Turn check (see internal/box/turncheck.go): when on, a box asks Jev on
-// Vercel AI Gateway (or the Jev-compatible server url names) whether a
-// finished turn needs you. A pasted key is kept on the box and never comes
-// back; key is only ever a secret reference.
+// Turn check (see internal/box/turncheck.go): when on, a box asks the model
+// you choose on Vercel AI Gateway (or the Jev-compatible server url names)
+// whether a finished turn needs you. A pasted key is kept on the box and
+// never comes back; key is only ever a secret reference. Only a paired
+// laptop reads or sets it.
 
 export interface TurnCheckConfig {
   enabled: boolean;
@@ -26,13 +27,10 @@ export const turnCheckApi = {
   put: (c: Client, box: string, change: TurnCheckChange) => c.box<TurnCheckStatus>(box, "PUT", "turncheck", change),
 };
 
-// ownServer says whether a check asks a server other than AI Gateway,
-// which may need no key: by host name, as the box decides.
+const gateway = "https://ai-gateway.vercel.sh/v1/evaluate";
+
+// ownServer says whether a check asks a server other than AI Gateway, which
+// gets no key: by its URL, as the box decides.
 export function ownServer(c: TurnCheckConfig) {
-  if (!c.url) return false;
-  try {
-    return new URL(c.url).hostname.toLowerCase() !== "ai-gateway.vercel.sh";
-  } catch {
-    return true;
-  }
+  return !!c.url && c.url !== gateway;
 }

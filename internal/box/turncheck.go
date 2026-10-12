@@ -20,30 +20,33 @@ import (
 	"github.com/cosscom/shipyard/internal/integrations/adapters"
 	"github.com/cosscom/shipyard/internal/statefile"
 	"github.com/cosscom/shipyard/internal/transcript"
+	"github.com/cosscom/shipyard/internal/wire"
 )
 
 // Turn check: an agent's hooks say its turn finished whether it is done,
 // asks you something ("go ahead?") or stopped with its work unfinished.
 // With turn check on, berthd reads the turn's last prompt and reply from
 // the agent's transcript (Claude Code's or Codex's), with the session's
-// title as its objective, and asks Jev, a
-// classifier served by Vercel AI Gateway, whether the agent needs you. A
-// confident yes is published as agent.waiting, so the session shows as
-// Needs you everywhere. Anything else (off, no key, a failed, late or
-// unsure answer) leaves the session finished: no other model is asked.
-// It is off by default, and it is the one time berthd itself sends a
-// session's words off the box. Any server that speaks Jev's request and
-// answer can stand in for AI Gateway, such as a self-hosted laya-serve.
+// title as its objective, and asks the model you chose on Vercel AI
+// Gateway's evaluate endpoint (Jev's request and answer) whether the agent
+// needs you. A confident yes is published as agent.waiting, so the session
+// shows as Needs you everywhere. Anything else (off, no key or model, a
+// failed, late or unsure answer) leaves the session finished: no other
+// model is asked. It is off by default, set only from a paired laptop, and
+// it is the one time berthd itself sends a session's words off the box:
+// capped, and with what looks like a secret taken out. Any server that
+// speaks the same request and answer can stand in for AI Gateway, such as
+// a self-hosted laya-serve; it never gets a key.
 
 // TurnCheckConfig is turncheck.json.
 type TurnCheckConfig struct {
 	Enabled bool `json:"enabled"`
 	// Key names the AI Gateway key as a secret reference (op://… or
 	// env://NAME), never the key itself; without one, the key pasted in
-	// Settings (KeyPath) is used. Another server may need none.
+	// Settings (KeyPath) is used. Either goes to AI Gateway alone.
 	Key string `json:"key,omitempty"`
-	// URL and Model are where to ask and which model; empty is Jev
-	// through AI Gateway.
+	// URL is where to ask; empty is AI Gateway. Model is which model, and
+	// has no default: you choose it.
 	URL   string `json:"url,omitempty"`
 	Model string `json:"model,omitempty"`
 }
@@ -72,19 +75,19 @@ type TurnCheck struct {
 
 // jevGateway is AI Gateway's evaluate endpoint, and jevURL where a check
 // with no URL of its own goes (a test's server in tests).
-const (
-	jevGateway = "https://ai-gateway.vercel.sh/v1/evaluate"
-	jevModel   = "typesafe-ai/jev"
-)
+const jevGateway = "https://ai-gateway.vercel.sh/v1/evaluate"
 
 var jevURL = jevGateway
 
 const (
 	turnCheckTimeout = 10 * time.Second
-	// How much of the reply is sent: its end.
-	turnCheckReplyLimit = 12000
-	turnCheckMinP       = 0.65
-	maxJevAnswer        = 100 << 10
+	// How much is sent: the reply's end, the prompt's start and the
+	// title's start.
+	turnCheckReplyLimit  = 12000
+	turnCheckPromptLimit = 4000
+	turnCheckTitleLimit  = 300
+	turnCheckMinP        = 0.65
+	maxJevAnswer         = 100 << 10
 )
 
 // turnCheckVerdicts are the answers that change how a finished turn reads: a
@@ -105,15 +108,12 @@ var jevCriteria = map[string]string{
 	"idle":          "There is no clear active objective.",
 }
 
-// gateway says whether the config asks AI Gateway, which needs a key and
-// is the one server that takes providerOptions; another may refuse fields
-// it doesn't know, and may need no key.
+// gateway says whether the config asks the default gateway, AI Gateway:
+// the one server a key goes to, and the one that takes providerOptions.
+// Another server may refuse fields it doesn't know, and gets no key, so a
+// URL put in turncheck.json can't collect one.
 func (cfg TurnCheckConfig) gateway() bool {
-	if cfg.URL == "" {
-		return true
-	}
-	u, err := url.Parse(cfg.URL)
-	return err == nil && strings.EqualFold(u.Hostname(), "ai-gateway.vercel.sh")
+	return cfg.URL == "" || cfg.URL == jevGateway
 }
 
 func (c *TurnCheck) load() TurnCheckConfig {
@@ -213,15 +213,22 @@ func (c *TurnCheck) check(ctx context.Context, b *Box, name string, seq int64) e
 	if !cfg.Enabled {
 		return nil
 	}
+	if cfg.Model == "" {
+		return errors.New("no model is chosen")
+	}
+	// A key, pasted or a reference, goes to AI Gateway alone. Settings
+	// refuses a reference with another URL; the file may still say so.
 	var key string
 	switch {
+	case !cfg.gateway():
+		if cfg.Key != "" {
+			return errors.New("a key goes only to AI Gateway, and another server is set")
+		}
 	case cfg.Key != "":
 		if key, err = b.secrets().Resolve(ctx, cfg.Key, LoadOpEnv(b.EnvFile), false); err != nil {
 			return fmt.Errorf("the key: %w", err)
 		}
-	case cfg.gateway():
-		// A pasted key goes to AI Gateway alone; another server gets one
-		// only through a reference.
+	default:
 		if key = stored; key == "" {
 			return errors.New("no key is set")
 		}
@@ -230,7 +237,15 @@ func (c *TurnCheck) check(ctx context.Context, b *Box, name string, seq int64) e
 	if prompt == "" {
 		prompt = earlierPrompt(agent, path, sess.Dir, page)
 	}
-	choice, p, err := c.askJev(ctx, b, cfg, key, sess.Title, prompt, reply)
+	// What looks like a secret is taken out before anything is cut, so a
+	// secret cut in two is never half sent.
+	objective := clipRunes(RedactSecrets(sess.Title), turnCheckTitleLimit)
+	prompt = clipRunes(RedactSecrets(prompt), turnCheckPromptLimit)
+	reply = tail(RedactSecrets(reply), turnCheckReplyLimit)
+	if what := LooksLikeSecret([]byte(objective + "\n" + prompt + "\n" + reply)); what != "" {
+		return fmt.Errorf("the turn still holds %s", what)
+	}
+	choice, p, err := c.askJev(ctx, b, cfg, key, objective, prompt, reply)
 	if err != nil {
 		return err
 	}
@@ -309,11 +324,11 @@ func itemOffset(id string) (int64, bool) {
 // answered.
 func (c *TurnCheck) askJev(ctx context.Context, b *Box, cfg TurnCheckConfig, key, objective, prompt, reply string) (string, float64, error) {
 	ask := map[string]any{
-		"model": firstNonEmpty(cfg.Model, jevModel),
+		"model": cfg.Model,
 		"state": map[string]string{
 			"session_objective": objective,
 			"user_request":      prompt,
-			"agent_response":    tail(reply, turnCheckReplyLimit),
+			"agent_response":    reply,
 		},
 		"questions": map[string]any{
 			"status": map[string]any{"type": "choice", "instructions": jevInstructions, "criteria": jevCriteria},
@@ -383,9 +398,14 @@ func jevVerdict(answer []byte) (string, float64, error) {
 	return st.Choice, p, nil
 }
 
-// getTurnCheck and putTurnCheck are for paired laptops. A pasted key is
-// written to the box and never answered, logged or put in an event.
+// getTurnCheck and putTurnCheck are for paired laptops only: an agent on
+// the box reaches its socket, and must not be able to read where turns go
+// or send them somewhere else. A pasted key is written to the box and
+// never answered, logged or put in an event.
 func (b *Box) getTurnCheck(w http.ResponseWriter, r *http.Request) error {
+	if wire.IsLocal(r.Context()) {
+		return turnCheckFromLaptop
+	}
 	if b.TurnCheck == nil {
 		return httpError{http.StatusNotImplemented, "this box cannot check turns"}
 	}
@@ -393,7 +413,12 @@ func (b *Box) getTurnCheck(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+var turnCheckFromLaptop = httpError{http.StatusForbidden, "turn check is set from a paired laptop, in Settings → Agents"}
+
 func (b *Box) putTurnCheck(w http.ResponseWriter, r *http.Request) error {
+	if wire.IsLocal(r.Context()) {
+		return turnCheckFromLaptop
+	}
 	if b.TurnCheck == nil {
 		return httpError{http.StatusNotImplemented, "this box cannot check turns"}
 	}
@@ -443,8 +468,11 @@ func (b *Box) putTurnCheck(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Model) > 200 {
 		return badRequest("that model name is too long")
 	}
-	if (req.Key != "" || hasKey && req.gateway()) && strings.HasPrefix(strings.ToLower(req.URL), "http:") {
-		return badRequest("a key goes only to an https URL")
+	if req.Key != "" && !req.gateway() {
+		return badRequest("a key goes only to AI Gateway; another server gets none")
+	}
+	if req.Enabled && req.Model == "" {
+		return badRequest("choose the model that checks turns")
 	}
 	if req.Enabled && req.Key == "" && !hasKey && req.gateway() {
 		return badRequest("turn check needs your AI Gateway key, or a reference to it")

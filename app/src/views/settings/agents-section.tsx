@@ -213,14 +213,14 @@ function TurnCheck({ boxes }: { boxes: string[] }) {
   return (
     <SettingsGroup
       title="Turn check"
-      description="When an agent's turn ends, ask Jev whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply, and the session's title, to the checker (Vercel AI Gateway by default)."
+      description="When an agent's turn ends, ask a model you choose whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply, and the session's title, to Vercel AI Gateway, capped and with anything that looks like a secret taken out."
     >
       {boxes.map((b) => {
         const st = cfg[b];
         if (!st || "error" in st) {
           return (
             <SettingsRow key={b} label={b} description={st ? <BoxError className="mt-1" box={b} error={st.error} what="turn check" /> : "Checking…"}>
-              <Switch checked={false} disabled aria-label={`Check finished turns with Jev on ${b}`} />
+              <Switch checked={false} disabled aria-label={`Check finished turns on ${b}`} />
             </SettingsRow>
           );
         }
@@ -234,19 +234,29 @@ function TurnCheckBox({ box, st, busy, save }: { box: string; st: TurnCheckStatu
   const [value, setValue] = useState("");
   const [ref, setRef] = useState(st.key ?? "");
   useEffect(() => setRef(st.key ?? ""), [st.key]);
+  const [model, setModel] = useState(st.model ?? "");
+  useEffect(() => setModel(st.model ?? ""), [st.model]);
   const config: TurnCheckConfig = { enabled: st.enabled, key: st.key, url: st.url, model: st.model };
   const hasKey = st.key_set || !!st.key || ownServer(st);
+  const keyText = st.key ? <Code>{st.key}</Code> : st.key_set ? `Key saved on ${box}` : hasKey ? "Your own server" : "Save a key first";
   return (
-    <div>
-      <SettingsRow label={box} description={st.key ? <Code>{st.key}</Code> : st.key_set ? `Key saved on ${box}` : hasKey ? "Your own server" : "Save a key first"}>
+    <div data-testid={`turncheck-${box}`}>
+      <SettingsRow label={box} description={st.model ? keyText : "Choose a model first"}>
         {st.key_set && (
           <Button size="xs" variant="ghost" disabled={busy} onClick={() => void save({ ...config, enabled: st.enabled && (!!st.key || ownServer(st)), remove_key: true })}>
             Remove
           </Button>
         )}
-        <Switch checked={st.enabled} disabled={busy || (!st.enabled && !hasKey)} onCheckedChange={(v) => void save({ ...config, enabled: v })} aria-label={`Check finished turns with Jev on ${box}`} />
+        <Switch checked={st.enabled} disabled={busy || (!st.enabled && (!hasKey || !st.model))} onCheckedChange={(v) => void save({ ...config, enabled: v })} aria-label={`Check finished turns on ${box}`} />
       </SettingsRow>
       <div className="flex flex-col gap-2 px-4 pb-3">
+        {/* No model is chosen for you: your transcripts, your choice. */}
+        <div className="flex gap-2">
+          <Input size="sm" value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model, as AI Gateway names it" className="font-mono text-xs [&_input::placeholder]:font-sans" aria-label={`Model that checks turns on ${box}`} />
+          <Button size="sm" variant="outline" disabled={busy || model.trim() === (st.model ?? "")} onClick={() => void save({ ...config, enabled: st.enabled && !!model.trim(), model: model.trim() || undefined })}>
+            Save
+          </Button>
+        </div>
         {!st.key_set && (
           <div className="flex gap-2">
             <Input size="sm" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Paste your key" className="font-mono [&_input::placeholder]:font-sans" aria-label={`AI Gateway key for ${box}`} />

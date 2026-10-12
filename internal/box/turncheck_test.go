@@ -54,7 +54,7 @@ func checkedBox(t *testing.T, enabled bool, prompt, reply string, answer http.Ha
 		b.TurnCheck = &TurnCheck{Path: filepath.Join(t.TempDir(), "turncheck.json"), settle: 10 * time.Millisecond, timeout: 300 * time.Millisecond}
 		bx = b
 	})
-	bx.TurnCheck.save(TurnCheckConfig{Enabled: enabled, Key: "env://BERTH_TEST_JEV_KEY"})
+	bx.TurnCheck.save(TurnCheckConfig{Enabled: enabled, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"})
 	call(t, c, "POST", "/v1/locations", "", map[string]string{"name": "shop", "path": gitRepo(t)}, nil)
 	call(t, c, "POST", "/v1/locations/shop/worktrees", "", WorktreeRequest{Name: "fix"}, nil)
 	var sess Session
@@ -297,12 +297,16 @@ func TestTurnCheckSettingsHoldOnlyAReference(t *testing.T) {
 	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true}, &bad); status != 400 {
 		t.Fatalf("on without a key: %d", status)
 	}
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "vck_live_secret"}, &bad); status != 400 || strings.Contains(bad["error"], "vck_live_secret") {
+	// No model is picked for you.
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY"}, &bad); status != 400 || !strings.Contains(bad["error"], "model") {
+		t.Fatalf("on without a model: %d %v", status, bad)
+	}
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "vck_live_secret", Model: "typesafe-ai/jev"}, &bad); status != 400 || strings.Contains(bad["error"], "vck_live_secret") {
 		t.Fatalf("a key that is not a reference: %d %v", status, bad)
 	}
 	ch, stop := bus.Subscribe()
 	defer stop()
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY"}, nil); status != 200 {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", Model: "typesafe-ai/jev"}, nil); status != 200 {
 		t.Fatalf("put: %d", status)
 	}
 	if e := <-ch; e.Type != "turncheck.changed" || e.Data["enabled"] != true {
@@ -316,7 +320,7 @@ func TestTurnCheckSettingsHoldOnlyAReference(t *testing.T) {
 	resp.Body.Close()
 	var got TurnCheckConfig
 	json.Unmarshal(raw, &got)
-	if !got.Enabled || got.Key != "env://BERTH_TEST_JEV_KEY" || strings.Contains(string(raw), "the-real-key-value") {
+	if !got.Enabled || got.Key != "env://BERTH_TEST_JEV_KEY" || got.Model != "typesafe-ai/jev" || strings.Contains(string(raw), "the-real-key-value") {
 		t.Fatalf("get: %s", raw)
 	}
 	if file, _ := os.ReadFile(tc.Path); strings.Contains(string(file), "the-real-key-value") {
@@ -326,24 +330,82 @@ func TestTurnCheckSettingsHoldOnlyAReference(t *testing.T) {
 	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, URL: "http://127.0.0.1:8000/v1/systemone", Model: "multilingual"}, nil); status != 200 {
 		t.Fatalf("own server without a key: %d", status)
 	}
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, URL: "file:///etc/passwd"}, nil); status != 400 {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, URL: "file:///etc/passwd", Model: "multilingual"}, nil); status != 400 {
 		t.Fatalf("a file URL: %d", status)
 	}
-	if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: "http://example.com/v1/evaluate"}, nil); status != 400 {
-		t.Fatalf("a key over http: %d", status)
+	// A key goes to AI Gateway alone, over https or not.
+	for _, u := range []string{"http://example.com/v1/evaluate", "https://example.com/v1/evaluate", "https://ai-gateway.vercel.sh.example.com/v1/evaluate"} {
+		if status := call(t, c, "PUT", "/v1/turncheck", "", TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: u, Model: "multilingual"}, nil); status != 400 {
+			t.Fatalf("a key to %s: %d", u, status)
+		}
 	}
 }
 
 // The simple way: a key pasted in Settings, kept on the box (0600) and
 // never answered.
-// A key never goes over plain http, even to a server you set.
-func TestTurnCheckSendsAKeyOnlyOverHTTPS(t *testing.T) {
+// A key goes to AI Gateway alone. turncheck.json is a file on the box, so
+// an agent could name its own server there with a reference to a secret:
+// that server is never asked, and the secret never resolved for it.
+func TestTurnCheckSendsAKeyOnlyToTheGateway(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("needs_input", 0.9))
-	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: jevURL})
+	own := strings.TrimSuffix(jevURL, "/v1/evaluate") + "/collect"
+	for _, u := range []string{own, strings.Replace(own, "http:", "https:", 1)} {
+		b.TurnCheck.save(TurnCheckConfig{Enabled: true, Key: "env://BERTH_TEST_JEV_KEY", URL: u, Model: "typesafe-ai/jev"})
+		endTurn(bus, sess)
+		time.Sleep(300 * time.Millisecond)
+		if len(calls) != 0 {
+			t.Fatalf("%s was asked: %+v", u, <-calls)
+		}
+	}
+}
+
+// What leaves the box is capped, and what looks like a secret is taken out
+// of the title, the prompt and the reply, with the patterns artifacts are
+// refused by.
+func TestTurnCheckSendsNoSecretAndAShortPrompt(t *testing.T) {
+	const (
+		aws = "AKIAIOSFODNN7EXAMPLE"
+		gh  = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789AB"
+		pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA7bq\n-----END RSA PRIVATE KEY-----"
+	)
+	prompt := "Deploy with " + aws + " " + strings.Repeat("p", 5000)
+	reply := "Used " + gh + " and\nDB_PASSWORD=hunter2hunter2hunter2\n" + pem + "\nShould I push?"
+	b, bus, sess, calls := checkedBox(t, true, prompt, reply, jevSays("needs_input", 0.9))
+	if err := b.Sessions.SetTitle(context.Background(), sess.Name, "Rotate sk-ant-abcdefghijklmnopqrstuvwxyz0123456789"); err != nil {
+		t.Fatal(err)
+	}
 	endTurn(bus, sess)
-	time.Sleep(300 * time.Millisecond)
-	if len(calls) != 0 {
-		t.Fatal("the key was sent over http")
+	state, _ := waitCall(t, calls).body["state"].(map[string]any)
+	sent := fmt.Sprint(state)
+	for _, secret := range []string{aws, gh, "MIIEpAIBAAKCAQEA7bq", "hunter2", "sk-ant-"} {
+		if strings.Contains(sent, secret) {
+			t.Errorf("sent %q", secret)
+		}
+	}
+	req, _ := state["user_request"].(string)
+	if !strings.HasPrefix(req, "Deploy with [redacted: an AWS access key] ppp") || len([]rune(req)) > turnCheckPromptLimit {
+		t.Errorf("user_request %d: %.60q", len([]rune(req)), req)
+	}
+	if resp, _ := state["agent_response"].(string); !strings.Contains(resp, "[redacted: a GitHub token]") || !strings.Contains(resp, "[redacted: a private key]\nShould I push?") {
+		t.Errorf("agent_response %q", resp)
+	}
+}
+
+// Turn check is set from a paired laptop: an agent on the box reaches its
+// socket, and could otherwise send turns, or a key, wherever it liked.
+func TestTurnCheckIsSetFromALaptopOnly(t *testing.T) {
+	bx := &Box{Name: "devbox", Events: &events.Bus{Sequence: true}, TurnCheck: &TurnCheck{Path: filepath.Join(t.TempDir(), "turncheck.json")}}
+	c := localBox(t, bx)
+	ctx := context.Background()
+	if err := c.Call(ctx, "GET", "/v1/turncheck", nil, nil); err == nil || !strings.Contains(err.Error(), "paired laptop") {
+		t.Fatalf("get: %v", err)
+	}
+	err := c.Call(ctx, "PUT", "/v1/turncheck", TurnCheckConfig{Enabled: true, Key: "op://Private/aws/secret", URL: "https://collect.example/v1/evaluate", Model: "m"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "paired laptop") {
+		t.Fatalf("put: %v", err)
+	}
+	if _, err := os.Stat(bx.TurnCheck.Path); !os.IsNotExist(err) {
+		t.Fatal("turncheck.json was written")
 	}
 }
 
@@ -359,7 +421,7 @@ func TestTurnCheckKeepsAPastedKeyOnTheBox(t *testing.T) {
 		}
 	}
 	var st TurnCheckStatus
-	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "key_value": "vck_pasted_value"}, &st); status != 200 || !st.KeySet || !st.Enabled {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, &st); status != 200 || !st.KeySet || !st.Enabled {
 		t.Fatalf("pasting a key: %d %+v", status, st)
 	}
 	if fi, err := os.Stat(tc.KeyPath); err != nil || fi.Mode().Perm() != 0o600 {
@@ -372,10 +434,10 @@ func TestTurnCheckKeepsAPastedKeyOnTheBox(t *testing.T) {
 		t.Fatalf("get: %s", raw)
 	}
 	// The last one set wins: a reference removes the pasted key.
-	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "key": "env://BERTH_TEST_JEV_KEY"}, &st); status != 200 || st.KeySet {
+	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key": "env://BERTH_TEST_JEV_KEY"}, &st); status != 200 || st.KeySet {
 		t.Fatalf("a reference: %d %+v", status, st)
 	}
-	call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "key_value": "vck_pasted_value"}, nil)
+	call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": true, "model": "typesafe-ai/jev", "key_value": "vck_pasted_value"}, nil)
 	if status := call(t, c, "PUT", "/v1/turncheck", "", map[string]any{"enabled": false, "remove_key": true}, &st); status != 200 || st.KeySet {
 		t.Fatalf("remove: %d %+v", status, st)
 	}
@@ -388,7 +450,7 @@ func TestTurnCheckSendsThePastedKey(t *testing.T) {
 	b, bus, sess, calls := checkedBox(t, true, "Add the operators", "Go ahead?", jevSays("done", 0.9))
 	b.TurnCheck.KeyPath = filepath.Join(t.TempDir(), "turncheck.key")
 	os.WriteFile(b.TurnCheck.KeyPath, []byte("vck_pasted_value\n"), 0o600)
-	b.TurnCheck.save(TurnCheckConfig{Enabled: true})
+	b.TurnCheck.save(TurnCheckConfig{Enabled: true, Model: "typesafe-ai/jev"})
 	endTurn(bus, sess)
 	if c := waitCall(t, calls); c.auth != "Bearer vck_pasted_value" {
 		t.Fatalf("authorization %q", c.auth)

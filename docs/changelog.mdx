@@ -31,6 +31,20 @@ again.
   conversations under *Resume a conversation*: each carries on where it left
   off, earlier turns and permission mode included. Needs the box upgraded.
 
+- **Turn check: a turn that ends on a question needs you.** Off by
+  default; turned on for a box in Settings → Agents, with a model you
+  choose on Vercel AI Gateway (or another server that answers the same
+  evaluate request), berthd asks about each finished Claude Code or Codex
+  turn: one that asks you something or is blocked shows as **Needs you**,
+  one that stopped while its work goes on without it (a build, a deploy, a
+  later time) as **Working**. A failed or unsure answer, or work that is
+  done, leaves it Done. It sends the turn's prompt (its first 4,000
+  characters, looked for further back when a long turn's tool calls pushed
+  it out of view), the end of its reply and the session's title, with
+  anything that looks like a secret taken out first. It is set only from a
+  paired laptop, never from the box's own socket, and a key goes to AI
+  Gateway alone.
+
 - **Labs: a structured Claude agent opens in Claude Code's own terminal and
   comes back.** The Terminal switch on a structured agent's pane stops it and
   opens the same conversation in Claude Code's screen, for `/login`,
@@ -740,17 +754,6 @@ bar, or `berth upgrade BOX`. Agents keep running through the update.
 - **The guided install.** Adding a box from Team setup first shows the
   plan, full screen: what will run, step by step, the exact commands a click
   away, which steps may need `sudo`, the team's own steps after Berth's, and
-
-- **Turn check: a turn that ends on a question needs you.** Off by
-  default; turned on for a box in Settings → Agents, berthd asks Jev on
-  Vercel AI Gateway (or another Jev-compatible server) about each finished
-  Claude Code or Codex turn: one that asks you something or is blocked shows
-  as **Needs you**, one that stopped while its work goes on without it (a
-  build, a deploy, a later time) as **Working**. A failed or unsure answer,
-  or work that is done, leaves it Done.
-- **Adding a box over SSH is one guided install.** Set up (or Install and
-  pair on a tailnet machine) first shows the plan: what will run, step by
-  step, the exact commands a click away, which steps may need `sudo`, and
   an **Agents** choice (Claude Code ticked; Codex, Cursor Agent and OpenCode
   to add; remembered for the next box). Then `berth add ssh --guided` runs
   in a terminal here, beside a checklist: press Enter to start, and type
