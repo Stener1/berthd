@@ -477,6 +477,29 @@ func TestReadForm(t *testing.T) {
 		t.Fatalf("single: %+v", f)
 	}
 
+	bordered := strings.Join([]string{
+		fakeRule,
+		"←  ☐ Timeout  ☐ Unclear out  ✔ Submit  →",
+		"",
+		"│ Return portal: on Oct 12 a refund for order #96895 returned a 500 to staff,",
+		"│ but Shopify had actually refunded it. How should money mutations",
+		"│ behave?",
+		"",
+		"❯ 1. 60s + idempotency key (Recommended)",
+		"     Reads keep 15s.",
+		"  2. No client timeout",
+		"     Simplest.",
+		"  3. Type something.",
+		fakeRule,
+		"  4. Chat about this",
+		"",
+		"Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+	}, "\n")
+	want := "Return portal: on Oct 12 a refund for order #96895 returned a 500 to staff, but Shopify had actually refunded it. How should money mutations behave?"
+	if f := readForm(bordered); !f.ok || f.question != want || f.cursor != 1 {
+		t.Fatalf("bordered: %+v", f)
+	}
+
 	review := strings.Join([]string{
 		fakeRule,
 		"←  ☒ Colour  ☒ Toppings  ☒ Pet name  ✔ Submit  →",
