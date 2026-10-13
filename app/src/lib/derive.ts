@@ -44,6 +44,15 @@ export function worktreeOf(locations: Location[] | undefined, s: Session): { loc
   return undefined;
 }
 
+// offBoard is whether a session runs in a location kept off the Agent
+// Dashboard (Settings → Agents). hidden holds "box/location" names; a
+// session outside every known worktree stays on the board.
+export function offBoard(locations: Location[] | undefined, box: string, s: Session, hidden: ReadonlySet<string>): boolean {
+  if (!hidden.size) return false;
+  const where = worktreeOf(locations, s);
+  return !!where && hidden.has(`${box}/${where.location.name}`);
+}
+
 // sessionName is what the app calls a session everywhere it lists one: its
 // title, the work it was started for ("Fix checkout webhook"), or without
 // one the agent's name, or "Shell", numbered when its worktree has more
