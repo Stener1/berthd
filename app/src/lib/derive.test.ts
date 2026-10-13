@@ -27,3 +27,10 @@ test("a finished turn whose work goes on without the agent shows as working, not
   // Only a finished turn: a question still needs you.
   assert.equal(sessionState({ ...s, agent_state: "waiting", unfinished: true }), "waiting");
 });
+
+test("a finished turn parked until a reply or a later time shows as idle, not done or working", () => {
+  const s = { name: "a", dir: "/w", created: "2026-10-12T10:00:00Z", attached: 0, exited: false, agent: "claude", agent_state: "finished", parked: true } as Session;
+  assert.equal(sessionState(s), "ready");
+  assert.equal(sessionState({ ...s, agent_state: "waiting" }), "waiting");
+  assert.equal(sessionState({ ...s, agent_state: "running" }), "running");
+});

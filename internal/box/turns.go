@@ -95,9 +95,12 @@ type SessionState struct {
 	// for while it waits, when its hooks said.
 	Queued int  `json:"queued,omitempty"`
 	Ask    *Ask `json:"ask,omitempty"`
-	// Unfinished is a finished turn turn check read as work still going on
-	// without the agent: a build, a deploy, a check, or a later time.
+	// Unfinished is a finished turn turn check read as work still running
+	// without the agent: a delegated task, a build, a deploy, a watcher.
+	// Parked is one it read as paused until someone else replies or a
+	// later time, with nothing running and nothing asked of you.
 	Unfinished bool `json:"unfinished,omitempty"`
+	Parked     bool `json:"parked,omitempty"`
 }
 
 func (t Turn) open() bool {
@@ -177,7 +180,10 @@ type sessTrack struct {
 	SoftWait bool `json:"soft_wait,omitempty"`
 	// Unfinished marks a finished turn turn check read as work still going
 	// on: it shows as working, but the agent takes prompts as finished.
+	// Parked marks one it read as paused until a reply or a later time: it
+	// shows as idle, and takes prompts as finished too.
 	Unfinished bool `json:"unfinished,omitempty"`
+	Parked     bool `json:"parked,omitempty"`
 
 	inbox []inboxItem
 	// screen polling, owned by the poller
@@ -399,7 +405,7 @@ func (t *Turns) newTurn(s *sessTrack, state, origin string) *Turn {
 }
 
 func (s *sessTrack) set(state string, e events.Event) {
-	s.State, s.Since, s.Seq, s.SoftWait, s.Unfinished = state, e.Time, e.Seq, false, false
+	s.State, s.Since, s.Seq, s.SoftWait, s.Unfinished, s.Parked = state, e.Time, e.Seq, false, false, false
 }
 
 func (s *sessTrack) end(tr *Turn, state string, e events.Event) {
@@ -651,13 +657,15 @@ func (t *Turns) agentEvent(e events.Event) {
 	cur := s.current()
 	switch e.Type {
 	case adapters.Ready:
-		// Turn check's "unfinished, not yours": only on the turn end it was
-		// about, as for its waits below. The turn stays finished.
+		// Turn check's "unfinished, not yours": still running (working) or
+		// paused until a reply or a later time (parked). Only on the turn
+		// end it was about, as for its waits below. The turn stays finished.
 		if source == "turncheck" {
 			if cur != nil || s.State != "finished" || s.Seq != seqOf(e.Data["seq"]) {
 				return
 			}
-			s.Unfinished = true
+			parked := str(e.Data, "choice") == "parked"
+			s.Unfinished, s.Parked = !parked, parked
 			break
 		}
 		if cur == nil {
@@ -853,7 +861,7 @@ func (t *Turns) Track(sess Session) SessionState {
 }
 
 func (s *sessTrack) snapshot() SessionState {
-	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox), Unfinished: s.Unfinished}
+	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox), Unfinished: s.Unfinished, Parked: s.Parked}
 	if tr := s.current(); tr != nil {
 		out.Turn = tr.ID
 		if n := len(tr.Waits); tr.State == "waiting" && n > 0 && tr.Waits[n-1].End.IsZero() && tr.Waits[n-1].Ask != nil {

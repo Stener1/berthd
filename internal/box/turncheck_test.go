@@ -167,8 +167,8 @@ func TestTurnCheckMarksWorkStillGoingOnUnfinished(t *testing.T) {
 	if got := stateNow(t, b, sess.Name); got != "finished" || !b.Turns.Ready(sess.Name) {
 		t.Fatalf("state %s, ready %v: want finished and ready for a prompt", got, b.Turns.Ready(sess.Name))
 	}
-	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || !got.Unfinished {
-		t.Fatalf("the session reads %s, unfinished %v", got.AgentState, got.Unfinished)
+	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || !got.Unfinished || got.Parked {
+		t.Fatalf("the session reads %s, unfinished %v, parked %v", got.AgentState, got.Unfinished, got.Parked)
 	}
 	// Its next turn starts afresh: no longer unfinished.
 	hook(bus, adapters.Started, sess.Name, sess.Dir, "claude", "signal", "prompt")
@@ -179,6 +179,150 @@ func TestTurnCheckMarksWorkStillGoingOnUnfinished(t *testing.T) {
 	bus.Publish(events.Event{Type: adapters.Ready, Data: map[string]any{"session": sess.Name, "path": sess.Dir, "source": "turncheck", "seq": end.Seq - 1}})
 	if got := stateNow(t, b, sess.Name); got != "finished" || unfinished() {
 		t.Fatalf("a verdict on an older turn was taken: %s, unfinished %v", got, unfinished())
+	}
+}
+
+// turnFixture is a finished turn as turn check reads it: the session's
+// title, the turn's last prompt and its reply.
+type turnFixture struct{ title, prompt, reply string }
+
+// Two real turns from a box, as turn check read them, with names changed.
+var (
+	// Waits on someone else's reply and checks again in 24 hours: nothing
+	// runs and nothing is asked of you, so it is parked.
+	parkedTurn = turnFixture{
+		title:  "👀 KEEP OPEN ACME-1898 — Dana watch + 24h check",
+		prompt: "This session should be kept up because it's still running and checking for what Dana might reply. Should we then rename the session to something more appropriate so that I don't close it accidentally?",
+		reply:  `Dana hasn't replied on "Bonus field in Shopify" yet. Her only new mail is on a different thread ("User invites", saying everyone has been invited).`,
+	}
+	// A deploy it started is still running (its shell, on the screen), and
+	// it acts when it ends: working. Its prompt was further back than turn
+	// check looks, so none is sent.
+	runningTurn = turnFixture{
+		title: "🚀 ACME-1903 deploying",
+		reply: "`./deploy.sh` is running for merge 956e39c. When it finishes I'll check that the new revision has 100% of traffic and run the prod verification.",
+	}
+)
+
+// Every provider is asked with parked beside working, each with its own
+// definition, and gets the turn as it is.
+func TestTurnCheckAsksWhetherWorkIsParked(t *testing.T) {
+	for name, turn := range map[string]turnFixture{"parked": parkedTurn, "running": runningTurn} {
+		t.Run(name, func(t *testing.T) {
+			b, bus, sess, calls := checkedBox(t, true, turn.prompt, turn.reply, jevSays("done", 0.9))
+			if err := b.Sessions.SetTitle(context.Background(), sess.Name, turn.title); err != nil {
+				t.Fatal(err)
+			}
+			endTurn(bus, sess)
+			c := waitCall(t, calls)
+			state, _ := c.body["state"].(map[string]any)
+			if state["session_objective"] != turn.title || state["user_request"] != turn.prompt || state["agent_response"] != turn.reply {
+				t.Fatalf("state %v", state)
+			}
+			status, _ := c.body["questions"].(map[string]any)["status"].(map[string]any)
+			criteria, _ := status["criteria"].(map[string]any)
+			instructions, _ := status["instructions"].(string)
+			if criteria["parked"] != jevCriteria["parked"] || criteria["working"] != jevCriteria["working"] || !strings.Contains(instructions, "parked means") {
+				t.Fatalf("asked %v", status)
+			}
+
+			ask := decisionsRequest("gpt-6-luna", turn.title, turn.prompt, turn.reply)
+			q := ask["questions"].([]map[string]any)[0]
+			got := map[string]string{}
+			for _, ch := range q["choices"].([]map[string]string) {
+				got[ch["value"]] = ch["description"]
+			}
+			if got["parked"] != jevCriteria["parked"] || got["working"] != jevCriteria["working"] || len(got) != len(jevCriteria) || !strings.Contains(q["instructions"].(string), "parked means") {
+				t.Fatalf("decisions choices %v", got)
+			}
+			if input := ask["input"].(string); input != "Session objective: "+turn.title+"\n\nUser request: "+turn.prompt+"\n\nAgent response: "+turn.reply {
+				t.Fatalf("decisions input %q", input)
+			}
+		})
+	}
+	// The two never overlap: what runs now is working, what waits on a
+	// reply or a later time is parked.
+	if !strings.Contains(jevCriteria["working"], "running right now") || !strings.Contains(jevCriteria["parked"], "nothing is running") || !strings.Contains(jevCriteria["parked"], "nothing is needed from the user") {
+		t.Fatalf("criteria %v", jevCriteria)
+	}
+}
+
+// Work that waits on someone else's reply or a later time, with nothing
+// running: the turn stays finished, takes prompts, and is marked parked,
+// not unfinished, so it shows as idle; only on the turn end it was about,
+// and never as a wait.
+func TestTurnCheckMarksWorkWaitingOnAReplyParked(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, parkedTurn.prompt, parkedTurn.reply, jevSays("parked", 0.86))
+	b.Sessions.SetTitle(context.Background(), sess.Name, parkedTurn.title)
+	ch, stop := bus.Subscribe()
+	defer stop()
+	endTurn(bus, sess)
+	waitCall(t, calls)
+	marks := func() (bool, bool) { st, _ := b.Turns.State(sess.Name); return st.Parked, st.Unfinished }
+	deadline := time.Now().Add(5 * time.Second)
+	for parked, _ := marks(); !parked; parked, _ = marks() {
+		if time.Now().After(deadline) {
+			t.Fatal("the verdict was not taken")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, unfinished := marks(); unfinished {
+		t.Fatal("parked work is marked unfinished too")
+	}
+	if got := stateNow(t, b, sess.Name); got != "finished" || !b.Turns.Ready(sess.Name) || b.Turns.SoftWait(sess.Name) {
+		t.Fatalf("state %s, ready %v: want finished and ready for a prompt", got, b.Turns.Ready(sess.Name))
+	}
+	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || !got.Parked || got.Unfinished {
+		t.Fatalf("the session reads %s, parked %v, unfinished %v", got.AgentState, got.Parked, got.Unfinished)
+	}
+	for len(ch) > 0 {
+		if e := <-ch; e.Type == adapters.Waiting || (e.Type == adapters.Ready && e.Data["choice"] != "parked") {
+			t.Fatalf("published %s %v", e.Type, e.Data)
+		}
+	}
+	// Its next turn starts afresh.
+	hook(bus, adapters.Started, sess.Name, sess.Dir, "claude", "signal", "prompt")
+	if parked, _ := marks(); parked {
+		t.Fatal("still parked once a new turn started")
+	}
+	end := hook(bus, adapters.Finished, sess.Name, sess.Dir, "claude")
+	verdict := func(choice string, seq int64) {
+		bus.Publish(events.Event{Type: adapters.Ready, Data: map[string]any{"session": sess.Name, "path": sess.Dir, "source": "turncheck", "choice": choice, "seq": seq}})
+	}
+	if verdict("parked", end.Seq-1); stateNow(t, b, sess.Name) != "finished" {
+		t.Fatal("not finished")
+	}
+	if parked, _ := marks(); parked {
+		t.Fatal("a verdict on an older turn was taken")
+	}
+	// On the same turn end, the last verdict wins: parked, then working.
+	if verdict("parked", end.Seq); !b.Turns.Ready(sess.Name) {
+		t.Fatal("parked work takes no prompt")
+	}
+	if parked, unfinished := marks(); !parked || unfinished {
+		t.Fatalf("parked %v, unfinished %v", parked, unfinished)
+	}
+	verdict("working", end.Seq)
+	if parked, unfinished := marks(); parked || !unfinished {
+		t.Fatalf("working read as parked %v, unfinished %v", parked, unfinished)
+	}
+}
+
+// A deploy still running is working, not parked.
+func TestTurnCheckMarksARunningDeployUnfinished(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, runningTurn.prompt, runningTurn.reply, jevSays("working", 0.9))
+	b.Sessions.SetTitle(context.Background(), sess.Name, runningTurn.title)
+	endTurn(bus, sess)
+	waitCall(t, calls)
+	deadline := time.Now().Add(5 * time.Second)
+	for st, _ := b.Turns.State(sess.Name); !st.Unfinished; st, _ = b.Turns.State(sess.Name) {
+		if time.Now().After(deadline) {
+			t.Fatal("the verdict was not taken")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || !got.Unfinished || got.Parked {
+		t.Fatalf("the session reads %s, unfinished %v, parked %v", got.AgentState, got.Unfinished, got.Parked)
 	}
 }
 

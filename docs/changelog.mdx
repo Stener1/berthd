@@ -36,10 +36,12 @@ again.
   decision model you pick about each finished Claude Code or Codex turn:
   **Jev on Vercel AI Gateway**, **OpenAI Decisions** (`gpt-6-luna`), or
   **Laya** on a server you run, which keeps turns on your machines. One
-  that asks you something or is blocked shows as **Needs you**, one that
-  stopped while its work goes on without it (a build, a deploy, a later
-  time) as **Working**. A failed or unsure answer, or work that is done,
-  leaves it Done. It sends the turn's prompt (its first 4,000 characters,
+  that asks you something or is blocked shows as **Needs you**; one that
+  stopped while something it started still runs (a build, a deploy, a
+  watcher) as **Working**; and one parked until someone else replies or a
+  later time ("check again in 24 hours"), with nothing running, as
+  **Idle**. Neither of those notifies you. A failed or unsure answer, or
+  work that is done, leaves it Done. It sends the turn's prompt (its first 4,000 characters,
   looked for further back when a long turn's tool calls pushed it out of
   view), the end of its reply and the session's title, with anything that
   looks like a secret taken out first. It is set only from a paired laptop,

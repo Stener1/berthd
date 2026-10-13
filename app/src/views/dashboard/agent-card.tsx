@@ -114,10 +114,19 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
         </div>
         {/* Its turn ended, but turn check read the work as still going on. */}
         {state === "running" && session.unfinished && (
-          <Tip label="Its turn ended while its work goes on: a build, a deploy, a check or a later time. It picks up by itself.">
+          <Tip label="Its turn ended while its work runs on: a delegated task, a build, a deploy or a watcher. It picks up by itself.">
             <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-[11px] text-muted-foreground">
               <HourglassIcon className="size-3" aria-hidden />
               Waiting on its work
+            </div>
+          </Tip>
+        )}
+        {/* Turn check read the work as parked: nothing runs, nothing needs you. */}
+        {state === "ready" && session.parked && (
+          <Tip label="Its work is paused until someone else replies or a later time. Nothing runs and nothing needs you; it picks up by itself.">
+            <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-[11px] text-muted-foreground">
+              <HourglassIcon className="size-3" aria-hidden />
+              Parked: waiting on a reply or a later time
             </div>
           </Tip>
         )}

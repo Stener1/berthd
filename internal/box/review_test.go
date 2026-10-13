@@ -94,6 +94,14 @@ func TestReviewListsAFinishedAgentsChangesAndCommits(t *testing.T) {
 	if items, err := b.Review(ctx, true); err != nil || len(items) != 1 {
 		t.Fatalf("all: %+v %v", items, err)
 	}
+	// Nor work parked until a reply or a later time.
+	bus.Publish(events.Event{Type: "agent.ready", Data: map[string]any{"session": "agent-billing", "path": wt.Path, "source": "turncheck", "choice": "parked", "seq": ends["billing"].Seq}})
+	if items, err := b.Review(ctx, false); err != nil || len(items) != 0 {
+		t.Fatalf("parked work is up for review: %+v %v", items, err)
+	}
+	if items, err := b.Review(ctx, true); err != nil || len(items) != 1 {
+		t.Fatalf("all: %+v %v", items, err)
+	}
 }
 
 func TestPorcelainAndNameStatusParsing(t *testing.T) {

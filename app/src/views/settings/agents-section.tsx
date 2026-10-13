@@ -214,7 +214,7 @@ function TurnCheck({ boxes }: { boxes: string[] }) {
   return (
     <SettingsGroup
       title="Turn check"
-      description="When an agent's turn ends, ask a decision model you choose whether it stopped to ask you something (Needs you) or with its work still going on, such as a build or a deploy (Working). When on, the box sends the turn's last prompt and reply, and the session's title, to the provider you pick, capped and with anything that looks like a secret taken out."
+      description="When an agent's turn ends, ask a decision model you choose whether it stopped to ask you something (Needs you), with its work still running, such as a build or a deploy (Working), or parked until someone replies or a later time, with nothing running (Idle). When on, the box sends the turn's last prompt and reply, and the session's title, to the provider you pick, capped and with anything that looks like a secret taken out."
     >
       {boxes.map((b) => {
         const st = cfg[b];
