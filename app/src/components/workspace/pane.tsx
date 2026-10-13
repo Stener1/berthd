@@ -11,7 +11,7 @@ import { openChatBackgroundSettings } from "@/components/conversation/chat-backg
 import { ConversationPane } from "@/components/conversation/conversation-pane";
 import { HelperPane } from "@/components/conversation/helper-pane";
 import { helperKey, useHelperInfo } from "@/components/conversation/subagent-view";
-import { ErrorText } from "@/components/error-note";
+import { ErrorText, toastError } from "@/components/error-note";
 import { SessionActionItems } from "@/components/orchestrate/session-actions";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "@/components/ui/menu";
@@ -25,6 +25,7 @@ import { TerminalView } from "@/components/workspace/terminal-view";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
 import { useLabel, useTone, WtChip } from "@/components/workspace/worktree-tone";
 import { agentPresets, closePane, openBrowserAt, openPreviewAt, startSession } from "@/lib/actions";
+import { boxApi } from "@/lib/api";
 import { agentLabel, agentOf, restartCommand, sessionAgent, sessionName, sessionState } from "@/lib/derive";
 import { nameFromKey } from "@/lib/groups";
 import { type Leaf, leaves, paneWorktree } from "@/lib/layout";
@@ -228,8 +229,10 @@ export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined
     const s = st.boxes[c.box]?.sessions?.find((x) => x.name === c.session);
     return !!(s && agentOf(s));
   });
+  // A structured agent has no screen of its own to read: its conversation.
+  const structured = useStore((st) => c.kind === "terminal" && st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.driver === "claude");
   if (c.kind !== "terminal" || !labs || !runsAgent) return undefined;
-  return c.view ?? fallback;
+  return c.view ?? (structured ? "conversation" : fallback);
 }
 
 // ViewSwitch flips an agent's pane between its terminal and its
@@ -237,6 +240,9 @@ export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined
 export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; pane: Leaf }) {
   const view = usePaneView(pane);
   const c = pane.content;
+  // A structured session's terminal and chat are two ways of running it,
+  // not two views of one: the switch moves it (switch.go).
+  const moves = useStore((st) => (c.kind === "terminal" ? st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch : undefined));
   if (!view || c.kind !== "terminal") return null;
   return (
     <ToggleGroup
@@ -246,6 +252,19 @@ export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; p
       onValueChange={(v) => {
         const next = v[0] as "terminal" | "conversation" | undefined;
         if (!next) return;
+        if ((moves === "terminal" && next === "terminal") || (moves === "chat" && next === "conversation")) {
+          const client = useStore.getState().client;
+          if (!client) return;
+          const to = next === "terminal" ? "terminal" : "chat";
+          void boxApi
+            .switchSession(client, c.box, c.session, to)
+            .then(() => {
+              setPaneContent(wsKey, tab, pane.id, { ...c, view: next });
+              void useStore.getState().refreshBox(c.box, ["sessions"]);
+            })
+            .catch((err) => toastError(err, { title: to === "terminal" ? "Couldn't open Claude Code's terminal" : "Couldn't go back to the chat", box: c.box }));
+          return;
+        }
         setPaneContent(wsKey, tab, pane.id, { ...c, view: next });
         // The way you last chose to see an agent is how new ones open.
         usePrefs.setState({ agentView: next });
@@ -253,12 +272,12 @@ export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; p
       aria-label="Show the agent as"
       className="mr-1"
     >
-      <Tip label="Terminal">
+      <Tip label={moves === "terminal" ? "Open in Claude Code's terminal" : "Terminal"}>
         <ToggleGroupItem value="terminal" aria-label="Terminal" className="h-6! min-w-7! px-1!">
           <SquareTerminalIcon className="size-3.5" />
         </ToggleGroupItem>
       </Tip>
-      <Tip label="Conversation">
+      <Tip label={moves === "chat" ? "Back to the chat" : "Conversation"}>
         <ToggleGroupItem value="conversation" aria-label="Conversation" className="h-6! min-w-7! px-1!">
           <MessagesSquareIcon className="size-3.5" />
         </ToggleGroupItem>

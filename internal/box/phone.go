@@ -297,7 +297,7 @@ func (p *Phone) Handler(b *Box, listenAddr string) http.Handler {
 			writeError(w, statusFor(err), err.Error())
 			return
 		}
-		if err := b.Sessions.Send(r.Context(), name, req.Text, req.Enter == nil || *req.Enter); err != nil {
+		if err := b.sendText(r.Context(), name, req.Text, req.Enter == nil || *req.Enter); err != nil {
 			writeError(w, statusFor(err), err.Error())
 			return
 		}

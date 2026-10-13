@@ -76,7 +76,7 @@ func BenchmarkTranscriptPoll(b *testing.B) {
 	b.Setenv("CLAUDE_CONFIG_DIR", cfg)
 	dir := b.TempDir()
 	for i := range 3 {
-		if _, err := s.create(ctx, fmt.Sprintf("acme-%d", i), "acme", dir, "sleep 600", "claude", nil, nil); err != nil {
+		if _, err := s.create(ctx, fmt.Sprintf("acme-%d", i), "acme", dir, "sleep 600", "claude", nil, nil, nil); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -116,7 +116,7 @@ func BenchmarkTranscriptPoll(b *testing.B) {
 func BenchmarkDraftPoll(b *testing.B) {
 	ctx := context.Background()
 	s, execs := benchSessions(b)
-	if _, err := s.create(ctx, "acme-0", "acme", b.TempDir(), "printf 'acme ready\\n'; sleep 600", "claude", nil, nil); err != nil {
+	if _, err := s.create(ctx, "acme-0", "acme", b.TempDir(), "printf 'acme ready\\n'; sleep 600", "claude", nil, nil, nil); err != nil {
 		b.Fatal(err)
 	}
 	bx := &Box{Name: "devbox", Sessions: s, Events: &events.Bus{}}
@@ -150,7 +150,7 @@ func BenchmarkPollScreens(b *testing.B) {
 	t.init()
 	for i := range 4 {
 		name := fmt.Sprintf("acme-%d", i)
-		if _, err := s.create(ctx, name, "acme", dir, "sleep 600", "", nil, nil); err != nil {
+		if _, err := s.create(ctx, name, "acme", dir, "sleep 600", "", nil, nil, nil); err != nil {
 			b.Fatal(err)
 		}
 		t.sess[name] = &sessTrack{Name: name, Agent: "acme-cli", Dir: dir, State: "running", Turns: []*Turn{{ID: name + "#1", Session: name, N: 1, State: "running", Fidelity: "screen"}}}

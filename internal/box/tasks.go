@@ -258,6 +258,9 @@ type TaskRequest struct {
 	// names (see AgentPreset); empty is the CLI's default.
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
+	// Driver and Mode, with an agent: see SessionRequest.
+	Driver string `json:"driver,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 	// FromSession names the session handing this work off, if any.
 	FromSession string `json:"from_session,omitempty"`
 	// Open asks the app to show the new session: "split" or "tab".
@@ -290,14 +293,25 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	command := req.Command
+	var launch *structuredLaunch
 	if command == "" && req.Agent != "" {
 		p, ok := presetFor(&loc, req.Agent)
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
-		if command, err = AgentCommandWith(p, req.Prompt, req.Model, req.Effort); err != nil {
+		if structured, err := wantStructured(req.Driver); err != nil {
+			return err
+		} else if structured {
+			l, err := b.launchClaude(p, req.Model, req.Effort, req.Mode, "")
+			if err != nil {
+				return err
+			}
+			launch, command = &l, p.Command
+		} else if command, err = AgentCommandWith(p, req.Prompt, req.Model, req.Effort); err != nil {
 			return err
 		}
+	} else if req.Driver != "" && req.Driver != DriverTerminal {
+		return badRequest("a driver needs an agent, not a command")
 	} else if req.Model != "" || req.Effort != "" {
 		return badRequest("a model or an effort needs an agent, not a command")
 	}
@@ -320,7 +334,12 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 	if req.Command == "" {
 		preset = req.Agent
 	}
-	sess, err := b.startSession(r, defaultSessionName(where, command), where, wt.Path, command, preset, preset != "" && req.Prompt != "")
+	var sess Session
+	if launch != nil {
+		sess, err = b.startStructuredSession(r, defaultSessionName(where, command), where, wt.Path, preset, *launch, req.Prompt)
+	} else {
+		sess, err = b.startSession(r, defaultSessionName(where, command), where, wt.Path, command, preset, preset != "" && req.Prompt != "")
+	}
 	if err != nil {
 		// A task is a worktree with an agent in it: without the agent, the
 		// worktree it made goes too, so a retry starts clean.
@@ -379,6 +398,18 @@ func (b *Box) enrich(ctx context.Context, all []Session) []Session {
 		if s.Agent == "" {
 			continue
 		}
+		s.Driver = b.driverFor(*s).Kind()
+		switch {
+		case s.Driver == DriverClaude:
+			s.Switch = "terminal"
+		case s.conv != "":
+			s.Switch = "chat"
+		}
+		if s.Driver == DriverClaude && !s.Exited {
+			// Followed from the first time it is seen (after a restart,
+			// the first list), so what it does is said as it does it.
+			b.claude().conv(*s)
+		}
 		if s.Exited {
 			if b.Turns != nil {
 				b.Turns.Exited(s.Name)
@@ -395,6 +426,16 @@ func (b *Box) enrich(ctx context.Context, all []Session) []Session {
 			s.Queued = st.Queued
 			if s.AgentState == "waiting" {
 				s.Ask = st.Ask
+				if s.Driver == DriverClaude {
+					if choices := b.claude().askChoices(*s); len(choices) > 0 {
+						ask := Ask{Choices: choices}
+						if s.Ask != nil {
+							ask = *s.Ask
+							ask.Choices = choices
+						}
+						s.Ask = &ask
+					}
+				}
 			}
 		}
 	}

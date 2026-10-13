@@ -20,6 +20,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/cosscom/shipyard/internal/agenthost"
 	"github.com/cosscom/shipyard/internal/box"
 	"github.com/cosscom/shipyard/internal/boxcmd"
 	"github.com/cosscom/shipyard/internal/debugserver"
@@ -205,6 +206,12 @@ func run(args []string) error {
 		return nil
 	case "headless":
 		return box.RunHeadless(args[1:], os.Stdout)
+	case "agent-host":
+		code, err := agenthost.Main(args[1:], os.Stdout)
+		if err != nil {
+			return err
+		}
+		os.Exit(code)
 	case "mcp":
 		return mcpserver.Serve(context.Background(), b.socket(), os.Stdin, os.Stdout)
 	case "agents":
@@ -350,18 +357,20 @@ func serve(b boxHome, args []string) error {
 		Watcher:      watcher,
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String(), *listen) },
 		LogDir:       filepath.Join(b.dir, "logs"),
-		Units:        &box.Units{Dir: filepath.Join(b.dir, "units")},
-		Turns:        turns,
-		Hooks:        hookRunner,
-		Flows:        box.FlowsAt(userDir, b.dir),
-		KitsDir:      filepath.Join(b.dir, "kits"),
-		EnvFile:      filepath.Join(userDir, "env.json"),
-		Paused:       &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
-		Secrets:      b.boxSecrets(),
-		Socket:       b.socket(),
-		Phone:        &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
-		Guard:        &box.Guard{Path: filepath.Join(userDir, "guard.json")},
-		Invites:      &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
+		// Structured agents' logs (claudedriver.go).
+		ConversationsDir: filepath.Join(b.dir, "conversations"),
+		Units:            &box.Units{Dir: filepath.Join(b.dir, "units")},
+		Turns:            turns,
+		Hooks:            hookRunner,
+		Flows:            box.FlowsAt(userDir, b.dir),
+		KitsDir:          filepath.Join(b.dir, "kits"),
+		EnvFile:          filepath.Join(userDir, "env.json"),
+		Paused:           &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
+		Secrets:          b.boxSecrets(),
+		Socket:           b.socket(),
+		Phone:            &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
+		Guard:            &box.Guard{Path: filepath.Join(userDir, "guard.json")},
+		Invites:          &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
 		Update: &box.SelfUpdate{
 			Executable:    exe,
 			Fingerprint:   id.Fingerprint().String(),

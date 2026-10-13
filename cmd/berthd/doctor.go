@@ -30,7 +30,9 @@ func daemonChecks(b boxHome, listening, listenFlag string) []doctor.Check {
 	default:
 		checks = append(checks, doctor.Check{Area: area, Name: "listening", Status: doctor.OK, Detail: listening})
 	}
-	if service.Installed(daemonService(b, listenFlag)) {
+	// install adds the login shell's PATH as it was then; doctor can't know
+	// it, so any PATH counts.
+	if service.InstalledAnyPATH(daemonService(b, listenFlag)) {
 		checks = append(checks, doctor.Check{Area: area, Name: "starts at boot", Status: doctor.OK, Detail: "installed as a user service"})
 	} else {
 		checks = append(checks, doctor.Check{Area: area, Name: "starts at boot", Status: doctor.Warn, Detail: "berthd runs, but not as a service", Fix: "berthd install"})

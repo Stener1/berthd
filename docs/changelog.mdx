@@ -22,6 +22,31 @@ again.
   between sections or keeping it off the dashboard twice in a row could
   lose the first change, because both saves read the same version of your
   projects. They now save one after the other.
+- **Settings › Boxes reads correctly to a screen reader.** A box with no
+  browsers running put its "No browsers running" note inside the browsers
+  list, so assistive tech announced an empty list with a stray line in it.
+  The note now stands on its own.
+- **Labs: a structured Claude agent opens in Claude Code's own terminal and
+  comes back.** The Terminal switch on a structured agent's pane stops it and
+  opens the same conversation in Claude Code's screen, for `/login`,
+  `/memory`, its menus and anything else only it does; Conversation brings it
+  back to the chat, with what was said in the terminal in its place. Needs the
+  box upgraded.
+
+- **Labs: structured Claude agents.** Turn on *Structured Claude agents*
+  in Settings › Labs and new Claude Code agents run without their
+  terminal: the box drives Claude Code through its stream and keeps its own
+  record of the conversation, so replies stream in as they are written,
+  nothing is read off a screen, and an agent keeps working while your
+  laptop is away or the box's berthd restarts. Permissions come to the chat
+  as Allow / Always allow / Deny, or with *Permissions: Bypass* (the
+  default) the box allows them for you; questions and plans always wait for
+  you. They open as conversations. Needs the box upgraded.
+- **Doctor no longer says berthd runs "not as a service" when it does.**
+  `berthd install` puts your login shell's PATH in the service, and doctor
+  compared the service with one that had no PATH, so on a Mac it always
+  asked you to run `berthd install` again. Now any PATH counts; the program,
+  its arguments and the rest must still match.
 
 ## v0.3.16
 

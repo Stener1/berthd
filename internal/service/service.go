@@ -222,6 +222,26 @@ func Installed(s Spec) bool {
 	return err == nil && bytes.Equal(have, want)
 }
 
+// InstalledAnyPATH is Installed for a unit whose PATH was the user's when
+// it was installed (ServicePATH): their login shell's, which changes as they
+// install things, so a caller can't render it again. Every other field must
+// still match.
+func InstalledAnyPATH(s Spec) bool {
+	u, ok, err := Read(s.Name)
+	if err != nil || !ok {
+		return false
+	}
+	if p, ok := u.Env["PATH"]; ok {
+		env := make(map[string]string, len(s.Env)+1)
+		for k, v := range s.Env {
+			env[k] = v
+		}
+		env["PATH"] = p
+		s.Env = env
+	}
+	return Installed(s)
+}
+
 // InstalledByName reports whether a unit file with this name exists at all,
 // whatever it contains.
 //

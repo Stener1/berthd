@@ -199,7 +199,7 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 		// or Enter, is someone answering. Text meant for the question
 		// (forced, or a key and Enter) is no answer it takes: refused.
 		b.awaitDrawn(ctx, name)
-		if req.Text != "" && !(isKey(req.Text) && !enter) && b.atStartupQuestion(ctx, Session{Name: name, Agent: agent}) {
+		if req.Text != "" && !(isKey(req.Text) && !enter) && b.atStartupQuestion(ctx, Session{Name: name, Agent: agent, Driver: sess.Driver}) {
 			if b.Turns == nil || req.Force || isKey(req.Text) {
 				return SendResult{}, startupText(agent)
 			}
@@ -218,7 +218,7 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 	if b.Turns != nil && req.When == "idle" && !b.Turns.Ready(name) {
 		return hold()
 	}
-	if err := b.Sessions.Send(ctx, name, req.Text, enter); err != nil {
+	if err := b.driverFor(sess).Send(ctx, sess, req.Text, enter); err != nil {
 		return SendResult{}, err
 	}
 	// Only that something was sent: prompts never go into events.

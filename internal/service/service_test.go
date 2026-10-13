@@ -127,6 +127,36 @@ func TestInstallIsIdempotentAndDetectsItself(t *testing.T) {
 	}
 }
 
+func TestAUnitWithTheUsersPATHCountsAsInstalledWhateverThatPATHWas(t *testing.T) {
+	spec := spec
+	for _, os_ := range []string{"darwin", "linux"} {
+		stub(t, os_)
+		spec.LogPath = filepath.Join(t.TempDir(), "berth.log")
+		withPATH := spec
+		withPATH.Env = map[string]string{"BERTH_HOME": spec.Env["BERTH_HOME"], "PATH": "/Users/alex/.local/bin:/opt/homebrew/bin:/usr/bin:/bin"}
+		if _, err := Install(withPATH); err != nil {
+			t.Fatalf("%s: %v", os_, err)
+		}
+		if Installed(spec) {
+			t.Fatalf("%s: Installed ignored the PATH; this test no longer shows anything", os_)
+		}
+		if !InstalledAnyPATH(spec) {
+			t.Fatalf("%s: a unit carrying the user's PATH didn't count as installed", os_)
+		}
+		other := spec
+		other.Args = []string{"agent", "--other"}
+		if InstalledAnyPATH(other) {
+			t.Fatalf("%s: a unit with other arguments counted as installed", os_)
+		}
+		if _, err := Uninstall(spec); err != nil {
+			t.Fatal(err)
+		}
+		if InstalledAnyPATH(spec) {
+			t.Fatalf("%s: still installed after uninstall", os_)
+		}
+	}
+}
+
 func TestInstallRefusesTemporaryAndRelativeBinaries(t *testing.T) {
 	stub(t, "darwin")
 	for _, program := range []string{filepath.Join(os.TempDir(), "berth"), "/Users/alex/Library/Caches/go-build/ab/berth", "bin/berth"} {

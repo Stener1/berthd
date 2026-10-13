@@ -235,6 +235,35 @@ box with the `commands` capability: `GET /v1/sessions/{name}/commands`
 (cached a minute, capped at 600) and `GET …/files?q=`. MCP servers' prompts
 aren't listed: the agent reads them from each server once it starts.
 
+## Structured Claude agents
+
+With *Structured Claude agents* on in Settings › Labs, a new Claude Code
+agent runs without its terminal. The box starts `claude -p` speaking
+stream-json under `berthd agent-host`, which keeps the agent running in its
+tmux session and writes everything that passes between them to the box's
+own record of the conversation. The box drives it from there:
+
+- **The conversation** is read from that record, and the reply being written
+  streams into the chat as it is written.
+- **Permissions** come to the chat with Allow, Always allow (for the rest of
+  the session) and Deny. *Permissions: Bypass*, the default, has the box allow
+  them for you instead; questions the agent asks and its plans always wait
+  for you. The chat's mode menu switches between bypass, ask, accept edits,
+  plan and auto.
+- **Stop** interrupts the turn, as Esc does in its terminal.
+- **Claude Code's own terminal** is one click away: the pane's Terminal
+  switch stops the structured agent and opens the same conversation in
+  Claude Code's screen (`claude --resume`), for what only it does
+  (`/login`, `/resume`, `/memory`, `/permissions`, its menus). Conversation
+  takes it back to the chat, with what you said in the terminal in its place.
+  Either way needs the agent to be idle. In a folder Claude Code hasn't
+  seen, its screen first asks whether you trust it.
+
+The agent keeps working while berthd restarts or upgrades, and the record
+keeps every streamed word even if the agent is killed. The box needs the
+`driver.claude` capability, and `driver.switch` for the terminal (upgrade
+it).
+
 ## Zen
 
 ⌘. puts everything but the agents away: no sidebar, tab strip or status

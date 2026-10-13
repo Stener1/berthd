@@ -147,7 +147,9 @@ func (b *Box) Capabilities() []string {
 	// /v1/locations/{name}/worktrees/{worktree} names one, worktreetitles.go).
 	// agents.paths: info says where each agent CLI was found
 	// (agent_paths), and POST /v1/agents/refresh looks again (agentpaths.go).
-	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths", "login"}
+	// driver: agent sessions say how berthd reaches their agent ("driver",
+	// driver.go).
+	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths", "login", "driver"}
 	if b.Turns != nil {
 		// controls: POST .../keys, .../interrupt and .../mode, GET
 		// .../controls (controls.go).
@@ -159,6 +161,13 @@ func (b *Box) Capabilities() []string {
 	caps = append(caps, "draft")
 	if b.Runs != nil {
 		caps = append(caps, "runs", "exec.detach")
+	}
+	if b.ConversationsDir != "" {
+		// driver.claude: sessions and tasks take "driver": "claude", Claude
+		// Code driven through its stream (claudedriver.go).
+		// driver.switch: POST .../switch takes a structured session to
+		// Claude Code's terminal and back (switch.go).
+		caps = append(caps, "driver.claude", "driver.switch")
 	}
 	if b.Artifacts != nil {
 		// artifacts: berthd artifact add, a worktree's artifacts and their

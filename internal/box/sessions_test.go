@@ -281,7 +281,7 @@ func TestGetAndCaptureIsGetAndAScreen(t *testing.T) {
 	var mu sync.Mutex
 	asked := map[string]int{}
 	s.trace = func(args []string) { mu.Lock(); asked[args[0]]++; mu.Unlock() }
-	if _, err := s.create(ctx, "both", "acme", t.TempDir(), "printf 'acme ready\\n'; sleep 30", "claude", nil, nil); err != nil {
+	if _, err := s.create(ctx, "both", "acme", t.TempDir(), "printf 'acme ready\\n'; sleep 30", "claude", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	want, err := s.Get(ctx, "both")

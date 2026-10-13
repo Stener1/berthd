@@ -170,7 +170,9 @@ func (b *Box) awaitDrawn(ctx context.Context, name string) int {
 // question now: from its watch, or, for one no watch follows (berthd
 // restarted while it asked), from its screen.
 func (b *Box) atStartupQuestion(ctx context.Context, sess Session) bool {
-	if sess.Agent == "" {
+	if sess.Agent == "" || sess.Driver == DriverClaude {
+		// A structured agent asks nothing at its start: its first prompt
+		// waits only for its host (startStructured).
 		return false
 	}
 	if v, ok := startups.Load(startKey{b, sess.Name}); ok {

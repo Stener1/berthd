@@ -74,6 +74,10 @@ type Ask struct {
 	Input   string `json:"input,omitempty"`
 	Why     string `json:"why,omitempty"`
 	Message string `json:"message,omitempty"`
+	// Choices are the answers a structured session offers, by the key
+	// that picks one (claudedriver.go); a terminal's are on its screen.
+	// Never kept: the session list asks its driver.
+	Choices []AskChoice `json:"choices,omitempty"`
 }
 
 // SessionState is what an agent session is doing now.
@@ -1052,7 +1056,7 @@ func (t *Turns) NoteAsk(data map[string]any, raw any) {
 		return
 	}
 	ask := Ask{Tool: askStr(m, "tool"), Input: askStr(m, "input"), Why: askStr(m, "why"), Message: askStr(m, "message")}
-	if ask == (Ask{}) {
+	if ask.Tool == "" && ask.Input == "" && ask.Why == "" && ask.Message == "" {
 		return
 	}
 	t.mu.Lock()
@@ -1246,6 +1250,29 @@ func (t *Turns) failQueued(it inboxItem, why string) {
 }
 
 // Changed returns a channel closed at the ledger's next change.
+// AwaitSent waits up to d for a prompt sent to the session to be in the
+// ledger: a turn pending, or begun. A structured agent's start can be read
+// before berthd has said it sent the prompt that starts it.
+func (t *Turns) AwaitSent(name string, d time.Duration) {
+	deadline := time.After(d)
+	for {
+		t.mu.Lock()
+		t.init()
+		s := t.sess[name]
+		ready := s != nil && (s.oldest("pending") != nil || (s.current() != nil && s.current().State == "running"))
+		changed := t.changed
+		t.mu.Unlock()
+		if ready {
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			return
+		}
+	}
+}
+
 func (t *Turns) Changed() <-chan struct{} {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1511,7 +1538,7 @@ func (b *Box) deliverInbox(ctx context.Context) {
 			continue
 		}
 		unlock := b.lockSend(it.Session)
-		if err := b.Sessions.Send(ctx, it.Session, it.Text, it.Enter); err != nil {
+		if err := b.sendText(ctx, it.Session, it.Text, it.Enter); err != nil {
 			b.Turns.failQueued(it, err.Error())
 			unlock()
 			continue

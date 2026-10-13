@@ -53,6 +53,15 @@ func (b *Box) draft(w http.ResponseWriter, r *http.Request) error {
 	if err != nil && sess.Name == "" {
 		return err
 	}
+	if d := b.driverFor(sess); d.Kind() != DriverTerminal {
+		// A structured session's reply streams to berthd, not its screen.
+		out, err := d.Draft(r.Context(), sess)
+		if err != nil {
+			return err
+		}
+		writeJSON(w, out)
+		return nil
+	}
 	agent := firstNonEmpty(sess.Preset, firstNonEmpty(sess.Agent, agentOf(sess.Command)))
 	out := Draft{Agent: agent}
 	if agent == "claude" && sess.Service == "" && !sess.Exited {
