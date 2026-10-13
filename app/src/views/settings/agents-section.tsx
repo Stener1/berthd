@@ -7,7 +7,10 @@ import { SkillsPanel } from "@/components/skills/skills-panel";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip";
+import { SimpleSelect } from "@/components/simple-select";
 import type { AgentPreset } from "@/lib/api";
+import { plainError } from "@/lib/errors";
+import { type Project, projectActions, useProjects } from "@/lib/project-groups";
 import { endSnooze, setRemind, useSkillsNotice } from "@/lib/skills-notice";
 import { neverRemind, untilText } from "@/lib/skills-notice-model";
 import { NONE, useStore } from "@/lib/store";
@@ -125,6 +128,8 @@ export function AgentsSection() {
         </section>
       )}
 
+      <OffBoard />
+
       {boxes.length > online.length && <p className="text-muted-foreground text-xs">Offline boxes are listed once they reconnect.</p>}
     </SettingsPage>
   );
@@ -159,5 +164,45 @@ function SkillsReminder({ box }: { box: string }) {
         <Switch checked={!off} disabled={!loaded} onCheckedChange={(on) => void setRemind(box, on)} />
       </SettingsRow>
     </div>
+  );
+}
+
+// OffBoard is the projects whose agents stay off the Agent Dashboard and
+// its counts: work followed somewhere else, such as a plugin's own board.
+// The choice is the project's, on every box, and kept on the laptop agent
+// with its name and section.
+function OffBoard() {
+  const { projects } = useProjects();
+  const [error, setError] = useState<string>();
+  const off = projects.filter((p) => p.dashboardHidden);
+  const on = projects.filter((p) => !p.dashboardHidden);
+  const set = (p: Project, hidden: boolean) => {
+    setError(undefined);
+    projectActions.setDashboardHidden(p, hidden).catch((err) => setError(plainError(err)));
+  };
+  if (!projects.length) return null;
+  return (
+    <SettingsGroup title="Agent Dashboard" description="Projects kept off the Agent Dashboard and its counts in the sidebar and status bar. Their agents still show in the sidebar, on Home and in notifications.">
+      {off.map((p) => (
+        <SettingsRow key={p.id} label={p.name} description={p.members.length > 1 ? `Kept off, on ${p.members.map((m) => m.box.name).join(", ")}` : "Kept off"}>
+          <Button size="sm" variant="outline" onClick={() => set(p, false)}>
+            Show
+          </Button>
+        </SettingsRow>
+      ))}
+      <SettingsRow label="Keep a project off" description={error ?? (off.length ? undefined : "Every project shows on the dashboard.")}>
+        <SimpleSelect
+          size="sm"
+          className="w-48"
+          placeholder="Choose a project…"
+          value=""
+          options={on.map((p) => ({ value: p.id, label: p.name }))}
+          onChange={(id) => {
+            const p = on.find((x) => x.id === id);
+            if (p) set(p, true);
+          }}
+        />
+      </SettingsRow>
+    </SettingsGroup>
   );
 }

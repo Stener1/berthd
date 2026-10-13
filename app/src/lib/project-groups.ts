@@ -29,6 +29,8 @@ export interface ProjectOverride {
   members?: MemberRef[];
   default_box?: string;
   section?: string;
+  // Its agents stay off the Agent Dashboard and its counts.
+  dashboard_hidden?: boolean;
 }
 
 export interface ProjectsDoc {
@@ -52,6 +54,7 @@ export interface Project {
   // The box new work goes to unless another is chosen.
   defaultBox: string;
   section?: string;
+  dashboardHidden: boolean;
 }
 
 const EMPTY: ProjectsDoc = { projects: [], sections: [] };
@@ -149,6 +152,7 @@ export function deriveProjects(boxes: BoxStatus[], data: Record<string, { locati
       members,
       defaultBox,
       section: o?.section && doc.sections.includes(o.section) ? o.section : undefined,
+      dashboardHidden: !!o?.dashboard_hidden,
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -166,6 +170,13 @@ export function useProjects(): { projects: Project[]; sections: string[] } {
     const data = Object.fromEntries(Object.entries(locations).map(([name, l]) => [name, { locations: l }]));
     return { projects: deriveProjects(boxes, data, doc), sections: doc.sections };
   }, [boxes, locations, doc]);
+}
+
+// useBoardHidden is every member of a project kept off the Agent
+// Dashboard, as "box/location".
+export function useBoardHidden(): ReadonlySet<string> {
+  const { projects } = useProjects();
+  return useMemo(() => new Set(projects.filter((p) => p.dashboardHidden).flatMap((p) => p.members.map((m) => `${m.box.name}/${m.loc.name}`))), [projects]);
 }
 
 export function projectOf(box: string, location: string): Project | undefined {
@@ -186,6 +197,7 @@ export const projectActions = {
   rename: (p: Project, name: string) => saveProjects((d) => upsert(d, p.id, { name: name.trim() || undefined })),
   setDefaultBox: (p: Project, box: string) => saveProjects((d) => upsert(d, p.id, { default_box: box })),
   setSection: (p: Project, section?: string) => saveProjects((d) => upsert(d, p.id, { section })),
+  setDashboardHidden: (p: Project, hidden: boolean) => saveProjects((d) => upsert(d, p.id, { dashboard_hidden: hidden || undefined })),
   addSection: (name: string, p?: Project) =>
     saveProjects((d) => {
       const n = name.trim();

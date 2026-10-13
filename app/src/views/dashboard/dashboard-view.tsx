@@ -8,10 +8,11 @@ import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Kbd } from "@/components/ui/kbd";
-import { type SessionEntry, useAllSessions } from "@/hooks/use-agent-counts";
+import { type SessionEntry, useBoardSessions } from "@/hooks/use-agent-counts";
 import { liftToasts } from "@/hooks/lift-toasts";
 import { agentOf, type SessionState, worktreeOf } from "@/lib/derive";
 import { ago } from "@/lib/format";
+import { useProjects } from "@/lib/project-groups";
 import { openBroadcast } from "@/lib/prompts";
 import { load, save } from "@/lib/storage";
 import { useStore } from "@/lib/store";
@@ -43,7 +44,9 @@ const sinceOf = (e: SessionEntry) => new Date(e.session.state_since ?? e.session
 // DashboardView is every agent on every box as a board, by what it needs:
 // you, time, a look at what it did, or a first prompt.
 export function DashboardView() {
-  const all = useAllSessions();
+  // Without the projects kept off it in Settings → Agents.
+  const all = useBoardSessions();
+  const offBoard = useProjects().projects.filter((p) => p.dashboardHidden).length;
   // With no box at all, a new worktree has nowhere to go: the way on is a box.
   const noBoxes = useStore((s) => !!s.status && s.status.boxes.length === 0);
   const boxNames = useMemo(() => [...new Set(all.map((e) => e.box))].sort(), [all]);
@@ -98,7 +101,19 @@ export function DashboardView() {
     <div className="relative flex h-full flex-col">
       <ViewHeader
         title="Agent Dashboard"
-        description={filtered ? `Showing ${shownBoxes.join(", ")} only` : "Every agent on every box, by what it needs."}
+        description={
+          <>
+            {filtered ? `Showing ${shownBoxes.join(", ")} only.` : "Every agent on every box, by what it needs."}
+            {offBoard > 0 && (
+              <>
+                {" "}
+                <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => useStore.getState().setView({ kind: "settings", section: "agents" })} data-testid="dashboard-off-board">
+                  {offBoard} {offBoard === 1 ? "project" : "projects"} kept off
+                </button>
+              </>
+            )}
+          </>
+        }
         actions={
           <div className="flex items-center gap-2">
             {agents.length > 0 && (
