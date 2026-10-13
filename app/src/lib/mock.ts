@@ -7,6 +7,7 @@ import { mockRequirements } from "@/lib/mock-requirements";
 import { browserCall, mockScreencast, mockShotSvg, wireBrowserMock } from "@/lib/mock-browser";
 import { mockDevtoolsCall } from "@/lib/mock-devtools";
 import { phoneCall } from "@/lib/mock-phone";
+import { turnCheckCall } from "@/lib/mock-turncheck";
 import { worktreesCall } from "@/lib/mock-worktrees";
 import { kitsCall, kitsStream } from "@/lib/mock-kits";
 import { marketplaceCall, marketplaceFile, marketplaceReady, type MockPlugin, seededPlugins } from "@/lib/mock-marketplace";
@@ -179,7 +180,7 @@ const sessions: Record<string, Session[]> = {
     // Three agents in one worktree, so the board has to tell them apart.
     { name: "order-export-claude", title: "Export orders as CSV from the admin", location: "shop/order-export", dir: "/home/me/work/shop-order-export", command: "claude 'Export orders as CSV from the admin'", created: ago(1700), attached: 0, exited: false, agent: "claude", agent_state: "finished", state_since: ago(1560) },
     { name: "order-export-claude-2", location: "shop/order-export", dir: "/home/me/work/shop-order-export", command: "claude", created: ago(320), attached: 0, exited: false, agent: "claude", agent_state: "idle", state_since: ago(290) },
-    { name: "order-export-claude-3", title: "Add tests for the export job", location: "shop/order-export", dir: "/home/me/work/shop-order-export", command: "claude 'Add tests for the export job'", created: ago(140), attached: 0, exited: false, agent: "claude", agent_state: "finished", state_since: ago(75) },
+    { name: "order-export-claude-3", title: "Add tests for the export job", location: "shop/order-export", dir: "/home/me/work/shop-order-export", command: "claude 'Add tests for the export job'", created: ago(140), attached: 0, exited: false, agent: "claude", agent_state: "finished", state_since: ago(75), unfinished: true },
     // Its repository's Playwright tests run near its 12 GB memory limit
     // (mock-processes).
     { name: "https-linear-app-acme-claude", title: "Fix the cart badge after a refund", location: "shop/https-linear-app-acme", dir: "/home/me/work/shop-https-linear-app-acme", command: "claude", created: ago(44), attached: 0, exited: false, agent: "claude", agent_state: "idle", state_since: ago(40), scope: "berth-https-linear-app-acme-claude-tq1.scope", usage: LINEAR_USAGE },
@@ -188,6 +189,8 @@ const sessions: Record<string, Session[]> = {
   gpu: [
     { name: "ci-flake-claude", title: "Move acme billing to the new ledger", location: "shop/ci-flake", dir: "/home/me/shop-ci-flake", command: "claude", created: ago(30), attached: 0, exited: false, agent: "claude", agent_state: "finished", state_since: ago(6) },
     { name: "judge-v2-claude", title: "Tune the judge prompt", location: "evals/judge-v2", dir: "/home/me/evals-judge-v2", command: "claude", created: ago(9), attached: 0, exited: false, agent: "claude", agent_state: "running", state_since: ago(1) },
+    // Turn check read its turn as parked: it checks back on a reply later.
+    { name: "evals-claude", title: "Rerun the evals once the vendor replies", location: "evals", dir: "/home/me/evals", command: "claude", created: ago(400), attached: 0, exited: false, agent: "claude", agent_state: "finished", state_since: ago(180), parked: true },
     { name: "evals-codex", location: "evals", dir: "/home/me/evals", command: "codex", created: ago(3), attached: 0, exited: false, agent: "codex", agent_state: "idle", state_since: ago(3) },
     // Asks a form of questions (AskUserQuestion) after a reply with code.
     { name: "shop-claude", title: "Plan the checkout release", location: "shop", dir: "/home/me/shop", command: "claude", created: ago(12), attached: 0, exited: false, agent: "claude", agent_state: "waiting", state_since: ago(2), ask: { tool: "AskUserQuestion", message: "Three questions about the release window" } },
@@ -675,6 +678,8 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
   if (thisMac) return thisMac;
   const phone = phoneCall(box, method, path, body, delay);
   if (phone) return phone;
+  const turnCheck = turnCheckCall(box, method, path, body, delay);
+  if (turnCheck) return turnCheck;
   const usage = usageCall(box, method, path, body, delay);
   if (usage) return usage;
   const wts = worktreesCall(box, method, path, body, { locations, sessions }, emit, delay);

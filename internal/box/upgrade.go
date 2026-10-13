@@ -167,7 +167,12 @@ func (b *Box) Capabilities() []string {
 		// Code driven through its stream (claudedriver.go).
 		// driver.switch: POST .../switch takes a structured session to
 		// Claude Code's terminal and back (switch.go).
-		caps = append(caps, "driver.claude", "driver.switch")
+		// conversations: GET /v1/conversations, POST .../{id}/resume and
+		// POST /v1/sessions/{name}/resume (conversations.go).
+		// driver.codex: "driver": "codex", Codex's app server (codexdriver.go).
+		// driver.acp: "driver": "acp", an agent whose preset says how it
+		// speaks ACP (acpdriver.go).
+		caps = append(caps, "driver.claude", "driver.codex", "driver.acp", "driver.switch", "conversations")
 	}
 	if b.Artifacts != nil {
 		// artifacts: berthd artifact add, a worktree's artifacts and their

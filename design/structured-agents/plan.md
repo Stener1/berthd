@@ -1,6 +1,6 @@
 # Structured agents: plan
 
-Status: 2026-10-13. Phase 0 (spike) done: go. Phases 1 (driver interface) and 2 (agent-host + log) merged. Phase 3 (Claude driver, behind Labs) merged. Phase 4a (terminal and back) in review; 4b (resume, conversation index) next. The spike's recordings join the repo as test fixtures in phase 3, once reviewed.
+Status: 2026-10-13. Phase 0 (spike) done: go. Phases 1 (driver interface) and 2 (agent-host + log) merged. Phase 3 (Claude driver, behind Labs) merged. Phase 4a (terminal and back) merged; 4b (resume, conversation index), 5 (Codex) and 6 (ACP) in review, stacked. The spike's recordings join the repo as test fixtures in phase 3, once reviewed.
 
 ## Why
 
@@ -90,10 +90,10 @@ Exit: a go/no-go note per item; any no-go changes the phases below.
 - Keep streamed partial text in the log (a killed agent loses it). Stop =
   interrupt, then SIGTERM, then kill the process tree (SIGKILL leaves Bash
   children running).
-- The SQLite index (conversation id, location/worktree, agent, driver, agent
-  session id, title, status, cost, timestamps) comes with resume and the
-  terminal hand-off (phase 4), the first thing that looks conversations up
-  after their session is gone.
+- The index is a meta.json per conversation folder (where it works, its
+  session, Claude's session id, mode, title, times), listed by scanning the
+  folder: at a box's scale that needs no database or migrations, and the
+  folder describes itself. GET /v1/conversations reads it (phase 4b).
 - Push to the app via the events bus (items in the event, not a "changed" ping);
   no stat-polling for driver agents.
 - Attaching to the tmux session shows a readable live render, so `berth attach` keeps working.

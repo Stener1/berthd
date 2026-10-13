@@ -1,44 +1,4 @@
-import {
-  ActivityIcon,
-  ListPlusIcon,
-  PaletteIcon,
-  ArchiveIcon,
-  ArrowUpCircleIcon,
-  ArrowUpRightIcon,
-  BotIcon,
-  CheckIcon,
-  FolderInputIcon,
-  MergeIcon,
-  PackageIcon,
-  PencilIcon,
-  PlusIcon,
-  ServerIcon,
-  SplitIcon,
-  CodeXmlIcon,
-  CopyIcon,
-  EllipsisIcon,
-  ExternalLinkIcon,
-  FolderOpenIcon,
-  GitBranchIcon,
-  GitCompareArrowsIcon,
-  GitBranchPlusIcon,
-  GitPullRequestIcon,
-  GlobeIcon,
-  HomeIcon,
-  LinkIcon,
-  PlayIcon,
-  RotateCwIcon,
-  Settings2Icon,
-  SquareIcon,
-  SquareTerminalIcon,
-  StethoscopeIcon,
-  Trash2Icon,
-  UnplugIcon,
-  WorkflowIcon,
-  WrenchIcon,
-  BellOffIcon,
-  UsersRoundIcon,
-} from "lucide-react";
+import { ActivityIcon, ListPlusIcon, PaletteIcon, ArchiveIcon, ArrowUpCircleIcon, ArrowUpRightIcon, BotIcon, CheckIcon, FolderInputIcon, MergeIcon, PackageIcon, PencilIcon, PlusIcon, ServerIcon, SplitIcon, CodeXmlIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, FolderOpenIcon, GitBranchIcon, GitCompareArrowsIcon, GitBranchPlusIcon, GitPullRequestIcon, GlobeIcon, HomeIcon, LinkIcon, PlayIcon, RotateCwIcon, Settings2Icon, SquareIcon, SquareTerminalIcon, StethoscopeIcon, Trash2Icon, UnplugIcon, WorkflowIcon, WrenchIcon, BellOffIcon, UsersRoundIcon, HistoryIcon } from "lucide-react";
 import { type ComponentProps, createContext, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
@@ -57,11 +17,11 @@ import { Kbd } from "@/components/ui/kbd";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuSub, MenuSubPopup, MenuSubTrigger, MenuTrigger } from "@/components/ui/menu";
 import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
-import { agentPresets, openBrowserAt, startSession, stopSession } from "@/lib/actions";
-import { boxApi, type BoxStatus, laptopApi, type Location, type Worktree, type WorktreeService } from "@/lib/api";
+import { agentPresets, openBrowserAt, resumeConversation, startSession, stopSession } from "@/lib/actions";
+import { boxApi, type BoxStatus, type Conversation, laptopApi, type Location, type Worktree, type WorktreeService } from "@/lib/api";
 import { portUrl } from "@/lib/browser-url";
 import { agentOf, worktreeSessions } from "@/lib/derive";
-import { errorMessage } from "@/lib/format";
+import { ago, errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -373,6 +333,9 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
         }),
       ),
     },
+    ...(st.boxes[box]?.info?.capabilities?.includes("conversations")
+      ? [{ type: "sub" as const, label: "Resume a conversation", icon: <HistoryIcon />, items: () => <ResumeItems box={box} loc={loc} wt={wt} /> }]
+      : []),
     { type: "sub", label: "Run", icon: <PlayIcon />, items: () => <RunItems box={box} loc={loc} wt={wt} /> },
     item(url ? "Open dev server in browser tab" : "New browser tab", <GlobeIcon />, () => {
       select();
@@ -502,6 +465,39 @@ function ReviewLinkAsItems({ box, loc, wt }: { box: string; loc: Location; wt: W
   const login = useLoginConfig(box, loc.name);
   if (!login?.users?.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-xs">{loc.name} lists no dev users to log in as.</div>;
   return <ActionItems items={login.users.map((u) => item(loginUserLabel(u), <span className="size-4" />, () => void copyReviewLink(box, loc, wt, { as: u.email })))} />;
+}
+
+// ResumeItems are the worktree's structured conversations whose agent isn't
+// running, newest first: each carries on where it left off.
+function ResumeItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
+  const [list, setList] = useState<Conversation[]>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    const client = useStore.getState().client;
+    if (!client) return;
+    boxApi.conversations(client, box, wt.path).then(
+      (all) => setList(all.filter((c) => !c.live)),
+      (e) => {
+        setList([]);
+        setError(plainError(e));
+      },
+    );
+  }, [box, wt.path]);
+  if (!list) {
+    return (
+      <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-xs">
+        <Spinner className="size-3" /> Loading…
+      </div>
+    );
+  }
+  if (!list.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-xs">{error ?? "No structured conversations to resume here."}</div>;
+  const items: Action[] = list.slice(0, 12).map((c) =>
+    item(`${c.title || "Untitled"} · ${ago(c.updated ?? c.created)}`, slot(<AgentIcon agent={c.agent} />), () => {
+      selectWorktree(refOf(box, loc, wt));
+      void resumeConversation(box, c, wsKey(box, wt.path));
+    }),
+  );
+  return <ActionItems items={items} />;
 }
 
 function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {

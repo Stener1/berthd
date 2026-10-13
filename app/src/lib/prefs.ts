@@ -43,9 +43,9 @@ export interface Prefs {
   labsChosen: boolean;
   // Labs: how an agent's pane opens, until switched.
   agentView: "terminal" | "conversation";
-  // Labs: new Claude Code agents run structured, driven through their
-  // stream by berthd rather than typed into, and open as conversations
-  // (boxes with "driver.claude").
+  // Labs: new Claude Code and Codex agents run structured, driven through
+  // their stream or app server by berthd rather than typed into, and open as
+  // conversations (boxes with "driver.claude", "driver.codex").
   structuredClaude: boolean;
   // What a structured agent's permissions do: "bypass" has berthd allow
   // them (questions and plans still ask), "ask" brings each to you.

@@ -191,6 +191,7 @@ failed after it went out (the box may have acted on it). The box API:
 | `POST helpers/{plugin}/attach-env` | `{ location, worktree, env? }` → `HelperEnvLook`. Has the box look in a worktree's own dotenv files for the variables the helper's manifest names (`attach_env`) and tell the helper, as it is told before one of the worktree's services starts: the same body to its `attach` path, with its token and two seconds to answer, and `.env` where the service's name would be, so a helper that files what it is told by that name replaces what the last look found and keeps what a service said. `worktree` is its name; empty is the location's main checkout. Only `.env`, `.env.development`, `.env.local` and `.env.development.local` in the worktree's folder are read, in that order, a later file winning: never another path, never through a link out of the worktree, at most 256 KB each. They are read as dotenv writes them (comments, `export`, single and double quotes with escapes in double quotes, backticks, values over several lines); `${NAME}`, `${NAME:-fallback}` and `$NAME` are filled in from the other variables of the same files, never from berthd's environment, and nothing is run. The answer is `{ plugin, location, worktree, command: ".env", files, skipped, variables, answer }`: `files` the names that were read; `skipped` the ones that are there and were not, `{ file, reason }` with `reason` one of `outside`, `not_a_file`, `too_large`, `not_text`, `unreadable`; `variables` the matching ones, `{ name, file, sent, reason? }`, where a variable that was not sent says why (`secret` for an `op://` or `env://` reference, `unresolved` for a `${NAME}` the files do not set, `empty`, `too_long`); and `answer` the helper's own answer without its `env` (for `berth-database`, `{ source, connections }` with the ids of the databases it took). No value is in it. Nothing found is a `200` with empty lists, and the helper is still told, so what an earlier look found goes. Nothing the helper answers is put in any environment, and the worktree is not added to the helper's attached services. 409 `helper_off` when the helper is not running (no file is read then), 409 `helper_no_attach` for a helper whose manifest names no `attach` path, 502 `helper_unreachable` when it did not answer in time or answered an error, `not_found` for a location or worktree the box does not know, and `refused` when a `before:helper.attach` hook says no, and for a caller on the box's own socket: only a paired laptop asks. A berthd from before this answers a plain 404, which the laptop agent passes on as `box_outdated`. **With `env`** (`{ "DATABASE_URL": "…" }`, one or more variables), no file is read: the helper is told those variables, which a person gave, with `.manual` as `command`, in place of what it was last told that way, and an empty `env` takes it back. The answer is the same shape with `command: ".manual"`, no `files`, and each variable as `{ name, file: "", sent: true }`. 400 `bad_request` for a name the manifest's `attach_env` does not match, a name that is not a variable's (it is not repeated), an empty or over-long value, or one that names a secret. A value given this way is a secret: it is read from the request's body, handed to the helper, and is in no answer, error, log or event of berthd's, which keeps none of it; the gate's data has `from: ".manual"` and not the variables |
 | `ANY helpers/{plugin}/api/{path}` | The helper's own API, relayed: `{path}`, the query and the body reach it as they were sent, and its answer comes back as it is, a stream included. The request reaches the helper as one from the box itself: its `Host` is the helper's loopback address, and `Origin`, `Referer`, `Cookie` and `Authorization` are removed. 409 `helper_off` when the helper is not running; 502 `helper_unreachable` when it did not answer. One answer does not come back as the helper wrote it: its own 401. On the connection between the laptop and a box a 401 means the box no longer trusts the laptop, so the agent asks the box, and when the box still answers it the helper's refusal comes back as 401 `unauthorized` in the agent's words (a helper that asks for a token refuses a box whose `berthd` is from before it sent one) |
 | `GET phone`, `PUT phone` | the [phone companion](/guides/phone) |
+| `GET turncheck`, `PUT turncheck` | `{ enabled, provider, key, url?, model?, key_set }`: [turn check](/concepts/sessions-and-agents#agent-state). `provider` is `gateway` (Jev on AI Gateway), `openai` (OpenAI's Decisions API) or `laya` (a server of your own at `url`), with no default. `key` is a secret reference (`op://…` or `env://NAME`), never a value; `key_set` says a key is kept for the chosen provider. PUT also takes `key_value`, a pasted key kept on the box for that provider and never answered, or `remove_key`. Turning it on needs a provider; `gateway` and `openai` also a `model` and a key, `laya` a `url`. `url` is only for `laya` and must be http or https; a key with `laya` is refused, and a reference set for one provider is dropped when the provider changes. A paired laptop's only: 403 on the box's own socket |
 | `GET events?since=SEQ&max=N`, `POST events` | the box's event stream as NDJSON, and announcing one (`{ type, data? }`). Events carry `seq`, their number in the box's journal; with `since`, the stream first replays what the journal holds after it (at most `max`, default 5000) |
 | `GET worktrees?location=L` | every worktree's git status |
 | `GET locations/{name}/worktrees/{wt}/log?limit=N` | the worktree's commits |
@@ -221,11 +222,18 @@ failed after it went out (the box may have acted on it). The box API:
 `waiting`, `finished`), plus `preset` (the agent preset it was started
 with), `turn` (its current or last turn), `state_seq` and `fidelity`
 (`hooks`, `partial` or `screen`), `queued` (prompts held until it is idle)
-and, while it waits, `ask` (what its hooks said it asks for). `driver`
+and, while it waits, `ask` (what its hooks said it asks for). A `finished`
+agent that [turn check](/concepts/sessions-and-agents#agent-state) read as
+unfinished carries `unfinished: true` (something still runs; shown as
+Working) or `parked: true` (it waits on a reply or a later time; shown as
+Idle). `driver`
 says how the box reaches the agent: `terminal` (its own screen in tmux) for
 every agent but a structured one, or `claude` (Claude Code driven through
 its stream); boxes that say it list `driver` in `capabilities`. `POST
-sessions` and `POST tasks` take `driver: "claude"` with `agent: "claude"`,
+sessions` and `POST tasks` take `driver: "claude"` with `agent: "claude"`
+(or `driver: "codex"` with `agent: "codex"`, Codex's app server, on boxes
+listing `driver.codex`, or `driver: "acp"` with an agent whose preset has
+`acp`, on boxes listing `driver.acp`),
 and `mode`, the permission mode it starts in (`bypassPermissions` has the
 box allow what it asks; questions and plans still wait), on boxes that list
 `driver.claude`. A waiting structured session's `ask` carries `choices`
@@ -233,7 +241,14 @@ box allow what it asks; questions and plans still wait), on boxes that list
 with `{ to: "terminal" }` or `{ to: "chat" }` moves a structured session to
 Claude Code's own terminal (`claude --resume`) and back, answering the
 `Session`; its `switch` says where it can go, 409 while the agent works.
-Boxes that take it list `driver.switch`. `exited` is
+Boxes that take it list `driver.switch`. A structured conversation outlives
+its session: `GET conversations?path=P` lists those that worked in `P`,
+newest first (`{ id, agent, location?, dir, session?, live?,
+agent_session_id?, mode?, title?, created, updated? }`); `POST
+conversations/{id}/resume` carries one on, in its session (started again if
+it ended) or a new one, answering the `Session`; `POST
+sessions/{name}/resume` starts an ended structured session again on its own
+record. Boxes that take them list `conversations`. `exited` is
 true once the program has ended. `title` names the work: the first line of
 the prompt it started with, or of the first prompt it was sent or typed, cut
 to about 48 characters; `PATCH sessions/{name}` with `{ title }` renames it

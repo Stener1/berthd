@@ -315,6 +315,21 @@ func (c *conv) call(toolID string, tc ToolCall) {
 	}
 }
 
+// retitle says what a call does once its agent says more: its target, in
+// the group it is in, when it does the same kind of thing.
+func (c *conv) retitle(toolID string, tc ToolCall) {
+	i, ok := c.byTool[toolID]
+	it := c.at(i)
+	if !ok || it == nil || it.Kind != "tools" || it.Verb != tc.Verb {
+		return
+	}
+	for j := range it.Items {
+		if it.Items[j].ID == toolID {
+			it.Items[j].Target, it.Items[j].File = tc.Target, tc.File
+		}
+	}
+}
+
 // launched marks a helper as running in the background: its tool call
 // answers at once, and it is back only when its notification says so.
 func (c *conv) launched(toolID string) {
