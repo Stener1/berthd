@@ -63,12 +63,12 @@ export function WidgetSkeleton({ rows = 3, className }: { rows?: number; classNa
   );
 }
 
-// More says how many rows didn't fit.
+// More says how many rows didn't fit; as a button, a full 24px touch target.
 export function More({ n, label, onClick }: { n: number; label: string; onClick?: () => void }) {
   if (n <= 0) return null;
   const text = `+${n} more ${label}`;
   return onClick ? (
-    <button type="button" onClick={onClick} className="self-start rounded-sm px-2 pt-0.5 text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+    <button type="button" onClick={onClick} className="inline-flex min-h-6 items-center self-start rounded-sm px-2 text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
       {text}
     </button>
   ) : (
