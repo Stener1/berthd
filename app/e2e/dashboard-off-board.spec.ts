@@ -55,3 +55,21 @@ test("a project kept off leaves the sidebar's waiting count", async ({ app }) =>
   await page.getByTestId("nav-home").click();
   await expect(page.getByRole("region", { name: "Needs you" }).getByText("Nothing needs you.")).toBeVisible();
 });
+
+test("two projects kept off in quick succession both stay off", async ({ app }) => {
+  mockOnly("writes the projects document");
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  const { page } = app;
+  const agents = await app.openSettings("agents");
+  // One right after the other (lib/one-at-a-time.test.ts covers two saves
+  // that overlap).
+  await agents.getByRole("combobox").click();
+  await page.getByRole("option", { name: "evals" }).click();
+  await agents.getByRole("combobox").click();
+  await page.getByRole("option", { name: "shop" }).click();
+  await expect(agents.getByRole("button", { name: "Show" })).toHaveCount(2);
+  // What the laptop agent kept: showing one reads the stored document
+  // again before writing it, so the other is still off only if both landed.
+  await agents.getByRole("button", { name: "Show" }).first().click();
+  await expect(agents.getByRole("button", { name: "Show" })).toHaveCount(1);
+});

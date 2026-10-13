@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { BoxStatus, Location } from "@/lib/api";
 import { projectKey } from "@/lib/projects";
 import { plainError } from "@/lib/errors";
+import { oneAtATime } from "@/lib/one-at-a-time";
 import { NONE, useStore } from "@/lib/store";
 
 // A project is one repository across boxes: "shop" on devl, build and homelab is
@@ -90,8 +91,14 @@ function normalize(doc: Partial<ProjectsDoc> | null): ProjectsDoc {
 
 // saveProjects changes the stored choices: it re-reads the document first,
 // so changes made elsewhere (another window, the New worktree dialog) are
-// kept, then writes it back whole.
-async function saveProjects(fn: (doc: ProjectsDoc) => ProjectsDoc) {
+// kept, then writes it back whole. Saves run one at a time, each after the
+// last one's write: two made quickly (keeping two projects off the board)
+// would otherwise read the same document, and the second write would undo
+// the first.
+const inTurn = oneAtATime();
+const saveProjects = (fn: (doc: ProjectsDoc) => ProjectsDoc) => inTurn(() => saveNow(fn));
+
+async function saveNow(fn: (doc: ProjectsDoc) => ProjectsDoc) {
   const before = useProjectsDoc.getState().doc;
   const client = useStore.getState().client;
   let base = before;
@@ -108,7 +115,8 @@ async function saveProjects(fn: (doc: ProjectsDoc) => ProjectsDoc) {
   try {
     await client.laptop("PUT", "/v1/app/projects", next);
   } catch (err) {
-    useProjectsDoc.setState({ doc: before, error: plainError(err) });
+    // Undone only while nothing newer (a reload) replaced it meanwhile.
+    useProjectsDoc.setState((s) => (s.doc === next ? { doc: before, error: plainError(err) } : { error: plainError(err) }));
     throw err;
   }
 }
