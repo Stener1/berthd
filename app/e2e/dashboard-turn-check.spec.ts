@@ -29,3 +29,19 @@ test("an agent waiting on its own work sits in Working, a parked one in Idle, ne
   await expect(finished.getByText("Parked:")).toHaveCount(0);
   await app.page.screenshot({ path: test.info().outputPath("dashboard.png") });
 });
+
+test("clean up never ticks a parked agent for you, however long it has sat", async ({ app }) => {
+  mockOnly("the parked agent is a mock fixture");
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  await app.page.getByTestId("nav-home").click();
+  await app.page.getByRole("button", { name: "Clean up…" }).click();
+  const dialog = app.page.getByRole("alertdialog");
+  // Idle three hours: over the shortest choice, as the agent beside it.
+  await dialog.getByRole("group", { name: "Idle longer than" }).getByText("1 hour").click();
+  const row = dialog.locator("li", { hasText: "parked" });
+  await expect(row).toHaveCount(1);
+  await expect(row.getByRole("checkbox")).not.toBeChecked();
+  // Ticked by hand, it goes like any other.
+  await row.getByRole("checkbox").click();
+  await expect(row.getByRole("checkbox")).toBeChecked();
+});
