@@ -107,7 +107,7 @@ func (b *Box) touchedIn(r *http.Request, wt Worktree) []FileTurn {
 		if _, inside := relInside(root, dir); !inside && dir != root {
 			continue
 		}
-		agent, path, _ := b.transcriptFile(r, s, sessions)
+		agent, path, _ := b.transcriptFile(r.Context(), s, sessions)
 		if path == "" || (agent != "claude" && agent != "codex") {
 			continue
 		}

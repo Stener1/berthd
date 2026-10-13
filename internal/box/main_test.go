@@ -2,15 +2,27 @@ package box
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/cosscom/shipyard/internal/agenthost"
 	"github.com/cosscom/shipyard/internal/agentpath"
 )
 
 // Rebases and merges make commits, which git refuses without an identity;
 // a fresh CI machine has none.
 func TestMain(m *testing.M) {
+	// The structured driver's tests run this binary as `berthd agent-host`
+	// (claudedriver_test.go).
+	if os.Getenv("BERTH_TEST_AGENT_HOST") == "1" {
+		code, err := agenthost.Main(os.Args[1:], os.Stdout)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		os.Exit(code)
+	}
 	for k, v := range map[string]string{
 		"GIT_AUTHOR_NAME": "berth test", "GIT_AUTHOR_EMAIL": "test@example.com",
 		"GIT_COMMITTER_NAME": "berth test", "GIT_COMMITTER_EMAIL": "test@example.com",

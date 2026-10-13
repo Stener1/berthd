@@ -58,7 +58,7 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 	if req.Tool == "" {
 		return badRequest("say which question to answer (tool)")
 	}
-	sess, path, err := b.claudeRecord(r)
+	sess, err := b.Sessions.Get(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
 	}
@@ -73,22 +73,8 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 	}
 	defer mu.(*sync.Mutex).Unlock()
 
-	res, err := reader().Read("claude", path, sess.Dir, 0)
+	shown, err := b.driverFor(sess).Answer(r.Context(), sess, req)
 	if err != nil {
-		return err
-	}
-	it, open := transcript.OpenQuestion(res, req.Tool)
-	switch {
-	case it.Kind == "":
-		return httpError{http.StatusNotFound, "that question isn't in Claude's conversation"}
-	case !open:
-		return httpError{http.StatusConflict, "those questions were already answered"}
-	}
-	shown, err := checkAnswers(it.Questions, req.Answers)
-	if err != nil {
-		return err
-	}
-	if err := driveAnswers(r.Context(), tmuxTerm{s: b.Sessions, target: "=" + sess.Name + ":"}, it.Questions, req.Answers); err != nil {
 		return err
 	}
 	writeJSON(w, AnswerResult{Answered: shown})

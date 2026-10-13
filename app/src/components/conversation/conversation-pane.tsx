@@ -82,7 +82,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const state = gone ? "exited" : s ? sessionState(s, stats) : undefined;
   const [attempt, setAttempt] = useState(0);
   const feed = useTranscriptFeed(box, session, s?.dir, visible && !mock && !away, attempt);
-  const ask = useAsk(box, session, !mock && state === "waiting", s?.state_since);
+  const ask = useAsk(box, session, !mock && state === "waiting", s?.state_since, s?.ask);
   const [answered, setAnswered] = useState<{ at?: string; key: string }>();
   // A form of questions the agent asks (Claude Code's AskUserQuestion),
   // from its record: the chat draws it whole and the box fills it in. stuck

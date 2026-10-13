@@ -40,6 +40,11 @@ func Hook(args []string, stdin *os.File, stdout, stderr io.Writer, emit Emit) {
 	}
 	tool, event := args[0], args[1]
 	defer fmt.Fprint(stdout, Reply(tool))
+	if os.Getenv("BERTH_DRIVER") == "structured" {
+		// berthd drives this agent and reads what it does from its stream:
+		// its hooks would say it all again.
+		return
+	}
 	var payload []byte
 	if len(args) >= 3 {
 		payload = []byte(args[2])

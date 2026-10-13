@@ -221,7 +221,19 @@ failed after it went out (the box may have acted on it). The box API:
 `waiting`, `finished`), plus `preset` (the agent preset it was started
 with), `turn` (its current or last turn), `state_seq` and `fidelity`
 (`hooks`, `partial` or `screen`), `queued` (prompts held until it is idle)
-and, while it waits, `ask` (what its hooks said it asks for). `exited` is
+and, while it waits, `ask` (what its hooks said it asks for). `driver`
+says how the box reaches the agent: `terminal` (its own screen in tmux) for
+every agent but a structured one, or `claude` (Claude Code driven through
+its stream); boxes that say it list `driver` in `capabilities`. `POST
+sessions` and `POST tasks` take `driver: "claude"` with `agent: "claude"`,
+and `mode`, the permission mode it starts in (`bypassPermissions` has the
+box allow what it asks; questions and plans still wait), on boxes that list
+`driver.claude`. A waiting structured session's `ask` carries `choices`
+(`{ key, label }`): send the key to answer. `POST sessions/{name}/switch`
+with `{ to: "terminal" }` or `{ to: "chat" }` moves a structured session to
+Claude Code's own terminal (`claude --resume`) and back, answering the
+`Session`; its `switch` says where it can go, 409 while the agent works.
+Boxes that take it list `driver.switch`. `exited` is
 true once the program has ended. `title` names the work: the first line of
 the prompt it started with, or of the first prompt it was sent or typed, cut
 to about 48 characters; `PATCH sessions/{name}` with `{ title }` renames it

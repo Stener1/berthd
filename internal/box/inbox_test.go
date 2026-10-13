@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestAPermissionRequestIsKeptOnTheWaitAndNeverPublished(t *testing.T) {
 
 	want := Ask{Tool: "Bash", Input: "pnpm test --filter checkout", Why: "Run the checkout tests", Message: "Claude needs your permission to use Bash"}
 	st, _ := turns.State("s")
-	if st.State != "waiting" || st.Ask == nil || *st.Ask != want {
+	if st.State != "waiting" || st.Ask == nil || !reflect.DeepEqual(*st.Ask, want) {
 		t.Fatalf("state = %+v ask=%+v", st, st.Ask)
 	}
 	for _, e := range seen {

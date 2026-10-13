@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/cosscom/shipyard/internal/events"
 	"github.com/cosscom/shipyard/internal/integrations/adapters"
@@ -84,11 +83,10 @@ var (
 	interrupted = regexp.MustCompile(`(?i)\binterrupted\b`)
 )
 
-// interruptSession answers POST /v1/sessions/{name}/interrupt: it presses
-// Esc, as stopping an agent at its terminal does, waits for the agent to
-// stop, and ends its turn in the ledger. Claude Code's hooks say nothing
-// when a turn is interrupted, so without this the session would read as
-// working until its next prompt.
+// interruptSession answers POST /v1/sessions/{name}/interrupt: its driver
+// stops the agent (Esc, in a terminal), and the turn ends in the ledger.
+// Claude Code's hooks say nothing when a turn is interrupted, so without
+// this the session would read as working until its next prompt.
 func (b *Box) interruptSession(w http.ResponseWriter, r *http.Request) error {
 	name := r.PathValue("name")
 	sess, err := b.Sessions.Get(r.Context(), name)
@@ -105,21 +103,9 @@ func (b *Box) interruptSession(w http.ResponseWriter, r *http.Request) error {
 	if b.Turns != nil {
 		st, _ = b.Turns.State(name)
 	}
-	if err := b.pressKeys(r.Context(), name, "Escape"); err != nil {
+	stopped, err := b.driverFor(sess).Interrupt(r.Context(), sess)
+	if err != nil {
 		return err
-	}
-	// The agent stops within a moment: its "esc to interrupt" goes, and
-	// Claude Code says "Interrupted".
-	stopped := false
-	deadline := time.Now().Add(4 * time.Second)
-	for !stopped && time.Now().Before(deadline) {
-		time.Sleep(150 * time.Millisecond)
-		screen, err := b.Sessions.Screen(r.Context(), name, 0)
-		if err != nil {
-			break
-		}
-		tail := lastLines(screen, 14)
-		stopped = !working.MatchString(tail) && adapters.ScreenState(screen) != "waiting"
 	}
 	if stopped && b.Turns != nil && (st.State == "running" || st.State == "waiting") {
 		b.Events.Publish(events.Event{Type: adapters.Finished, Box: b.Name, Origin: origin(r), Data: map[string]any{
@@ -182,28 +168,17 @@ func (b *Box) sessionControls(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	agent := controlAgent(sess)
-	out := Controls{Agent: agent}
-	if !sess.Exited {
-		screen, err := b.Sessions.capture(r.Context(), sess.Name, 0)
-		if err != nil {
-			return err
-		}
-		if agent == "claude" {
-			out = claudeControls(screen)
-			out.Modes = []string{"default", "acceptEdits", "plan", "auto", "bypassPermissions"}
-		} else if m := screenLimit.FindAllString(lastLines(screen, 20), -1); m != nil {
-			out.Limit = strings.TrimSpace(m[len(m)-1])
-		}
+	out, err := b.driverFor(sess).Controls(r.Context(), sess)
+	if err != nil {
+		return err
 	}
 	writeJSON(w, out)
 	return nil
 }
 
-// setMode answers POST /v1/sessions/{name}/mode {"mode":"plan"}: it presses
-// Shift+Tab, as a person cycling Claude Code's modes does, until its screen
-// shows that mode, and says where it ended up. A mode the session can't
-// reach (bypass, unless it was started allowing it) is a 409.
+// setMode answers POST /v1/sessions/{name}/mode {"mode":"plan"}: the
+// session's driver switches the mode (Shift+Tab in a terminal), and it says
+// where it ended up. A mode the session can't reach is a 409.
 func (b *Box) setMode(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		Mode string `json:"mode"`
@@ -219,11 +194,8 @@ func (b *Box) setMode(w http.ResponseWriter, r *http.Request) error {
 	if sess.Exited {
 		return ErrSessionExited
 	}
-	if controlAgent(sess) != "claude" {
-		return badRequest("only Claude Code's mode can be switched from here; use its terminal")
-	}
 	if b.Turns != nil {
-		// Shift+Tab at a permission prompt picks an option: never there.
+		// A mode change at a permission prompt can pick an option there.
 		if st, ok := b.Turns.State(name); ok && st.State == "waiting" {
 			return httpError{http.StatusConflict, "the agent is waiting for an answer; answer it first"}
 		}
@@ -231,45 +203,9 @@ func (b *Box) setMode(w http.ResponseWriter, r *http.Request) error {
 	if err := b.before(r, "session.send", map[string]any{"name": name, "key": "btab", "mode": req.Mode}); err != nil {
 		return err
 	}
-	read := func() (string, error) {
-		screen, err := b.Sessions.Screen(r.Context(), name, 0)
-		if err != nil {
-			return "", err
-		}
-		if adapters.ScreenState(screen) == "waiting" {
-			return "", httpError{http.StatusConflict, "the agent is showing a question; answer it first"}
-		}
-		return claudeControls(screen).Mode, nil
-	}
-	mode, err := read()
+	mode, err := b.driverFor(sess).SetMode(r.Context(), sess, req.Mode)
 	if err != nil {
 		return err
-	}
-	seen := map[string]bool{mode: true}
-	for presses := 0; mode != req.Mode && presses < 7; presses++ {
-		if err := b.pressKeys(r.Context(), name, "BTab"); err != nil {
-			return err
-		}
-		// The footer redraws within a moment.
-		next := mode
-		for wait := 0; wait < 10 && next == mode; wait++ {
-			time.Sleep(100 * time.Millisecond)
-			if next, err = read(); err != nil {
-				return err
-			}
-		}
-		mode = next
-		if mode != req.Mode && seen[mode] && presses > 0 {
-			break // round the whole cycle: not one this session has
-		}
-		seen[mode] = true
-	}
-	if mode != req.Mode {
-		msg := "this session doesn't offer that mode; it is in " + mode + " mode"
-		if req.Mode == "bypassPermissions" {
-			msg = "bypass needs Claude Code started with --dangerously-skip-permissions; this session is in " + mode + " mode"
-		}
-		return httpError{http.StatusConflict, msg}
 	}
 	b.publish(r, "session.mode", map[string]any{"name": name, "mode": mode})
 	writeJSON(w, map[string]any{"mode": mode})

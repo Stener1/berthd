@@ -142,8 +142,7 @@ function ProcessesBody({ box, data, error, reload }: { box: string; data?: BoxPr
   const sessions = (data.sessions ?? []).slice(0, 5);
   return (
     <>
-      <Section title="Browsers">
-        {data.browsers.length === 0 && <p className="px-4 py-3 text-muted-foreground text-xs">No browsers running on {box}.</p>}
+      <Section title="Browsers" empty={data.browsers.length === 0 ? `No browsers running on ${box}.` : undefined}>
         {data.browsers.map((b) => (
           <BrowserRow key={b.id} box={box} b={b} onStopped={reload} />
         ))}
@@ -162,11 +161,12 @@ function ProcessesBody({ box, data, error, reload }: { box: string; data?: BoxPr
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// empty says so in place of the list, which may hold only its rows.
+function Section({ title, empty, children }: { title: string; empty?: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="sticky top-0 z-1 border-b bg-popover px-4 py-1 font-medium text-[11px] text-muted-foreground">{title}</div>
-      <ul className="divide-y">{children}</ul>
+      {empty ? <p className="px-4 py-3 text-muted-foreground text-xs">{empty}</p> : <ul className="divide-y">{children}</ul>}
     </div>
   );
 }

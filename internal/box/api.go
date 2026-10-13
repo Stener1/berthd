@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cosscom/shipyard/internal/box/runs"
@@ -55,6 +56,16 @@ type Box struct {
 	// Turns is the turn ledger: what every agent session is doing, turn by
 	// turn. Without it agents read as running.
 	Turns *Turns
+	// Drivers replace a driver by kind (driver.go); nil, or a kind not in
+	// it, is the built-in one.
+	Drivers map[string]Driver
+	// ConversationsDir holds structured agents' logs, a folder each
+	// (claudedriver.go); AgentHost is the command that runs `berthd
+	// agent-host` (nil is this program's own).
+	ConversationsDir string
+	AgentHost        []string
+	claudeOnce       sync.Once
+	claudeDrv        *claudeDriver
 	// Hooks, when set, may refuse actions through "before:" hooks.
 	Hooks *hooks.Runner
 	// Flows runs the box's and its repositories' automations.
@@ -206,6 +217,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/sessions/{name}/interrupt", b.interruptSession)
 	route("GET /v1/sessions/{name}/controls", b.sessionControls)
 	route("POST /v1/sessions/{name}/mode", b.setMode)
+	route("POST /v1/sessions/{name}/switch", b.switchSession)
 	route("GET /v1/sessions/{name}/wait", b.waitForSession)
 	route("GET /v1/sessions/{name}/turns", b.listTurns)
 	route("GET /v1/sessions/{name}/queue", b.listQueue)
@@ -655,6 +667,12 @@ type SessionRequest struct {
 	// location: a terminal on the box, tied to no worktree. It takes a
 	// command or a shell, never an agent preset, and no location.
 	Home bool `json:"home,omitempty"`
+	// Driver, with an agent, is how berthd runs it: "terminal" (its own
+	// screen; the default) or "claude" (Claude Code structured,
+	// claudedriver.go). Mode is a structured agent's permission mode to
+	// start in: "bypassPermissions" has berthd allow what it asks.
+	Driver string `json:"driver,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
@@ -688,9 +706,30 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
+		if structured, err := wantStructured(req.Driver); err != nil {
+			return err
+		} else if structured {
+			l, err := b.launchClaude(p, req.Model, req.Effort, req.Mode, "")
+			if err != nil {
+				return err
+			}
+			if req.Name == "" {
+				req.Name = defaultSessionName(req.Location, p.Command)
+			}
+			sess, err := b.startStructuredSession(r, req.Name, req.Location, dir, req.Agent, l, req.Prompt)
+			if err != nil {
+				return err
+			}
+			sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+			b.announceOpen(r, sess, req.Open)
+			writeJSON(w, sess)
+			return nil
+		}
 		if req.Command, err = AgentCommandWith(p, req.Prompt, req.Model, req.Effort); err != nil {
 			return err
 		}
+	} else if req.Driver != "" && req.Driver != DriverTerminal {
+		return badRequest("a driver needs an agent, not a command")
 	} else if req.Model != "" || req.Effort != "" {
 		return badRequest("a model or an effort needs an agent, not a command")
 	}
@@ -769,6 +808,36 @@ func (b *Box) startSession(r *http.Request, name, location, dir, command, preset
 	}
 	sess = b.enrich(r.Context(), []Session{sess})[0]
 	b.beginStartup(origin(r), sess)
+	return sess, nil
+}
+
+// wantStructured says whether a request's driver is the structured one.
+func wantStructured(driver string) (bool, error) {
+	switch driver {
+	case "", DriverTerminal:
+		return false, nil
+	case DriverClaude:
+		return true, nil
+	}
+	return false, badRequest("unknown driver %q: terminal or claude", driver)
+}
+
+// startStructuredSession starts a structured agent (claudedriver.go) and
+// gives it its first prompt once its host listens.
+func (b *Box) startStructuredSession(r *http.Request, name, location, dir, preset string, l structuredLaunch, prompt string) (Session, error) {
+	data := map[string]any{"name": name, "location": location, "path": dir, "command": l.command}
+	if err := b.before(r, "session.start", data); err != nil {
+		return Session{}, err
+	}
+	sess, err := b.createAgentSessionWith(r.Context(), name, location, dir, l.command, preset, l.env, l.labels)
+	if err != nil {
+		return Session{}, err
+	}
+	data["agent"], data["driver"] = agentFor(sess), DriverClaude
+	b.publish(r, "session.started", data)
+	b.setUpOnFirstOpen(origin(r), dir)
+	sess = b.enrich(r.Context(), []Session{sess})[0]
+	b.startStructured(origin(r), gateOrigin(r), sess, prompt)
 	return sess, nil
 }
 
@@ -1066,32 +1135,38 @@ func (b *Box) emit(w http.ResponseWriter, r *http.Request) error {
 	if err := b.before(r, "event.emit", map[string]any{"type": req.Type}); err != nil {
 		return err
 	}
-	// A tool use while the agent is already working changes nothing, and
-	// agents use tools constantly: keep them out of the journal.
-	// A prompt's title (adapters.Title) names the session; it is never
-	// published, so the journal and hooks never see it.
-	title, _ := req.Data["title"].(string)
-	delete(req.Data, "title")
-	// What a waiting agent asks for (its hook's tool and a summary of its
-	// input) is never published: it goes on the turn's wait, in the
-	// ledger's private file, once the event has made that wait.
-	ask, hasAsk := req.Data[adapters.AskKey]
-	delete(req.Data, adapters.AskKey)
-	if b.Turns != nil && b.Turns.Redundant(req.Type, req.Data) {
-		writeJSON(w, map[string]bool{"ok": true})
-		return nil
-	}
-	b.publish(r, req.Type, req.Data)
-	if title != "" && req.Type == adapters.Started && b.Turns != nil {
-		if name := b.Turns.SessionOf(req.Data); name != "" {
-			b.nameAfter(r.Context(), name, adapters.Clip(title, adapters.TitleMax))
+	private := map[string]any{}
+	for _, k := range []string{"title", adapters.AskKey} {
+		if v, ok := req.Data[k]; ok {
+			private[k] = v
+			delete(req.Data, k)
 		}
 	}
-	if hasAsk && b.Turns != nil && req.Type == adapters.Waiting {
-		b.Turns.NoteAsk(req.Data, ask)
-	}
+	b.agentEvent(r.Context(), origin(r), req.Type, req.Data, private)
 	writeJSON(w, map[string]bool{"ok": true})
 	return nil
+}
+
+// agentEvent publishes what an agent does, from its hooks or its driver.
+// private holds what is never published: a prompt's title (adapters.Title),
+// which names the session, and what a waiting agent asks for (its tool and
+// a summary of its input), which goes on the turn's wait, in the ledger's
+// private file, once the event has made that wait.
+func (b *Box) agentEvent(ctx context.Context, origin, typ string, data, private map[string]any) {
+	// A tool use while the agent is already working changes nothing, and
+	// agents use tools constantly: keep them out of the journal.
+	if b.Turns != nil && b.Turns.Redundant(typ, data) {
+		return
+	}
+	b.Events.Publish(events.Event{Type: typ, Box: b.Name, Origin: origin, Data: data})
+	if title, _ := private["title"].(string); title != "" && typ == adapters.Started && b.Turns != nil {
+		if name := b.Turns.SessionOf(data); name != "" {
+			b.nameAfter(ctx, name, adapters.Clip(title, adapters.TitleMax))
+		}
+	}
+	if ask, ok := private[adapters.AskKey]; ok && b.Turns != nil && typ == adapters.Waiting {
+		b.Turns.NoteAsk(data, ask)
+	}
 }
 
 var validEventType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9-]{0,31}$`)

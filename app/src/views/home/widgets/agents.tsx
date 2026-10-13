@@ -131,9 +131,9 @@ function WaitingRow({ r }: { r: AgentRow }) {
   const s = r.session;
   const tool = s.ask?.tool;
   const question = !tool || QUESTION_TOOLS.test(tool);
-  // A permission's options are on the agent's screen: read them while the
-  // row can be seen, as the agent's own pane does.
-  const ask = useAsk(r.box, s.name, visible && !preview && !question, s.state_since);
+  // A permission's options are on the agent's screen (or, structured, on
+  // its ask): read them while the row can be seen, as its own pane does.
+  const ask = useAsk(r.box, s.name, visible && !preview && !question, s.state_since, s.ask);
   const choices = ask && !ask.form ? permissionChoices(ask.choices) : undefined;
   const allow = choices?.find((c) => c.label === "Allow");
   const deny = choices?.find((c) => c.label === "Deny");

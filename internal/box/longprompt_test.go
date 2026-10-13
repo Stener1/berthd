@@ -74,7 +74,7 @@ func TestLongPromptsStartAndReadBack(t *testing.T) {
 			command := agent + " " + shellQuote(prompt)
 			name := fmt.Sprintf("task-%d", size>>10)
 			out := filepath.Join(t.TempDir(), "prompt")
-			sess, err := s.create(ctx, name, "demo/big", t.TempDir(), command, "claude", []string{"OUT=" + out}, nil)
+			sess, err := s.create(ctx, name, "demo/big", t.TempDir(), command, "claude", []string{"OUT=" + out}, nil, nil)
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}

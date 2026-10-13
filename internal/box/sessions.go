@@ -6,10 +6,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,6 +62,13 @@ type Session struct {
 	// "terminal": true): the service's name, kept as @berth_service. It is
 	// never an agent, whatever it runs.
 	Service string `json:"service,omitempty"`
+	// Switch is where a structured session can go: "terminal" (Claude
+	// Code's own screen), or "chat" for one in its terminal now
+	// (switch.go).
+	Switch string `json:"switch,omitempty"`
+	// Driver is how berthd reaches the session's agent (driver.go):
+	// "terminal" for every agent today. Empty when it runs no agent.
+	Driver string `json:"driver,omitempty"`
 	// Scope is the systemd scope unit its program runs in (@berth_scope),
 	// on boxes where sessions get one; Usage what its processes use, in
 	// the session list.
@@ -70,6 +79,11 @@ type Session struct {
 	// panePID the process its pane runs.
 	commandFile string
 	panePID     int
+	// conv and sock are a structured agent's log folder and its host's
+	// socket (@berth_conv, @berth_sock; agenthost); bypass, that berthd
+	// answers its permissions (@berth_bypass).
+	conv, sock string
+	bypass     bool
 }
 
 var (
@@ -209,7 +223,7 @@ func (s *Sessions) tmux(ctx context.Context, args ...string) ([]byte, error) {
 //
 // Sessions started since keep their command in a file (@berth_command_file)
 // and only its start in @berth_command, for older builds to show.
-const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}"
+const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}"
 
 // plainCommandMax is how much of a command the plain @berth_command keeps.
 const plainCommandMax = 1024
@@ -266,10 +280,10 @@ func parseSessions(out []byte) []Session {
 	sessions := []Session{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
-		for len(f) >= 7 && len(f) < 14 {
+		for len(f) >= 7 && len(f) < 18 {
 			f = append(f, "")
 		}
-		if len(f) != 14 {
+		if len(f) != 18 {
 			continue
 		}
 		command := f[4]
@@ -293,9 +307,13 @@ func parseSessions(out []byte) []Session {
 			Title:    f[9],
 			Service:  f[10],
 			Scope:    f[12],
+			Driver:   f[14],
 
 			commandFile: f[11],
 			panePID:     panePID,
+			conv:        f[15],
+			sock:        f[16],
+			bypass:      f[17] == "1",
 		})
 	}
 	return sessions
@@ -305,7 +323,7 @@ func parseSessions(out []byte) []Session {
 // Commands run through a login shell, so tools the user installed (claude,
 // codex) are on PATH even when berthd runs under systemd.
 func (s *Sessions) Create(ctx context.Context, name, location, dir, command string, env []string) (Session, error) {
-	return s.create(ctx, name, location, dir, command, "", env, nil)
+	return s.create(ctx, name, location, dir, command, "", env, nil, nil)
 }
 
 // create is Create with the pane's program run behind wrap, a command that
@@ -316,7 +334,10 @@ func (s *Sessions) Create(ctx context.Context, name, location, dir, command stri
 // BERTH_AGENT, so the agent's hooks can say which session they come from,
 // and agent-browser's idle timeout unless env or berthd's own environment
 // sets it.
-func (s *Sessions) create(ctx context.Context, name, location, dir, command, agent string, env, wrap []string) (Session, error) {
+//
+// labels are more of the session's tmux options (@berth_driver and the
+// like), set with the rest.
+func (s *Sessions) create(ctx context.Context, name, location, dir, command, agent string, env, wrap []string, labels map[string]string) (Session, error) {
 	if !sessionName.MatchString(name) {
 		return Session{}, fmt.Errorf("invalid session name %q: use letters, digits, - and _", name)
 	}
@@ -384,6 +405,9 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 	}
 	if scope != "" {
 		set("@berth_scope", scope)
+	}
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		set(k, labels[k])
 	}
 	for i, a := range args {
 		if a != ";" {

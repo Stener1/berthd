@@ -11,6 +11,7 @@ import type { AgentPick, ComposerTarget } from "@/lib/composer";
 import { agentLabel } from "@/lib/derive";
 import { plainError } from "@/lib/errors";
 import { handoff, loop, review } from "@/lib/orchestrate";
+import { usePrefs } from "@/lib/prefs";
 import { worktreeSlug } from "@/lib/projects";
 import { usePrompts } from "@/lib/prompts";
 import { boxHasRuns, runs, scheduleRuns } from "@/lib/runs";
@@ -95,6 +96,15 @@ const fail = (title: string, err: unknown, box?: string) => {
   return false;
 };
 
+// structured is how a Claude agent starts when Labs runs it structured: on
+// a box whose berthd drives Claude Code through its stream.
+function structured(box: string, agent: string): { driver?: "claude"; mode?: string } {
+  const p = usePrefs.getState();
+  const caps = useStore.getState().boxes[box]?.info?.capabilities ?? [];
+  if (agent !== "claude" || !p.labs || !p.structuredClaude || !caps.includes("driver.claude")) return {};
+  return { driver: "claude", mode: p.approvals === "bypass" ? "bypassPermissions" : "default" };
+}
+
 export async function startWork(d: StartDraft): Promise<boolean> {
   const client = useStore.getState().client;
   if (!client) return false;
@@ -120,7 +130,7 @@ export async function startWork(d: StartDraft): Promise<boolean> {
       toastManager.add({ type: "success", title: `Created ${wt.name}`, description: `${wt.branch ?? ""} on ${d.box}` });
       return true;
     }
-    const how = { agent: pick.agent, prompt: d.text || undefined, model: pick.model || undefined, effort: pick.effort || undefined };
+    const how = { agent: pick.agent, prompt: d.text || undefined, model: pick.model || undefined, effort: pick.effort || undefined, ...structured(d.box, pick.agent) };
     if (d.where === "new") {
       const name = d.worktree?.name || freeName(d.box, d.location, d.text ? slug(d.text) : randomName());
       const res = await client.box<TaskResult>(d.box, "POST", "tasks", {
