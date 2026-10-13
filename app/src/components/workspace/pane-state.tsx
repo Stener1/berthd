@@ -3,7 +3,7 @@ import { RotateCwIcon, ServerIcon } from "lucide-react";
 import { Scene } from "@/components/art/scenes";
 import { Tip } from "@/components/tip";
 import { Button } from "@/components/ui/button";
-import { startSession } from "@/lib/actions";
+import { resumeSession, startSession } from "@/lib/actions";
 import { agentLabel, restartCommand } from "@/lib/derive";
 import { retryLine } from "@/lib/net";
 import { tryNow, useAway } from "@/lib/reconnect";
@@ -35,6 +35,8 @@ export function SessionEnded({ box, session, agent, command, wsKey, tab, pane, o
   const ref = useWorkspaces((s) => s.spaces[wsKey]?.ref);
   const label = agent ? agentLabel(agent) : "Shell";
   const named = useTitleAt(ref?.box, ref?.path);
+  // A structured agent's conversation carries on, rather than a new one.
+  const resumable = useStore((st) => !!st.boxes[box]?.sessions?.find((x) => x.name === session)?.switch);
   const where = ref ? (named ?? (ref.main ? ref.location : ref.worktree)) : undefined;
   return (
     <PaneState
@@ -57,10 +59,17 @@ export function SessionEnded({ box, session, agent, command, wsKey, tab, pane, o
         </p>
       }
     >
-      <Button size="sm" onClick={() => void startSession(restartCommand(command) ?? "", { kind: "replace", tab, pane }, label)}>
-        <RotateCwIcon />
-        Start {agent ? label : "a shell"} again
-      </Button>
+      {resumable ? (
+        <Button size="sm" onClick={() => void resumeSession(box, session)}>
+          <RotateCwIcon />
+          Resume the conversation
+        </Button>
+      ) : (
+        <Button size="sm" onClick={() => void startSession(restartCommand(command) ?? "", { kind: "replace", tab, pane }, label)}>
+          <RotateCwIcon />
+          Start {agent ? label : "a shell"} again
+        </Button>
+      )}
       <Button size="sm" variant="ghost" onClick={onClose}>
         Close pane
       </Button>

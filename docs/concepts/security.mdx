@@ -243,8 +243,9 @@ output. That data is only ever text:
   JSON-escaped, so a value can't add a host, a path, a parameter or a field.
 - A secret's value never leaves in a webhook, a notification or a step's
   kept output: it shows as `[secret]`.
-- Webhooks and [phone notifications](/guides/phone) reach only public
-  addresses (notifications also your tailnet). Loopback, private, link-local,
+- Webhooks, [phone notifications](/guides/phone) and turn check's requests
+  reach only public addresses (notifications also your tailnet).
+  Loopback, private, link-local,
   cloud metadata and other reserved addresses are refused, checked on the
   address actually dialled, redirects included, unless the box's owner
   allows them in `~/.berth/network.json` on the box, which nothing in the
@@ -279,6 +280,22 @@ output. That data is only ever text:
   sessions list carry (see [known limits](#known-limits)).
 - The offline queue keeps prompts on the laptop, in its state directory, and
   never puts them in an event.
+- [Turn check](/concepts/sessions-and-agents#agent-state), off by default,
+  is the one time berthd sends a session's words off the box: each finished
+  turn's last prompt (its first 4,000 characters) and the end of its reply
+  and the session's title, to the provider you chose: Jev on Vercel AI
+  Gateway (prompt training disallowed), OpenAI's Decisions API, or a Laya
+  server you run, at the address set in `turncheck.json`.
+  Before anything goes, what looks like a secret is replaced with what kind
+  it was, by the same patterns that refuse an [artifact](/guides/artifacts);
+  a turn that still holds one isn't sent. It is set from a paired laptop
+  only: `GET` and `PUT /v1/turncheck` refuse the box's own socket, so an
+  agent on the box can't read where turns go or send them elsewhere. Its
+  key, pasted (kept in the state directory, 0600, one file per provider) or
+  a secret reference, is never answered or logged, and goes only to the
+  provider it was given for, at that provider's own URL: a URL in
+  `turncheck.json` never changes where a key goes, and a Laya server gets
+  none.
 
 ## The phone
 

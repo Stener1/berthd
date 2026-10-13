@@ -178,21 +178,7 @@ func (b *Box) toChat(r *http.Request, sess Session) error {
 	if err := b.importTerminalTurns(ctx, sess); err != nil {
 		return err
 	}
-	l, err := b.launchClaudeIn(b.claudePreset(ctx, sess), "", "", modeFor(sess), sid, sess.conv, sess.sock)
-	if err != nil {
-		return err
-	}
-	l.labels[labelHandoff] = ""
-	b.claude().forget(sess.Name)
-	if err := b.respawnAgent(ctx, sess, l.command, l.env, l.labels); err != nil {
-		return err
-	}
-	// Back when it listens, so what is sent next reaches it.
-	awaitHost(sess.sock, 15*time.Second)
-	if live, err := b.Sessions.Get(ctx, sess.Name); err == nil {
-		b.startStructured(origin(r), gateOrigin(r), live, "")
-	}
-	return nil
+	return b.resumeInPlace(r, sess, sid)
 }
 
 // modeFor is the mode a structured session goes back to: bypass when

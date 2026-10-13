@@ -91,6 +91,8 @@ func Detail(source, path, dir, id string) (ToolDetail, error) {
 			var call, result bool
 			if source == "codex" {
 				call, result = codexDetail(line, id, dir, &d)
+			} else if source == SourceCodexHost {
+				call, result = codexHostDetail(line, id, dir, &d)
 			} else if source == SourceClaudeHost {
 				if inner, ok := unwrapHost(line); ok {
 					call, result = claudeDetail(inner, id, dir, &d)

@@ -39,11 +39,12 @@ func TestReviewListsAFinishedAgentsChangesAndCommits(t *testing.T) {
 
 	fake := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(fake, []byte("#!/bin/sh\nexec cat\n"), 0o755)
+	ends := map[string]events.Event{}
 	for _, w := range []Worktree{wt, quiet} {
 		if _, err := b.Sessions.Create(ctx, "agent-"+w.Name, "cal/"+w.Name, w.Path, fake, nil); err != nil {
 			t.Fatal(err)
 		}
-		bus.Publish(events.Event{Type: "agent.finished", Data: map[string]any{"path": w.Path}})
+		ends[w.Name] = bus.Publish(events.Event{Type: "agent.finished", Data: map[string]any{"path": w.Path}})
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	var items []ReviewItem
@@ -82,6 +83,16 @@ func TestReviewListsAFinishedAgentsChangesAndCommits(t *testing.T) {
 	}
 	if it.Added != 5 || it.Removed != 1 {
 		t.Fatalf("totals +%d -%d", it.Added, it.Removed)
+	}
+
+	// Turn check read its finished turn as work still going on (a deploy to
+	// watch): not ready to review yet, unless all is asked for.
+	bus.Publish(events.Event{Type: "agent.ready", Data: map[string]any{"session": "agent-billing", "path": wt.Path, "source": "turncheck", "choice": "working", "seq": ends["billing"].Seq}})
+	if items, err := b.Review(ctx, false); err != nil || len(items) != 0 {
+		t.Fatalf("unfinished work is up for review: %+v %v", items, err)
+	}
+	if items, err := b.Review(ctx, true); err != nil || len(items) != 1 {
+		t.Fatalf("all: %+v %v", items, err)
 	}
 }
 

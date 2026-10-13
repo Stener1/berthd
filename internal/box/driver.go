@@ -60,8 +60,13 @@ func (b *Box) driverFor(sess Session) Driver {
 	if d := b.Drivers[kind]; d != nil {
 		return d
 	}
-	if kind == DriverClaude {
+	switch kind {
+	case DriverClaude:
 		return b.claude()
+	case DriverCodex:
+		return b.codex()
+	case DriverACP:
+		return b.acp()
 	}
 	return terminalDriver{b}
 }

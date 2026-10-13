@@ -235,10 +235,10 @@ box with the `commands` capability: `GET /v1/sessions/{name}/commands`
 (cached a minute, capped at 600) and `GET …/files?q=`. MCP servers' prompts
 aren't listed: the agent reads them from each server once it starts.
 
-## Structured Claude agents
+## Structured agents
 
-With *Structured Claude agents* on in Settings › Labs, a new Claude Code
-agent runs without its terminal. The box starts `claude -p` speaking
+With *Structured agents* on in Settings › Labs, a new Claude Code, Codex,
+OpenCode, Gemini CLI or Cursor Agent agent runs without its terminal. The box starts `claude -p` speaking
 stream-json under `berthd agent-host`, which keeps the agent running in its
 tmux session and writes everything that passes between them to the box's
 own record of the conversation. The box drives it from there:
@@ -259,9 +259,30 @@ own record of the conversation. The box drives it from there:
   Either way needs the agent to be idle. In a folder Claude Code hasn't
   seen, its screen first asks whether you trust it.
 
+- **Resume.** A structured agent that ended offers *Resume the conversation*
+  in its pane, and a worktree's menu lists its conversations whose agents
+  aren't running under *Resume a conversation*: each carries on, with
+  Claude Code's `--resume`, in its own record, so the chat shows its earlier
+  turns.
+
+- **Codex** runs as `codex app-server` under the same host: the box opens its
+  thread, sends each prompt as a turn with the agent's mode, model and effort,
+  and brings its command and file-change approvals and its questions to the
+  chat. Its modes are default (asks to go past its workspace sandbox),
+  untrusted (asks before untrusted commands), read only, and bypass (no
+  sandbox, nothing asked). It has no terminal switch.
+- **OpenCode, Gemini CLI and Cursor Agent** speak the Agent Client Protocol
+  (`opencode acp`, `gemini --acp`, `cursor-agent acp`), and so does any agent
+  whose preset in a repository's config has an [`acp`](/reference/config):
+  the box opens its session (with its own login, for Cursor Agent), streams
+  its reply, cancels its turn, switches its own modes, and brings its
+  permission requests to the chat; *Bypass* has the box allow them.
+
 The agent keeps working while berthd restarts or upgrades, and the record
 keeps every streamed word even if the agent is killed. The box needs the
-`driver.claude` capability, and `driver.switch` for the terminal (upgrade
+`driver.claude` capability (`driver.codex` for Codex, `driver.acp` for ACP
+agents), and `driver.switch`
+for the terminal (upgrade
 it).
 
 ## Zen

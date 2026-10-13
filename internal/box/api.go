@@ -66,6 +66,10 @@ type Box struct {
 	AgentHost        []string
 	claudeOnce       sync.Once
 	claudeDrv        *claudeDriver
+	codexOnce        sync.Once
+	codexDrv         *codexDriver
+	acpOnce          sync.Once
+	acpDrv           *acpDriver
 	// Hooks, when set, may refuse actions through "before:" hooks.
 	Hooks *hooks.Runner
 	// Flows runs the box's and its repositories' automations.
@@ -81,6 +85,9 @@ type Box struct {
 	Phone *Phone
 	// Guard, when set, keeps the box usable when memory runs short.
 	Guard *Guard
+	// TurnCheck, when turned on, asks Jev whether a finished turn needs
+	// you (turncheck.go).
+	TurnCheck *TurnCheck
 	// Secrets resolves secret references in worktree environments; nil
 	// uses a shared one.
 	Secrets *Secrets
@@ -183,6 +190,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/locations/{name}/worktrees/{worktree}/{action}", b.pauseAction)
 	route("GET /v1/phone", b.getPhone)
 	route("PUT /v1/phone", b.putPhone)
+	route("GET /v1/turncheck", b.getTurnCheck)
+	route("PUT /v1/turncheck", b.putTurnCheck)
 	route("GET /v1/kits", b.listKits)
 	route("PUT /v1/locations/{name}/kit", b.putKit)
 	route("POST /v1/locations/{name}/team-kit", b.postTeamKit)
@@ -261,6 +270,7 @@ func (b *Box) Mount(s *wire.Server) {
 	b.mountRuns(route)
 	b.mountHistory(route)
 	b.mountAnswer(route)
+	b.mountConversations(route)
 	b.mountBrowser(route)
 	b.mountNotify(route)
 	b.mountArtifacts(route)
@@ -706,10 +716,10 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
-		if structured, err := wantStructured(req.Driver); err != nil {
+		if kind, err := wantStructured(req.Driver); err != nil {
 			return err
-		} else if structured {
-			l, err := b.launchClaude(p, req.Model, req.Effort, req.Mode, "")
+		} else if kind != "" {
+			l, err := b.launchStructured(kind, p, req.Model, req.Effort, req.Mode)
 			if err != nil {
 				return err
 			}
@@ -811,15 +821,42 @@ func (b *Box) startSession(r *http.Request, name, location, dir, command, preset
 	return sess, nil
 }
 
-// wantStructured says whether a request's driver is the structured one.
-func wantStructured(driver string) (bool, error) {
+// wantStructured is the structured driver a request asks for, or "".
+func wantStructured(driver string) (string, error) {
 	switch driver {
 	case "", DriverTerminal:
-		return false, nil
-	case DriverClaude:
-		return true, nil
+		return "", nil
+	case DriverClaude, DriverCodex, DriverACP:
+		return driver, nil
 	}
-	return false, badRequest("unknown driver %q: terminal or claude", driver)
+	return "", badRequest("unknown driver %q: terminal, claude, codex or acp", driver)
+}
+
+// launchStructured is what starts preset p under a structured driver, in a
+// new conversation.
+func (b *Box) launchStructured(kind string, p AgentPreset, model, effort, mode string) (structuredLaunch, error) {
+	if kind == DriverClaude {
+		return b.launchClaude(p, model, effort, mode, "")
+	}
+	if kind == DriverACP {
+		dir, sock, err := b.newConversation()
+		if err != nil {
+			return structuredLaunch{}, err
+		}
+		l, err := b.launchACPIn(p, mode, dir, sock)
+		l.model = model
+		return l, err
+	}
+	if p.ID != "codex" {
+		return structuredLaunch{}, badRequest("the codex driver runs Codex; %s runs in its terminal", p.Name)
+	}
+	dir, sock, err := b.newConversation()
+	if err != nil {
+		return structuredLaunch{}, err
+	}
+	l, err := b.launchCodexIn(p, mode, dir, sock)
+	l.model, l.effort = model, effort
+	return l, err
 }
 
 // startStructuredSession starts a structured agent (claudedriver.go) and
@@ -833,8 +870,9 @@ func (b *Box) startStructuredSession(r *http.Request, name, location, dir, prese
 	if err != nil {
 		return Session{}, err
 	}
-	data["agent"], data["driver"] = agentFor(sess), DriverClaude
+	data["agent"], data["driver"] = agentFor(sess), sess.Driver
 	b.publish(r, "session.started", data)
+	noteStarted(l, location, dir, sess.Name, prompt)
 	b.setUpOnFirstOpen(origin(r), dir)
 	sess = b.enrich(r.Context(), []Session{sess})[0]
 	b.startStructured(origin(r), gateOrigin(r), sess, prompt)

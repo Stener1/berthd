@@ -24,7 +24,7 @@ import { armDrag, useTabDrag } from "@/components/workspace/tab-drag";
 import { TerminalView } from "@/components/workspace/terminal-view";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
 import { useLabel, useTone, WtChip } from "@/components/workspace/worktree-tone";
-import { agentPresets, closePane, openBrowserAt, openPreviewAt, startSession } from "@/lib/actions";
+import { agentPresets, closePane, openBrowserAt, openPreviewAt, resumeSession, startSession } from "@/lib/actions";
 import { boxApi } from "@/lib/api";
 import { agentLabel, agentOf, restartCommand, sessionAgent, sessionName, sessionState } from "@/lib/derive";
 import { nameFromKey } from "@/lib/groups";
@@ -141,7 +141,11 @@ export function Pane({ wsKey, tab, pane, visible, focused, split, mixed, compare
           {/* The terminal stays connected underneath, so switching back is instant. */}
           {c.kind === "terminal" && view === "conversation" && (
             <div className="absolute inset-0 z-10 flex flex-col">
-              <ConversationPane box={c.box} session={c.session} agent={c.agent} visible={visible} onStartAgain={() => void startSession(restartCommand(c.command) ?? c.agent ?? "", { kind: "replace", tab, pane: pane.id }, c.agent ? agentLabel(c.agent) : "Agent")} onShowTerminal={() => setPaneContent(wsKey, tab, pane.id, { ...c, view: "terminal" })} />
+              <ConversationPane box={c.box} session={c.session} agent={c.agent} visible={visible} onStartAgain={() =>
+                  useStore.getState().boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch
+                    ? void resumeSession(c.box, c.session)
+                    : void startSession(restartCommand(c.command) ?? c.agent ?? "", { kind: "replace", tab, pane: pane.id }, c.agent ? agentLabel(c.agent) : "Agent")
+                } onShowTerminal={() => setPaneContent(wsKey, tab, pane.id, { ...c, view: "terminal" })} />
             </div>
           )}
           {c.kind === "browser" && (
@@ -230,7 +234,11 @@ export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined
     return !!(s && agentOf(s));
   });
   // A structured agent has no screen of its own to read: its conversation.
-  const structured = useStore((st) => c.kind === "terminal" && st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.driver === "claude");
+  const structured = useStore((st) => {
+    if (c.kind !== "terminal") return false;
+    const d = st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.driver;
+    return d === "claude" || d === "codex" || d === "acp";
+  });
   if (c.kind !== "terminal" || !labs || !runsAgent) return undefined;
   return c.view ?? (structured ? "conversation" : fallback);
 }

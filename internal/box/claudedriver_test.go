@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosscom/shipyard/internal/agenthost"
 	"github.com/cosscom/shipyard/internal/transcript"
 )
 
@@ -481,5 +482,128 @@ func TestAStructuredSessionGoesToItsTerminalAndBack(t *testing.T) {
 	}
 	if strings.Join(order, " | ") != "echo: hello | answered in the terminal | echo: back again" {
 		t.Fatalf("the conversation reads %q", order)
+	}
+}
+
+func TestAStructuredConversationIsResumedWhenItsAgentEndsAndWhenItsSessionIsGone(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("the stand-in Claude needs python3")
+	}
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "claude"), []byte(fakeStreamClaude), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	exe, _ := os.Executable()
+	states := &Turns{}
+	var bx *Box
+	c, bus := servedBox(t, func(b *Box) {
+		bx = b
+		b.Turns = states
+		b.ConversationsDir = t.TempDir()
+		b.AgentHost = []string{"env", "BERTH_TEST_AGENT_HOST=1", exe}
+	})
+	states.Attach(bus)
+	repo := gitRepo(t)
+	call(t, c, "POST", "/v1/locations", "", map[string]string{"name": "acme", "path": repo}, nil)
+	var sess Session
+	call(t, c, "POST", "/v1/sessions", "", map[string]any{"location": "acme", "agent": "claude", "driver": "claude", "mode": "bypassPermissions", "prompt": "hello"}, &sess)
+	names := []string{sess.Name}
+	t.Cleanup(func() {
+		for _, n := range names {
+			call(t, c, "DELETE", "/v1/sessions/"+n, "", nil, nil)
+		}
+	})
+	until := func(what string, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(15 * time.Second)
+		for !ok() {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s never happened", what)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	said := func(name, text string) func() bool {
+		return func() bool {
+			var res transcript.Result
+			call(t, c, "GET", "/v1/sessions/"+name+"/transcript?since=0", "", nil, &res)
+			for _, it := range res.Items {
+				if strings.Contains(it.Text, text) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	finished := func(name string) func() bool {
+		return func() bool { st, _ := states.State(name); return st.State == "finished" }
+	}
+	until("the first reply", said(sess.Name, "echo: hello"))
+	until("the first turn's end", finished(sess.Name))
+
+	var convs []Conversation
+	call(t, c, "GET", "/v1/conversations?path="+repo, "", nil, &convs)
+	if len(convs) != 1 || !convs[0].Live || convs[0].Session != sess.Name || convs[0].Title != "hello" ||
+		convs[0].AgentSessionID != "00000000-0000-4000-8000-0000000000c1" || convs[0].Mode != "bypassPermissions" {
+		t.Fatalf("conversations = %+v", convs)
+	}
+	id := convs[0].ID
+
+	// Its agent ends (stopped here; a crash or a /exit alike): the session
+	// starts it again on its own log.
+	live, err := bx.Sessions.Get(t.Context(), sess.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agenthost.Stop(t.Context(), live.sock); err != nil {
+		t.Fatal(err)
+	}
+	until("the session's end", func() bool {
+		var list []Session
+		call(t, c, "GET", "/v1/sessions", "", nil, &list)
+		return len(list) == 1 && list[0].Exited
+	})
+	var resumed Session
+	if status := call(t, c, "POST", "/v1/sessions/"+sess.Name+"/resume", "", nil, &resumed); status != 200 || resumed.Exited || resumed.Driver != DriverClaude {
+		t.Fatalf("resume: %d %+v", status, resumed)
+	}
+	call(t, c, "POST", "/v1/sessions/"+sess.Name+"/send", "", map[string]any{"text": "again", "when": "now"}, nil)
+	until("a reply once resumed", said(sess.Name, "echo: again"))
+	until("its turn's end", finished(sess.Name))
+
+	// Its session closed altogether: the conversation is found and carried
+	// on in a new one, its earlier turns with it.
+	if status := call(t, c, "DELETE", "/v1/sessions/"+sess.Name, "", nil, nil); status != 200 {
+		t.Fatalf("delete: %d", status)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		convs = nil
+		call(t, c, "GET", "/v1/conversations", "", nil, &convs)
+		if len(convs) == 1 && !convs[0].Live {
+			break
+		}
+		if time.Now().After(deadline) {
+			var list []Session
+			call(t, c, "GET", "/v1/sessions", "", nil, &list)
+			t.Fatalf("the conversation is still %+v; sessions %+v", convs, list)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var again Session
+	if status := call(t, c, "POST", "/v1/conversations/"+id+"/resume", "", nil, &again); status != 200 || again.Driver != DriverClaude || again.Title != "hello" {
+		t.Fatalf("resume the conversation: %d %+v", status, again)
+	}
+	names = append(names, again.Name)
+	call(t, c, "POST", "/v1/sessions/"+again.Name+"/send", "", map[string]any{"text": "third", "when": "now"}, nil)
+	until("a reply in the new session", said(again.Name, "echo: third"))
+	until("the earlier turns in it", said(again.Name, "echo: again"))
+	var controls Controls
+	call(t, c, "GET", "/v1/sessions/"+again.Name+"/controls", "", nil, &controls)
+	if controls.Mode != "bypassPermissions" {
+		t.Fatalf("it came back in %q", controls.Mode)
+	}
+	if status := call(t, c, "POST", "/v1/conversations/nope/resume", "", nil, nil); status != http.StatusNotFound {
+		t.Fatalf("an unknown conversation: %d", status)
 	}
 }

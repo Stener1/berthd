@@ -204,6 +204,10 @@ export interface Session {
   // What the agent waits on, from its own hooks ("ask" capability), while
   // agent_state is "waiting".
   ask?: Ask;
+  // Set on a finished agent that turn check read as still at work without
+  // it: waiting on a build, a deploy, a check or a later time, to pick up
+  // by itself. The app shows it as working.
+  unfinished?: boolean;
   // What the work is called: the first line of the prompt it started with
   // (or the first it was sent), about 48 characters, or what someone renamed
   // it to. Absent until there is one; api.renameSession names it.
@@ -215,7 +219,7 @@ export interface Session {
   // How the box reaches the agent ("driver" capability): "terminal", its
   // own screen in tmux, or "claude", Claude Code driven through its stream
   // ("driver.claude" capability).
-  driver?: "terminal" | "claude" | string;
+  driver?: "terminal" | "claude" | "codex" | "acp" | string;
   // Where a structured session can switch ("driver.switch" capability):
   // "terminal", to Claude Code's own screen, or "chat", back from it. POST
   // sessions/{name}/switch with { to } switches it.
@@ -233,6 +237,24 @@ export interface Session {
 // tool, a short summary of its input (the command, or the file's path;
 // never what it would write), its reason, and the message it showed. Each
 // is at most 300 characters.
+// A structured agent's conversation, kept on the box past its session
+// ("conversations" capability): GET conversations lists them, newest first.
+export interface Conversation {
+  id: string;
+  agent: string;
+  location?: string;
+  dir: string;
+  // The session it last ran in, and whether that one is running.
+  session?: string;
+  live?: boolean;
+  agent_session_id?: string;
+  mode?: string;
+  // Its first prompt's first line.
+  title?: string;
+  created: string;
+  updated?: string;
+}
+
 export interface Ask {
   tool?: string;
   input?: string;
@@ -380,6 +402,9 @@ export interface AgentPreset {
   // it has them). Leaving one out means the CLI's default.
   models?: string[];
   efforts?: string[];
+  // What starts its Agent Client Protocol server ("acp", "--acp"): with it,
+  // the agent can run structured on boxes listing "driver.acp".
+  acp?: string;
 }
 
 // AgentPath is where a box found an agent CLI: through the person's shell
@@ -460,7 +485,7 @@ export interface TaskRequest {
   // Code structured ("driver.claude" capability); mode is a structured
   // agent's permission mode to start in ("bypassPermissions": berthd allows
   // what it asks, questions and plans aside).
-  driver?: "terminal" | "claude";
+  driver?: "terminal" | "claude" | "codex" | "acp";
   mode?: string;
 }
 

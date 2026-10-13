@@ -5,7 +5,7 @@ import { serviceKeepsRunning } from "@/components/workspace/service-terminal";
 import { toastManager } from "@/components/ui/toast";
 import { usePrefs } from "@/lib/prefs";
 import { offerAgentHooks } from "@/lib/agent-hooks";
-import { type AgentPreset, boxApi, type Location, type Worktree } from "@/lib/api";
+import { type AgentPreset, boxApi, type Conversation, type Location, type Worktree } from "@/lib/api";
 import { agentLabel, agentOf } from "@/lib/derive";
 import { errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
@@ -97,6 +97,36 @@ export async function startSession(command: string, target: Target = { kind: "ta
     return s.name;
   } catch (err) {
     setPaneContent(at.key, at.tab, at.pane, { kind: "error", message: plainError(err) });
+  }
+}
+
+// resumeConversation carries a structured agent's conversation on in a tab
+// of its worktree: in its own session when that still runs (or only
+// ended), else in a new one.
+export async function resumeConversation(box: string, conv: Conversation, worktree: string): Promise<string | undefined> {
+  const client = useStore.getState().client;
+  if (!client) return;
+  const at = place({ kind: "starting", label: agentLabel(conv.agent) }, { kind: "tab" }, worktree);
+  if (!at) return;
+  try {
+    const s = await boxApi.resumeConversation(client, box, conv.id);
+    setPaneContent(at.key, at.tab, at.pane, { kind: "terminal", box, session: s.name, agent: conv.agent });
+    scheduleRefresh(box, ["sessions"]);
+    return s.name;
+  } catch (err) {
+    setPaneContent(at.key, at.tab, at.pane, { kind: "error", message: plainError(err) });
+  }
+}
+
+// resumeSession starts a structured agent that ended again, in its pane.
+export async function resumeSession(box: string, session: string): Promise<void> {
+  const client = useStore.getState().client;
+  if (!client) return;
+  try {
+    await boxApi.resumeSession(client, box, session);
+    scheduleRefresh(box, ["sessions"]);
+  } catch (err) {
+    toastManager.add({ type: "error", title: "Couldn't resume it", description: errorMessage(err) });
   }
 }
 

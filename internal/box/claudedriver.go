@@ -64,6 +64,8 @@ type structuredLaunch struct {
 	command string
 	env     []string
 	labels  map[string]string
+	// mode, model and effort are what was asked for; agent the agent.
+	mode, model, effort, agent string
 }
 
 // launchClaude is the command, environment and labels that start the
@@ -83,12 +85,7 @@ func (b *Box) launchClaude(p AgentPreset, model, effort, mode, resume string) (s
 	default:
 		return structuredLaunch{}, badRequest("unknown permission mode %q", mode)
 	}
-	id := newConvID()
-	dir := filepath.Join(b.ConversationsDir, id)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return structuredLaunch{}, err
-	}
-	sock, err := hostSocket(id)
+	dir, sock, err := b.newConversation()
 	if err != nil {
 		return structuredLaunch{}, err
 	}
@@ -105,13 +102,9 @@ func (b *Box) launchClaudeIn(p AgentPreset, model, effort, mode, resume, dir, so
 	if err != nil {
 		return structuredLaunch{}, err
 	}
-	host := b.AgentHost
-	if len(host) == 0 {
-		exe, err := os.Executable()
-		if err != nil {
-			return structuredLaunch{}, err
-		}
-		host = []string{exe, "agent-host"}
+	host, err := b.agentHostCommand()
+	if err != nil {
+		return structuredLaunch{}, err
 	}
 	claudeMode, bypass := mode, "0"
 	if mode == "bypassPermissions" {
@@ -129,6 +122,7 @@ func (b *Box) launchClaudeIn(p AgentPreset, model, effort, mode, resume, dir, so
 		words = append(words, "--resume", shellQuote(resume))
 	}
 	return structuredLaunch{
+		mode: mode, model: model, effort: effort, agent: "claude",
 		command: strings.Join(words, " "),
 		env:     []string{"BERTH_DRIVER=structured"},
 		labels:  map[string]string{labelDriver: DriverClaude, labelConv: dir, labelSock: sock, labelBypass: bypass},
@@ -139,6 +133,32 @@ func (b *Box) launchClaudeIn(p AgentPreset, model, effort, mode, resume, dir, so
 func ownedByMe(st os.FileInfo) bool {
 	sys, ok := st.Sys().(*syscall.Stat_t)
 	return ok && int(sys.Uid) == os.Getuid()
+}
+
+// agentHostCommand is the command that runs `berthd agent-host`.
+func (b *Box) agentHostCommand() ([]string, error) {
+	if len(b.AgentHost) > 0 {
+		return b.AgentHost, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return []string{exe, "agent-host"}, nil
+}
+
+// newConversation makes a new conversation's folder and names its socket.
+func (b *Box) newConversation() (dir, sock string, err error) {
+	if b.ConversationsDir == "" {
+		return "", "", errors.New("this box keeps no conversations")
+	}
+	id := newConvID()
+	dir = filepath.Join(b.ConversationsDir, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", err
+	}
+	sock, err = hostSocket(id)
+	return dir, sock, err
 }
 
 func newConvID() string {
@@ -405,8 +425,12 @@ func (c *claudeConv) apply(e agenthost.Entry, live bool) {
 	if len(e.Data) == 0 || json.Unmarshal(e.Data, &l) != nil {
 		return
 	}
-	if l.SessionID != "" {
+	if l.SessionID != "" && l.SessionID != c.sessionID {
 		c.sessionID = l.SessionID
+		if live {
+			sid, dir := l.SessionID, c.conv
+			say = append(say, func() { noteConversation(dir, func(m *Conversation) { m.AgentSessionID = sid }) })
+		}
 	}
 	helper := l.Parent != nil && *l.Parent != ""
 	switch l.Type {
@@ -497,7 +521,9 @@ func (c *claudeConv) apply(e agenthost.Entry, live bool) {
 				data["status"] = "interrupted"
 			}
 		}
-		say = append(say, func() { c.event(adapters.Finished, data, nil) }, c.changedConversation)
+		dir := c.conv
+		say = append(say, func() { c.event(adapters.Finished, data, nil) }, c.changedConversation,
+			func() { noteConversation(dir, func(m *Conversation) { m.Updated = time.Now().UTC() }) })
 	}
 }
 
@@ -908,6 +934,7 @@ func (d *claudeDriver) SetMode(ctx context.Context, sess Session, mode string) (
 		v = "1"
 	}
 	d.b.Sessions.tmux(ctx, "set-option", "-t", "="+sess.Name+":", labelBypass, v)
+	noteConversation(c.conv, func(m *Conversation) { m.Mode = mode })
 	for _, r := range allow {
 		c.answer(r, true, false, "")
 	}
@@ -1010,6 +1037,26 @@ func (d *claudeDriver) askChoices(sess Session) []AskChoice {
 	return c.choices()
 }
 
+// follow starts following a structured session's log, for its driver.
+func (b *Box) follow(sess Session) {
+	switch sess.Driver {
+	case DriverClaude:
+		b.claude().conv(sess)
+	case DriverCodex:
+		b.codex().conv(sess)
+	case DriverACP:
+		b.acp().conv(sess)
+	}
+}
+
+// forgetConversation lets a structured session's conversation go, for
+// whichever driver follows it.
+func (b *Box) forgetConversation(name string) {
+	b.claude().forget(name)
+	b.codex().forget(name)
+	b.acp().forget(name)
+}
+
 // awaitHost waits up to d for a session's host to listen.
 func awaitHost(sock string, d time.Duration) bool {
 	deadline := time.Now().Add(d)
@@ -1029,7 +1076,7 @@ func (b *Box) startStructured(origin, from string, sess Session, prompt string) 
 	go func() {
 		awaitHost(sess.sock, 30*time.Second)
 		// Followed from its start, so its first turn is said as it goes.
-		b.claude().conv(sess)
+		b.follow(sess)
 		if strings.TrimSpace(prompt) == "" {
 			return
 		}
