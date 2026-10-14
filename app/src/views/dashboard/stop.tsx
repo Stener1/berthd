@@ -191,7 +191,9 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
     return req.entries.map((entry) => ({ entry, key: entryKey(entry), names: namesOf(entry), idle: now - sinceOf(entry) })).sort((a, b) => b.idle - a.idle);
   });
   const [after, setAfter] = useState<After>(() => load("berth.dashboard.cleanupAfter", "4h"));
-  const overFor = (a: After) => new Set(rows.filter((r) => r.idle > AFTER.find((x) => x.value === a)!.ms).map((r) => r.key));
+  // A parked agent (turn check read it as waiting on a reply or a later
+  // time) is idle on purpose: it is listed, never ticked for you.
+  const overFor = (a: After) => new Set(rows.filter((r) => !r.entry.session.parked && r.idle > AFTER.find((x) => x.value === a)!.ms).map((r) => r.key));
   const [ticked, setTicked] = useState<Set<string>>(() => (cleanup ? overFor(after) : new Set(rows.map((r) => r.key))));
   const [progress, setProgress] = useState<Record<string, Progress>>({});
   const [phase, setPhase] = useState<"confirm" | "running" | "done">("confirm");
@@ -339,7 +341,7 @@ function StopRow({ row, ticked, progress, locked, cleanup, onToggle }: { row: Ro
             <span className="block whitespace-normal break-words text-destructive-foreground text-xs">{progress.message}</span>
           ) : (
             <span className="block truncate text-[11px] text-muted-foreground">
-              {[names.where?.location.name, names.crowded && `started ${startedAt(entry.session.created)}`, names.where?.worktree.branch].filter(Boolean).join(" · ")}
+              {[entry.session.parked && "parked", names.where?.location.name, names.crowded && `started ${startedAt(entry.session.created)}`, names.where?.worktree.branch].filter(Boolean).join(" · ")}
             </span>
           )}
         </span>

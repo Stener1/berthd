@@ -22,6 +22,22 @@ again.
   between sections or keeping it off the dashboard twice in a row could
   lose the first change, because both saves read the same version of your
   projects. They now save one after the other.
+- **Turn check: a turn that ends on a question needs you.** Off by
+  default; turned on for a box in Settings → Agents, berthd asks a
+  decision model you pick about each finished Claude Code or Codex turn:
+  **Jev on Vercel AI Gateway**, **OpenAI Decisions** (`gpt-6-luna`), or
+  **Laya** on a server you run, which keeps turns on your machines. One
+  that asks you something or is blocked shows as **Needs you**; one that
+  stopped while something it started still runs (a build, a deploy, a
+  watcher) as **Working**; and one parked until someone else replies or a
+  later time ("check again in 24 hours"), with nothing running, as
+  **Idle**. Neither of those notifies you. A failed or unsure answer, or
+  work that is done, leaves it Done. It sends the turn's prompt (its first 4,000 characters,
+  looked for further back when a long turn's tool calls pushed it out of
+  view), the end of its reply and the session's title, with anything that
+  looks like a secret taken out first. It is set only from a paired laptop,
+  never from the box's own socket; each provider's key is kept apart and
+  goes only to that provider.
 
 ## v0.3.20
 
@@ -132,6 +148,13 @@ again.
   chat, commands and file changes to approve come to it as Allow / Always
   allow / Deny (or, with Bypass, run without asking), its questions are
   answered there, and it can be stopped and resumed. Needs the box upgraded.
+
+- **Labs: a structured Claude agent's conversation can be resumed.** When
+  one ends, its pane offers *Resume the conversation* rather than a fresh
+  start, and once its session is closed a worktree's menu lists its
+  conversations under *Resume a conversation*: each carries on where it left
+  off, earlier turns and permission mode included. Needs the box upgraded.
+
 - **Labs: a structured Claude agent opens in Claude Code's own terminal and
   comes back.** The Terminal switch on a structured agent's pane stops it and
   opens the same conversation in Claude Code's screen, for `/login`,
