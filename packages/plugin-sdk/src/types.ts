@@ -204,6 +204,14 @@ export interface Session {
   // What the agent waits on, from its own hooks ("ask" capability), while
   // agent_state is "waiting".
   ask?: Ask;
+  // Set on a finished agent that turn check read as still at work without
+  // it: a delegated task, a build, a deploy or a watcher still running, to
+  // pick up by itself. The app shows it as working.
+  unfinished?: boolean;
+  // Set on a finished agent that turn check read as parked: nothing runs
+  // and nothing is asked of you while it waits on someone else's reply or
+  // a later time ("check again in 24 hours"). The app shows it as idle.
+  parked?: boolean;
   // What the work is called: the first line of the prompt it started with
   // (or the first it was sent), about 48 characters, or what someone renamed
   // it to. Absent until there is one; api.renameSession names it.
