@@ -374,6 +374,21 @@ var secretPatterns = []struct {
 	{"a secret in an .env-style line", regexp.MustCompile(`(?im)^\s*(?:export\s+)?[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY)[A-Z0-9_]*\s*=\s*['"]?[^\s'"$]{12,}`)},
 }
 
+// privateKeyBlock is a whole private key, header to footer (or to the end
+// of a text that was cut off), for RedactSecrets: the header alone is
+// enough to refuse an artifact, not to take the key out of a text.
+var privateKeyBlock = regexp.MustCompile(`-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?s:.*?)(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|\z)`)
+
+// RedactSecrets replaces what LooksLikeSecret finds in s with what kind of
+// secret it was, for text that leaves the box (turn check).
+func RedactSecrets(s string) string {
+	s = privateKeyBlock.ReplaceAllLiteralString(s, "[redacted: a private key]")
+	for _, p := range secretPatterns {
+		s = p.re.ReplaceAllLiteralString(s, "[redacted: "+p.what+"]")
+	}
+	return s
+}
+
 // LooksLikeSecret names the kind of secret content seems to hold, or "".
 func LooksLikeSecret(content []byte) string {
 	for _, p := range secretPatterns {

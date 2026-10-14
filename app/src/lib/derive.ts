@@ -2,7 +2,9 @@ import type { Location, Session, Stats, Worktree } from "@/lib/api";
 
 // What the app shows for a session: the agent's last reported state ("ready"
 // is an agent open with nothing to do yet), "exited" once the program ended,
-// or "idle" for a plain shell.
+// or "idle" for a plain shell. A finished turn that turn check read as work
+// still running (a build, a deploy, a watcher) shows as running, and one it
+// read as parked until a reply or a later time as ready (Idle).
 export type SessionState = "ready" | "running" | "waiting" | "finished" | "exited" | "idle";
 
 export const AGENTS = ["claude", "codex", "opencode", "gemini", "pi", "omp", "cursor-agent"];
@@ -19,6 +21,8 @@ export function sessionState(s: Session, stats?: Stats): SessionState {
   if (s.exited) return "exited";
   // Never another agent's state in the same worktree.
   if (s.service) return "idle";
+  if (s.agent_state === "finished" && s.unfinished) return "running";
+  if (s.agent_state === "finished" && s.parked) return "ready";
   if (s.agent_state) return s.agent_state === "idle" ? "ready" : s.agent_state;
   // The box's report is per folder: a state from before this session began
   // is another agent's in the same worktree, not this one's (a new agent
