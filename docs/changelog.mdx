@@ -22,6 +22,13 @@ again.
   between sections or keeping it off the dashboard twice in a row could
   lose the first change, because both saves read the same version of your
   projects. They now save one after the other.
+- **Turn check: a check-in an agent scheduled for itself is Idle.** An
+  agent that ends its turn saying it will check again at a later time
+  ("tomorrow morning I'll check the numbers"), with nothing running now,
+  shows as **Idle**, even when the machine is kept awake for that check.
+  It used to show as **Working**. Work still running in the background, a
+  re-check or a watcher that reports back, stays **Working**.
+  [Sessions and agents](/concepts/sessions-and-agents#agent-state)
 
 ## v0.3.21
 
