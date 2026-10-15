@@ -46,3 +46,39 @@ test("a reply's math draws as typeset math, and a single $ stays text", async ({
   // A formula KaTeX can't read is its source, and the rest still draws.
   await expect(md.locator(".katex-error")).toHaveText("\\frac{1}{");
 });
+
+const BLOCKS_REPLY = [
+  "## Rigid bodies, step by step",
+  "",
+  "Semi-implicit Euler, velocity first:",
+  "",
+  "```math",
+  "\\begin{aligned} \\mathbf{v}_{t+\\Delta t} &= \\mathbf{v}_t + \\Delta t \\, M^{-1} \\mathbf{F} \\\\ \\mathbf{x}_{t+\\Delta t} &= \\mathbf{x}_t + \\Delta t \\, \\mathbf{v}_{t+\\Delta t} \\end{aligned}",
+  "```",
+  "",
+  "The contact impulse, clamped so bodies only push:",
+  "",
+  "```latex",
+  "\\lambda = \\max\\left(0, -\\frac{J\\mathbf{v} + b}{J M^{-1} J^{\\top}}\\right)",
+  "```",
+  "",
+  "And the file to compile, which stays code:",
+  "",
+  "```latex",
+  "\\documentclass{article}",
+  "\\begin{document}",
+  "Rigid bodies.",
+  "\\end{document}",
+  "```",
+].join("\n");
+
+test("a ```math block and a ```latex one of equations draw; a LaTeX document stays code", async ({ app }) => {
+  mockOnly("lands a reply on the demo's agent");
+  await app.open({ params: { view: "conversation" } });
+  await app.openWorktree("gpu/judge-v2");
+  await landReply(app.page, BLOCKS_REPLY);
+  const md = app.chat.locator("[data-kind=text] .cv-md").filter({ hasText: "Rigid bodies, step by step" });
+  await expect(md.locator(".cv-math-block .katex-display")).toHaveCount(2);
+  await expect(md.locator(".katex-error")).toHaveCount(0);
+  await expect(md.locator("pre code", { hasText: "\\documentclass{article}" })).toBeVisible();
+});

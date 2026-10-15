@@ -28,7 +28,8 @@ import {
   removeImage,
   type StoredImageInfo,
 } from "@/lib/chat-background";
-import { type ChatWidth, setChatBackground, setPrefs, usePrefs } from "@/lib/prefs";
+import { DEFAULT_HEADER_PICTURE } from "@/lib/header-picture";
+import { type ChatWidth, setChatBackground, setHeaderPicture, setPrefs, usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/views/settings/controls";
@@ -81,7 +82,7 @@ export function ChatBackgroundSettings() {
 
   const add = async (f: File) => {
     try {
-      const image = await keepImage(f, { name: f.name });
+      const image = await keepImage(f, { name: f.name }, picturesInUse());
       setChatBackground({ source: "image", image, ...PICTURE_PRESET });
     } catch (err) {
       toastError(err, { title: "Couldn't use that picture" });
@@ -162,7 +163,7 @@ export function ChatBackgroundSettings() {
   );
 }
 
-function TileRow({ title, children }: { title: string; children: ReactNode }) {
+export function TileRow({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div role="group" aria-label={title} className="flex items-start gap-3">
       <div className="w-[68px] shrink-0 pt-4 text-muted-foreground text-xs">{title}</div>
@@ -172,7 +173,7 @@ function TileRow({ title, children }: { title: string; children: ReactNode }) {
 }
 
 // Tile is one background to pick, as a small thumbnail with its name in a tip.
-function Tile({ label, selected, onClick, children, extra }: { label: string; selected?: boolean; onClick(): void; children: ReactNode; extra?: ReactNode }) {
+export function Tile({ label, selected, onClick, children, extra }: { label: string; selected?: boolean; onClick(): void; children: ReactNode; extra?: ReactNode }) {
   return (
     <div className="group relative">
       <Tip label={label}>
@@ -194,7 +195,7 @@ function Tile({ label, selected, onClick, children, extra }: { label: string; se
   );
 }
 
-function TileWords({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+export function TileWords({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <span className="flex flex-col items-center gap-1 text-[11px] text-muted-foreground [&_svg]:size-4">
       {icon}
@@ -217,10 +218,9 @@ function Thumb({ bg }: { bg: ChatBackground }) {
   );
 }
 
-// OwnImages are the pictures added or generated, newest first, each drawn
-// as it would be and with a way to forget it.
-function OwnImages({ selected }: { selected?: string }) {
-  const bg = usePrefs((p) => p.chatBackground);
+// useOwnImages is the pictures added or generated, newest first: the chat
+// background's and the header picture's alike.
+export function useOwnImages() {
   const [images, setImages] = useState<StoredImageInfo[]>([]);
   useEffect(() => {
     let alive = true;
@@ -235,11 +235,30 @@ function OwnImages({ selected }: { selected?: string }) {
       off();
     };
   }, []);
-  const forget = async (img: StoredImageInfo) => {
-    await removeImage(img.id);
-    const now = usePrefs.getState().chatBackground;
-    if (now.source === "image" && now.image?.id === img.id) setChatBackground({ source: "none", image: undefined });
-  };
+  return images;
+}
+
+// picturesInUse are the pictures of your own chosen now, which keeping a
+// new one never pushes out.
+export function picturesInUse() {
+  const { chatBackground: bg, headerPicture: hp } = usePrefs.getState();
+  return [bg.source === "image" ? bg.image?.id : undefined, hp.source === "image" ? hp.image?.id : undefined];
+}
+
+// forgetPicture removes a picture of your own; whatever showed it goes back
+// to its default: no chat background, the harbour atop a new chat.
+export async function forgetPicture(img: StoredImageInfo) {
+  await removeImage(img.id);
+  const { chatBackground: bg, headerPicture: hp } = usePrefs.getState();
+  if (bg.source === "image" && bg.image?.id === img.id) setChatBackground({ source: "none", image: undefined });
+  if (hp.source === "image" && hp.image?.id === img.id) setHeaderPicture({ ...DEFAULT_HEADER_PICTURE, image: undefined });
+}
+
+// OwnImages are the pictures added or generated, newest first, each drawn
+// as it would be and with a way to forget it.
+function OwnImages({ selected }: { selected?: string }) {
+  const bg = usePrefs((p) => p.chatBackground);
+  const images = useOwnImages();
   // A picture not chosen yet is shown as it would land: Shipyard's preset.
   return images.map((img) => (
     <Tile
@@ -247,23 +266,28 @@ function OwnImages({ selected }: { selected?: string }) {
       label={img.prompt ? `Generated: ${img.prompt}` : img.name}
       selected={selected === img.id}
       onClick={() => setChatBackground(selected === img.id ? {} : { source: "image", image: img, ...(bg.source === "image" ? {} : PICTURE_PRESET) })}
-      extra={
-        <Tip label="Remove this picture">
-          <Button
-            size="icon-xs"
-            variant="secondary"
-            aria-label={`Remove ${img.prompt ? "the generated picture" : img.name}`}
-            onClick={() => void forget(img)}
-            className="absolute -top-1.5 -right-1.5 size-5 rounded-full opacity-0 shadow-sm transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <XIcon className="size-3" />
-          </Button>
-        </Tip>
-      }
+      extra={<RemovePicture img={img} />}
     >
       <Thumb bg={{ ...bg, ...(bg.source === "image" ? {} : PICTURE_PRESET), source: "image", image: img }} />
     </Tile>
   ));
+}
+
+// RemovePicture is a picture tile's ×, shown on hover or focus.
+export function RemovePicture({ img }: { img: StoredImageInfo }) {
+  return (
+    <Tip label="Remove this picture">
+      <Button
+        size="icon-xs"
+        variant="secondary"
+        aria-label={`Remove ${img.prompt ? "the generated picture" : img.name}`}
+        onClick={() => void forgetPicture(img)}
+        className="absolute -top-1.5 -right-1.5 size-5 rounded-full opacity-0 shadow-sm transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <XIcon className="size-3" />
+      </Button>
+    </Tip>
+  );
 }
 
 // Preview is a conversation in miniature over the background, as it
@@ -438,7 +462,7 @@ function Generate({ onClose }: { onClose(): void }) {
     setError(undefined);
     try {
       const img = await imageGenApi.generate(client, prompt.trim(), gen.id);
-      const image = await keepImage(generatedBlob(img), { name: `${gen.name}: ${img.prompt}`, prompt: img.prompt });
+      const image = await keepImage(generatedBlob(img), { name: `${gen.name}: ${img.prompt}`, prompt: img.prompt }, picturesInUse());
       setChatBackground({ source: "image", image, ...PICTURE_PRESET });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

@@ -394,7 +394,8 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 			applyWIP(dir, x.Vars["handoff.wip"])
 		}
 	}
-	command, err := AgentCommandWith(p, prompt, runs.ExpandText(s.Model, x.Vars), runs.ExpandText(s.Effort, x.Vars))
+	model, effort := runs.ExpandText(s.Model, x.Vars), runs.ExpandText(s.Effort, x.Vars)
+	command, err := AgentCommandWith(p, prompt, model, effort)
 	if err != nil {
 		return fail(err)
 	}
@@ -403,6 +404,13 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 		if cmd, how := nativeResume(p, agent, x.Vars, dir, prompt); cmd != "" {
 			command, native = cmd, how
 		}
+	}
+	// A step names no driver: a fresh agent follows the box's default
+	// (agentdefaults.go). One carrying on its terminal conversation stays
+	// in its terminal.
+	kind, mode := "", ""
+	if native == "" {
+		kind, mode, _ = b.startDriver(p, "", "")
 	}
 	where := loc.Name + "/" + wt.Name
 	name := runSessionName(x.Run.ID, wt.Name, agent, x.Path)
@@ -413,6 +421,9 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 			set["turn.id"], set["turn.session"] = tr.ID, name
 		}
 		return runs.Result{Status: runs.Succeeded, Out: "adopted " + name, Set: set}
+	}
+	if kind != "" {
+		return h.startStructuredAgent(ctx, x, structuredStart{p: p, agent: agent, kind: kind, mode: mode, model: model, effort: effort, name: name, where: where, dir: dir, prompt: prompt}, set)
 	}
 	if err := h.b.beforeAs(ctx, origOf(x), "session.start", map[string]any{"location": where, "path": dir, "command": command, "agent": agent}); err != nil {
 		return fail(err)
@@ -438,6 +449,45 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 		out += " (" + native + ")"
 	}
 	return runs.Result{Status: runs.Succeeded, Out: out, Set: set}
+}
+
+// structuredStart is what startStructuredAgent starts.
+type structuredStart struct {
+	p                                                          AgentPreset
+	agent, kind, mode, model, effort, name, where, dir, prompt string
+}
+
+// startStructuredAgent is startAgent for an agent the box runs structured.
+// Its first prompt goes in once its host listens, sent as any prompt is,
+// so the turn it starts is one the run's next wait can wait on.
+func (h *runHost) startStructuredAgent(ctx context.Context, x *runs.StepCtx, st structuredStart, set map[string]string) runs.Result {
+	b := h.b
+	l, err := b.launchStructured(st.kind, st.p, st.model, st.effort, st.mode)
+	if err != nil {
+		return fail(err)
+	}
+	if err := b.beforeAs(ctx, origOf(x), "session.start", map[string]any{"location": st.where, "path": st.dir, "command": l.command, "agent": st.agent}); err != nil {
+		return fail(err)
+	}
+	sess, err := b.createAgentSessionWith(ctx, st.name, st.where, st.dir, l.command, st.agent, l.env, l.labels)
+	if err != nil {
+		return fail(err)
+	}
+	b.Events.Publish(events.Event{Type: "session.started", Box: b.Name, Origin: origOf(x), Data: map[string]any{"name": sess.Name, "location": st.where, "path": st.dir, "command": l.command, "agent": agentFor(sess), "driver": sess.Driver, "run": x.Run.ID}})
+	noteStarted(l, st.where, st.dir, sess.Name, st.prompt)
+	sess = b.enrich(ctx, []Session{sess})[0]
+	awaitHost(sess.sock, 30*time.Second)
+	b.follow(sess)
+	if strings.TrimSpace(st.prompt) != "" {
+		res, err := b.sendPrompt(ctx, sess.Name, SendRequest{Text: st.prompt, When: "now", IdemKey: x.IdemKey}, origOf(x), origOf(x))
+		if err != nil {
+			return fail(err)
+		}
+		if res.Turn != "" {
+			set["turn.id"], set["turn.session"] = res.Turn, sess.Name
+		}
+	}
+	return runs.Result{Status: runs.Succeeded, Out: "started " + sess.Name + " in " + st.where, Set: set}
 }
 
 func (h *runHost) webhook(ctx context.Context, x *runs.StepCtx) runs.Result {

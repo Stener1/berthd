@@ -70,6 +70,9 @@ type Box struct {
 	codexDrv         *codexDriver
 	acpOnce          sync.Once
 	acpDrv           *acpDriver
+	// AgentDefaults is how agents start when what starts them names no
+	// driver (agentdefaults.go); nil is in their terminals.
+	AgentDefaults *AgentDefaultsStore
 	// Hooks, when set, may refuse actions through "before:" hooks.
 	Hooks *hooks.Runner
 	// Flows runs the box's and its repositories' automations.
@@ -85,6 +88,9 @@ type Box struct {
 	Phone *Phone
 	// Guard, when set, keeps the box usable when memory runs short.
 	Guard *Guard
+	// TurnCheck, when turned on, asks Jev whether a finished turn needs
+	// you (turncheck.go).
+	TurnCheck *TurnCheck
 	// Secrets resolves secret references in worktree environments; nil
 	// uses a shared one.
 	Secrets *Secrets
@@ -187,6 +193,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/locations/{name}/worktrees/{worktree}/{action}", b.pauseAction)
 	route("GET /v1/phone", b.getPhone)
 	route("PUT /v1/phone", b.putPhone)
+	route("GET /v1/turncheck", b.getTurnCheck)
+	route("PUT /v1/turncheck", b.putTurnCheck)
 	route("GET /v1/kits", b.listKits)
 	route("PUT /v1/locations/{name}/kit", b.putKit)
 	route("POST /v1/locations/{name}/team-kit", b.postTeamKit)
@@ -259,6 +267,8 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/agents", b.listAgentCLIs)
 	route("POST /v1/agents/install", b.installAgentCLIs)
 	route("POST /v1/agents/refresh", b.lookAgainForAgents)
+	route("GET /v1/agents/defaults", b.getAgentDefaults)
+	route("PUT /v1/agents/defaults", b.putAgentDefaults)
 	route("POST /v1/upgrade", b.handleUpgrade)
 	route("GET /v1/events", b.streamEvents)
 	route("POST /v1/events", b.emit)
@@ -673,9 +683,11 @@ type SessionRequest struct {
 	// command or a shell, never an agent preset, and no location.
 	Home bool `json:"home,omitempty"`
 	// Driver, with an agent, is how berthd runs it: "terminal" (its own
-	// screen; the default) or "claude" (Claude Code structured,
-	// claudedriver.go). Mode is a structured agent's permission mode to
-	// start in: "bypassPermissions" has berthd allow what it asks.
+	// screen) or "claude" (Claude Code structured, claudedriver.go). None
+	// is the box's default (agentdefaults.go): the terminal, unless the
+	// person turned structured agents on. Mode is a structured agent's
+	// permission mode to start in: "bypassPermissions" has berthd allow
+	// what it asks.
 	Driver string `json:"driver,omitempty"`
 	Mode   string `json:"mode,omitempty"`
 }
@@ -711,10 +723,11 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
-		if kind, err := wantStructured(req.Driver); err != nil {
+		// No driver named (the berth tools, the CLI): the box's default.
+		if kind, mode, err := b.startDriver(p, req.Driver, req.Mode); err != nil {
 			return err
 		} else if kind != "" {
-			l, err := b.launchStructured(kind, p, req.Model, req.Effort, req.Mode)
+			l, err := b.launchStructured(kind, p, req.Model, req.Effort, mode)
 			if err != nil {
 				return err
 			}

@@ -24,6 +24,7 @@
     { "id": "zoom-out", "group": "View", "label": "Zoom out", "keys": "⌘−", "accel": "CmdOrCtrl+-" },
     { "id": "zoom-reset", "group": "View", "label": "Actual size", "keys": "⌘0", "accel": "CmdOrCtrl+0" },
     { "id": "palette", "group": "Go", "label": "Search and commands…", "keys": "⌘K", "accel": "CmdOrCtrl+K" },
+    { "id": "switchboard", "group": "Go", "label": "Switchboard…", "keys": "⌘⇧K", "accel": "CmdOrCtrl+Shift+K", "what": "Pick up focused and recent work across areas" },
     { "id": "files", "group": "Go", "label": "Go to file…", "keys": "⌘P", "accel": "CmdOrCtrl+P", "what": "Find a file in the worktree in front: what the agent changed this turn first. ↵ opens it in a File tab, ⌥↵ beside the pane, ⌘↵ in your editor" },
     { "id": "save-file", "group": "Go", "label": "Save file", "keys": "⌘S", "what": "In a File tab: save it. If the agent wrote the file since, you choose what to keep instead" },
     { "id": "tab", "group": "Go", "label": "Tab {n}", "keys": "⌘1–9", "accel": "CmdOrCtrl+{n}", "count": 9, "sep": true, "what": "Go to tab 1–9" },

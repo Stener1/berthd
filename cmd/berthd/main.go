@@ -371,6 +371,7 @@ func serve(b boxHome, args []string) error {
 		Phone:            &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
 		Guard:            &box.Guard{Path: filepath.Join(userDir, "guard.json")},
 		Invites:          &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
+		TurnCheck:        &box.TurnCheck{Path: filepath.Join(userDir, "turncheck.json"), KeyPath: filepath.Join(b.dir, "turncheck.key"), Log: logger},
 		Update: &box.SelfUpdate{
 			Executable:    exe,
 			Fingerprint:   id.Fingerprint().String(),
@@ -387,6 +388,9 @@ func serve(b boxHome, args []string) error {
 	// A worktree that is removed, however it was, is one they forget.
 	defer bx.Helpers.Watch(bus)()
 	bx.AutoFix = &box.AutoFixStore{Path: filepath.Join(b.dir, "autofix.json")}
+	// How agents start when what starts them names no driver
+	// (agentdefaults.go): the app keeps it to the person's Labs setting.
+	bx.AgentDefaults = &box.AgentDefaultsStore{Path: filepath.Join(b.dir, "agent-defaults.json")}
 	bx.Triggers = &box.TriggerSecrets{Path: filepath.Join(b.dir, "trigger-secrets.json")}
 	rc := box.LoadRunsConfig(filepath.Join(userDir, "runs.json"))
 	bx.NewRuns(filepath.Join(b.dir, "runs"), rc.MaxConcurrentRuns, rc.MaxConcurrentAgents, logger.Printf)
@@ -469,6 +473,7 @@ func serve(b boxHome, args []string) error {
 	go bx.Phone.Run(ctx, bx)
 	go bx.Guard.Run(ctx, bx)
 	go bx.WatchSessionMemory(ctx)
+	go bx.TurnCheck.Run(ctx, bx)
 
 	os.Remove(b.socket())
 	local, err := net.Listen("unix", b.socket())

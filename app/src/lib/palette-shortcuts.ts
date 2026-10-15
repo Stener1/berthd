@@ -4,7 +4,7 @@
 // palette-shortcuts.test.ts checks every shortcut is in one list here.
 
 // The palette has its own item for these, with words of its own.
-export const OWN_ITEMS = ["new-worktree", "new-terminal", "new-browser", "open-editor", "split-worktree", "zen", "dashboard", "notifications", "shortcuts", "rename"] as const;
+export const OWN_ITEMS = ["new-worktree", "new-terminal", "new-browser", "open-editor", "split-worktree", "zen", "dashboard", "switchboard", "notifications", "shortcuts", "rename"] as const;
 
 // These it lists as the shortcut table names them; labs ones with Labs on.
 export const FROM_TABLE = ["files", "split-right", "split-down", "compare", "close-pane", "close-group", "file-tree", "devtools", "sidebar", "zoom-in", "zoom-out", "zoom-reset", "compare-swap", "prev-group", "next-group"] as const;

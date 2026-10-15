@@ -148,6 +148,48 @@ login notice are not questions, so they never read as `waiting`; after you
 approve a permission, the tool it allowed running says the agent is working
 again.
 
+An agent's hooks say its turn finished whether it is done or asks you
+something ("go ahead?"). **Turn check**, off by default and turned on per
+box in Settings → Agents, tells these apart for Claude Code and Codex: when
+a turn ends normally, berthd sends the turn's last prompt (looking back past
+a long turn's tool calls) and reply from the agent's transcript, and the
+session's title as its objective, to the decision model you pick. Nothing
+is picked for you:
+
+| Provider | Where turns go | Key | Model |
+| --- | --- | --- | --- |
+| **Jev on AI Gateway** | Vercel AI Gateway's evaluate endpoint, prompt training disallowed | Your AI Gateway key | `typesafe-ai/jev` |
+| **OpenAI Decisions** | OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta) | Your OpenAI API key | `gpt-6-luna` |
+| **Laya, your own server** | [Laya](https://huggingface.co/convaiinnovations/laya)'s `laya-serve` (`pip install "laya[serve]"`), or another server that answers Jev's request, at the address you give | None | Optional: `english`, `multilingual` or `typed-decisions`; Laya picks one by itself |
+
+The prompt is capped at 4,000 characters, the reply at its last 12,000, and
+what looks like a secret is taken out of all three first. An agent that
+asks you something, or is blocked, shows as **Needs you**
+(`agent.waiting` with `source: "turncheck"` and the model's `choice`), and
+notifications follow; it still takes prompts as if done, so held prompts
+and other agents' reports are delivered. Unfinished work that needs
+nothing from you is one of two kinds, and neither notifies. **Working**:
+something it started is still running and it acts when that ends (a
+delegated task, a build, a deploy, a test run, or a watcher it started);
+the session stays `finished` with `unfinished: true`. **Parked**: nothing
+runs for it, and it waits on someone else (a reply, another team, a
+vendor) or a later time ("check again in 24 hours", "continue on
+Thursday"); the session stays `finished` with `parked: true` and shows as
+**Idle**. Both are `agent.ready` with `source: "turncheck"` and the
+model's `choice` (`working` or `parked`); both take prompts and end waits
+as done, and stay out of Review, so Done holds only work that is done. A
+dev server or shell left running after the agent is done is not work in
+progress, and anything that waits on you is **Needs you**. Anything else (done, an answer under 65%
+sure, a failed request, no answer in 10 seconds, or you prompting again
+first) leaves it **Done**; no other model is asked.
+
+Settings → Agents, which only a paired laptop can change, keeps a key per
+provider on the box, readable by you alone, and sends each only to its own
+provider; a [secret reference](/guides/secrets) (`op://…`, or `env://NAME`
+from berthd's own environment) is the alternative. Laya gets no key. A Laya
+server on the box itself or on a private address needs that address in
+`allow_outbound` in `~/.berth/network.json`.
+
 ### Turns
 
 A **turn** is one prompt to the end of the agent's reply. The box keeps a

@@ -36,7 +36,7 @@ test("Labs turned off in Settings stays off", async ({ app }) => {
 test("Labs can be turned off and on in Settings", async ({ app }) => {
   await app.open();
   const labs = await app.openSettings("labs");
-  const toggle = labs.getByRole("switch");
+  const toggle = labs.getByRole("switch", { name: "Harbour home and conversations" });
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: false, labsChosen: true });

@@ -23,6 +23,71 @@ again.
   lose the first change, because both saves read the same version of your
   projects. They now save one after the other.
 
+## v0.3.21
+
+- **The phone app pairs from a pasted link.** Its Pair and Boxes screens have
+  *Or paste a pairing link*, for a phone app added to the home screen, which
+  keeps its own storage apart from the browser. A good pairing link no longer
+  says it is damaged, and Back always returns to the list instead of leaving
+  the app. Needs the box upgraded.
+  [Phone](/guides/phone)
+
+- **Turn check: a turn that ends on a question needs you.** Off by
+  default; turned on for a box in Settings → Agents, berthd asks a
+  decision model you pick about each finished Claude Code or Codex turn:
+  **Jev on Vercel AI Gateway**, **OpenAI Decisions** (`gpt-6-luna`), or
+  **Laya** on a server you run, which keeps turns on your machines. One
+  that asks you something or is blocked shows as **Needs you**; one that
+  stopped while something it started still runs (a build, a deploy, a
+  watcher) as **Working**; and one parked until someone else replies or a
+  later time ("check again in 24 hours"), with nothing running, as
+  **Idle**. Neither of those notifies you. A failed or unsure answer, or
+  work that is done, leaves it Done. It sends the turn's prompt (its first 4,000 characters,
+  looked for further back when a long turn's tool calls pushed it out of
+  view), the end of its reply and the session's title, with anything that
+  looks like a secret taken out first. It is set only from a paired laptop,
+  never from the box's own socket; each provider's key is kept apart and
+  goes only to that provider.
+- **Switchboard:** Pick up focused and recent conversations and worktrees with ⌘⇧K or from Home. Type to find one, ↑ ↓ and ↵ to open it, ⌘S to star it into Focus, ⌘E to leave a pickup note, and Tab to step through your areas. Right-click a row (or ⇧F10) to move it to another area. Your focus, areas and notes stay on this computer.
+- **Choose the picture at the top of a new chat.** Settings › Appearance ›
+  Header picture picks the painting across the top of a new chat, an empty
+  worktree and Home: the harbour (still the default), one of six new
+  paintings (Alpine lake, Meadow, Desert mesa, Snowy fjord, Lavender fields,
+  Sea of clouds), a picture of your own, or none. Each new painting has its
+  own night version for dark themes, as the harbour does, and a picture of
+  your own is dimmed there.
+- **Six new chat backgrounds.** The same six paintings are scenes under
+  Settings › Appearance › Chat background, at night in a dark theme.
+- **Math in code blocks draws too.** A ` ```math ` block, as GitHub writes a
+  formula, and a ` ```latex ` or ` ```tex ` block of equations now show as
+  typeset math. A whole LaTeX document (with `\documentclass`, meant for
+  `pdflatex`) stays code, as does a block still being written.
+- **Agents started by other agents follow Structured agents too.** With
+  *Structured agents* on in Settings › Labs, an agent that another agent
+  starts with the berth tools, one started with `berth task new` or
+  `berth session new`, and the agents of runs and automations now run
+  structured, with your *Permissions* choice, instead of always in their
+  terminals. Update your boxes (`berth upgrade BOX`, or Update all) for it
+  to take effect.
+- **Mermaid flowcharts in a reply draw as diagrams.** A `mermaid` code
+  block with a flowchart shows as the diagram, in the theme's colours, the
+  way a diagram artifact does; *Source* in its corner shows what it was
+  drawn from, and *Copy* still copies that. Other Mermaid diagrams, such
+  as sequence diagrams, show as written, and a reply still being written
+  shows its blocks as text until it's done.
+- **Mermaid flowcharts draw as they were written.** Subgraphs show as
+  titled, tinted boxes around their nodes, nested where they nest, and a
+  `<br/>` in a label starts a new line. Labels lose their quotes, codes
+  such as `#quot;` and `&amp;` show as the characters they stand for, and
+  nodes keep their shapes: pills, cylinders, circles, hexagons and slanted
+  boxes. Every kind of arrow is read, labelled or not, as are chains like
+  `a --> b --> c` and `a & b --> c`. A loop back up the chart curves round
+  the side instead of stretching it. This goes for diagram artifacts too.
+- **Diffs in a reply look like the chat's edits.** A `diff` or `patch`
+  code block draws with file names, line numbers and highlighting, as an
+  agent's edits do. Plain lines of `+` and `-` show coloured, without
+  numbers. A block that isn't really a diff stays as written.
+
 ## v0.3.20
 
 - **Pictures from a worktree show in replies.** An agent can include a
@@ -132,6 +197,13 @@ again.
   chat, commands and file changes to approve come to it as Allow / Always
   allow / Deny (or, with Bypass, run without asking), its questions are
   answered there, and it can be stopped and resumed. Needs the box upgraded.
+
+- **Labs: a structured Claude agent's conversation can be resumed.** When
+  one ends, its pane offers *Resume the conversation* rather than a fresh
+  start, and once its session is closed a worktree's menu lists its
+  conversations under *Resume a conversation*: each carries on where it left
+  off, earlier turns and permission mode included. Needs the box upgraded.
+
 - **Labs: a structured Claude agent opens in Claude Code's own terminal and
   comes back.** The Terminal switch on a structured agent's pane stops it and
   opens the same conversation in Claude Code's screen, for `/login`,

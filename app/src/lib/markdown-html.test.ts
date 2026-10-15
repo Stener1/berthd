@@ -53,6 +53,32 @@ test("math in code stays as written", () => {
   assert.equal(read("[docs](https://example.com/a\\(b\\))"), '<p><a href="https://example.com/a(b)">docs</a></p>');
 });
 
+test("a ```math block, or a ```latex one of equations, is a display", () => {
+  const block = (tex: string) => `<div class="cv-math-block"><span class="cv-math cv-math-display">[display:${tex}]</span></div>`;
+  assert.equal(read("```math\nE = mc^2\n```"), block("E = mc^2"));
+  assert.equal(read("```latex\n\\begin{aligned}a &= b \\\\ c &= d\\end{aligned}\n```"), block("\\begin{aligned}a &= b \\\\ c &= d\\end{aligned}"));
+  assert.equal(read("```tex\nx^2\n```"), block("x^2"));
+  // What micromark escaped is TeX again.
+  assert.equal(read("```math\na < b & c\n```"), block("a < b & c"));
+  assert.match(html("```math\n\\frac{1}{2}\n```"), /katex-display/);
+  // Words around it are still the reply's.
+  assert.equal(read("Energy:\n\n```math\nE = mc^2\n```\n\nas Einstein had it."), `<p>Energy:</p>\n${block("E = mc^2")}\n<p>as Einstein had it.</p>`);
+});
+
+test("a LaTeX document, other code and a block still being written stay code", () => {
+  // A document is for pdflatex.
+  const doc = "```latex\n\\documentclass{article}\n\\begin{document}\n$x$\n\\end{document}\n```";
+  assert.equal(markdownHtml(doc, tex).math, false);
+  assert.match(read(doc), /<pre><code class="language-latex">\\documentclass/);
+  assert.match(read("```tex\n\\section{Forces}\nF = ma\n```"), /<pre><code class="language-tex">/);
+  // Other languages and unnamed blocks are untouched.
+  assert.equal(read("```python\nx = 1\n```"), '<pre><code class="language-python">x = 1\n</code></pre>');
+  // A draft's block that hasn't closed: code until it does.
+  assert.equal(markdownHtml("```math\nE = m", tex).math, false);
+  // Only the open one, when one before it closed.
+  assert.equal(read("```math\na\n```\n\n```math\nb"), '<div class="cv-math-block"><span class="cv-math cv-math-display">[display:a]</span></div>\n<pre><code class="language-math">b\n</code></pre>\n');
+});
+
 test("a formula KaTeX can't read shows as its source, and nothing throws", () => {
   const out = html("A \\(\\frac{1}{\\) and $$\\badcommand$$ here.");
   assert.match(out, /katex-error/);

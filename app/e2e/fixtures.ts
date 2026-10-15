@@ -16,7 +16,7 @@ import { type BrowserContext, expect, type Locator, type Page, test as base } fr
 // nav-<id>, pane with data-pane-kind, chat, chat-item with data-kind,
 // composer, question-form, queued-reply, artifacts-chip/-popover,
 // attachment-chip, panel with data-panel, browser-pane with data-mode,
-// chat-background, settings-nav-<id>, settings-<id>, theme-option with
+// chat-background, header-picture with data-picture, header-picture-settings, settings-nav-<id>, settings-<id>, theme-option with
 // data-theme-id, plugin-row and market-plugin with data-plugin,
 // market-error, zoom-hud, leadline with data-leadline and data-state, and
 // its leadline-row, -detail, -notice, -box, database with data-state, and

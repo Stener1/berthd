@@ -21,6 +21,7 @@ import {
   GitCompareArrowsIcon,
   GlobeIcon,
   LayoutDashboardIcon,
+  Layers3Icon,
   PanelTopIcon,
   PuzzleIcon,
   RefreshCwIcon,
@@ -85,6 +86,7 @@ import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { openAttempts, openComposer } from "@/lib/composer";
 import { defaultScope } from "@/views/automations/flows/project-label";
 import { placeLabel, worktreeLabel } from "@/lib/worktree-names";
+import { setSwitchboardOpen } from "@/lib/switchboard";
 
 // Settings' sections ⌘K goes to, with words they answer to besides their name.
 const SETTINGS_SECTIONS: [SettingsSectionId, string, string][] = [
@@ -218,6 +220,7 @@ export function CommandPalette() {
       { value: "home harbour start", label: "Home", icon: slot(<HouseIcon />), run: go(goHome) },
       { value: "review inbox approve changes", label: "Review", icon: slot(<InboxIcon />), run: go(() => st.setView({ kind: "review" })) },
       { value: "dashboard", label: "Agent Dashboard", icon: slot(<LayoutDashboardIcon />), shortcut: keysFor("dashboard"), run: go(() => st.setView({ kind: "dashboard" })) },
+      { value: "switchboard focus areas recent work", label: "Switchboard…", icon: slot(<Layers3Icon />), shortcut: keysFor("switchboard"), run: go(() => setSwitchboardOpen(true)) },
       ...(hasWhatsNew() ? [{ value: "whats new release notes changes update", label: "What's new in Shipyard", icon: slot(<SparkleIcon />), run: go(() => openWhatsNew("palette")) }] : []),
       { value: "keyboard shortcuts keys help", label: "Keyboard shortcuts", icon: slot(<KeyboardIcon />), shortcut: keysFor("shortcuts"), run: go(openShortcuts) },
       { value: "notifications inbox bell", label: "Notifications", icon: slot(<BellIcon />), shortcut: keysFor("notifications"), run: go(() => setNotificationsOpen(true)) },

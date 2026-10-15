@@ -17,7 +17,8 @@ whatever you put there.
 An empty worktree has a composer that starts an agent right there. Labs
 adds the harbour above them: a painting of the harbour dissolving into the
 page, in a halftone grain, at night in a dark theme, smaller in an empty
-worktree.
+worktree. [Settings → Appearance → Header picture](/guides/themes#header-picture)
+swaps it for another painting or a picture of your own, or turns it off.
 
 The harbour is **Home**, the first place in the sidebar. Without Labs that
 place is the Agent Dashboard; with Labs the dashboard moves under **More**
@@ -277,6 +278,12 @@ own record of the conversation. The box drives it from there:
   the box opens its session (with its own login, for Cursor Agent), streams
   its reply, cancels its turn, switches its own modes, and brings its
   permission requests to the chat; *Bypass* has the box allow them.
+
+Agents started without the app follow the setting too: those another agent
+starts with the berth tools, those started with `berth task new` or
+`berth session new --agent`, and the agents of runs and automations. Shipyard gives each box the
+setting, with your *Permissions* choice, whenever it connects and whenever
+you change it; the box needs the `agents.defaults` capability (upgrade it).
 
 The agent keeps working while berthd restarts or upgrades, and the record
 keeps every streamed word even if the agent is killed. The box needs the

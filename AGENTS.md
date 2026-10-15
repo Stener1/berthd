@@ -29,7 +29,7 @@ Browser tests: run the specs you touched, not the whole suite (`E2E_PORT=14xx np
 - **Ports:** 1420 is the dev app and 1377–1379 the laptop agent: never use or kill them. Vite and Playwright use `E2E_PORT` in 1421–1439, and you check the port is free first.
 - **Hands off:** never touch `~/.berth`, `~/Library/Application Support/berth` or the `dev.berth.berthd` launchd job. Kill only PIDs you started; no `pkill node`/`vite`/`next-server`.
 - **No symlinked `node_modules`** (pnpm breaks without a TTY). Install per worktree.
-- **New unit test files** go into `app/package.json`'s `"test"` script list. It's the last key, with no trailing comma; keep the JSON valid.
+- **New unit test files** go in `app/src/lib/` as `*.test.ts`; `pnpm test` finds them there (`src/lib/**/*.test.ts`). Don't list them in `package.json`.
 - **No `title=` attributes** in the app (`check:titles`); use `<Tip>`.
 - **MDX:** a bare `<word>` in prose is parsed as a tag and breaks the docs build. Wrap it in backticks.
 - **Changelog:** every user-visible change gets a bullet under `## Unreleased` in `docs/changelog.mdx`, in plain words.

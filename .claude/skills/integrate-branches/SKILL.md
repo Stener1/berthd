@@ -17,7 +17,6 @@ description: Merge several feature branches (often from parallel agents) into on
    Don't rebase other people's branches. `git merge-tree --write-tree origin/main origin/<branch>` previews the conflicts.
 3. **Resolve the usual conflicts:**
    - `docs/changelog.mdx`: keep every bullet from both sides under `## Unreleased`.
-   - `app/package.json` `"test"`: the union of both file lists. It stays the last key, with no trailing comma; check with `node -e "require('./app/package.json')"`.
    - Other `package.json` scripts and dependencies: keep both sides.
    - Mocks (`app/src/lib/mock*.ts`) and capability lists: the union of both.
    - Real code: keep both intents. Read both sides; don't pick one.

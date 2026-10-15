@@ -301,6 +301,8 @@ export interface DiffProps {
   layout: "split" | "unified";
   dark: boolean;
   wrap?: boolean;
+  // Off for lines that number nothing: a reply's bare +/- lines.
+  lineNumbers?: boolean;
   className?: string;
   style?: CSSProperties;
   // Notes drawn under their lines, and a button in the gutter to add one.
@@ -309,7 +311,7 @@ export interface DiffProps {
   onAddNote?(side: "old" | "new", line: number): void;
 }
 
-export function Diff({ fileDiff, layout, dark, wrap = true, className, style, notes, renderNote, onAddNote }: DiffProps) {
+export function Diff({ fileDiff, layout, dark, wrap = true, lineNumbers = true, className, style, notes, renderNote, onAddNote }: DiffProps) {
   const add = useRef(onAddNote);
   add.current = onAddNote;
   const commentable = !!onAddNote;
@@ -324,13 +326,14 @@ export function Diff({ fileDiff, layout, dark, wrap = true, className, style, no
       lineDiffType: "word-alt" as const,
       hunkSeparators: "simple" as const,
       disableFileHeader: true,
+      disableLineNumbers: !lineNumbers,
       unsafeCSS: CHAT_CSS,
       enableGutterUtility: commentable,
       onGutterUtilityClick: commentable
         ? (r: { start: number; side?: "deletions" | "additions" }) => add.current?.(r.side === "deletions" ? "old" : "new", r.start)
         : undefined,
     }),
-    [dark, layout, wrap, commentable, syntax],
+    [dark, layout, wrap, lineNumbers, commentable, syntax],
   );
   const annotations = useMemo<DiffLineAnnotation<string>[] | undefined>(
     () => notes?.map((n) => ({ side: n.side === "old" ? "deletions" : "additions", lineNumber: n.line, metadata: n.key })),

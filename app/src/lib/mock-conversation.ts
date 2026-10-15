@@ -223,6 +223,12 @@ export function mockAnswer(box: string, session: string, req: { tool: string; an
 // seedTranscript gives an agent that is already working something to show
 // when it is opened.
 export function seedTranscript(box: string, session: string, state: string, worktree: string): TranscriptItem[] {
+  // ?scene=first-prompt: an agent at rest hasn't been asked anything yet,
+  // so it opens to the start of a chat (the header picture, the composer).
+  if (new URLSearchParams(location.search).get("scene") === "first-prompt" && state !== "running" && state !== "waiting") {
+    useConversations.setState((s) => (s.items[keyOf(box, session)] ? s : { items: { ...s.items, [keyOf(box, session)]: [] } }));
+    return [];
+  }
   // Messages from other agents and Claude Code (agent-message): a story, or
   // with ?scene=busy a teammate on a busy team.
   if (box === "gpu" && session === MESSAGES_SESSION) {

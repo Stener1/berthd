@@ -43,6 +43,9 @@ type Info struct {
 	Capabilities []string `json:"capabilities"`
 	// Adapters say what each agent can report, for the app.
 	Adapters map[string]adapters.Caps `json:"adapters,omitempty"`
+	// AgentDefaults is how agents start when what starts them names no
+	// driver, on a box with "agents.defaults".
+	AgentDefaults *AgentDefaults `json:"agent_defaults,omitempty"`
 }
 
 // BuildID identifies a daemon build by its bytes.
@@ -117,6 +120,10 @@ func (b *Box) handleInfo(w http.ResponseWriter, r *http.Request) error {
 		i.Agents = []AgentPreset{}
 	}
 	i.Capabilities = b.Capabilities()
+	if b.AgentDefaults != nil {
+		d := b.AgentDefaults.Get()
+		i.AgentDefaults = &d
+	}
 	i.Adapters = map[string]adapters.Caps{}
 	for _, a := range adapters.All() {
 		i.Adapters[a.Name] = a.Caps
@@ -173,6 +180,12 @@ func (b *Box) Capabilities() []string {
 		// driver.acp: "driver": "acp", an agent whose preset says how it
 		// speaks ACP (acpdriver.go).
 		caps = append(caps, "driver.claude", "driver.codex", "driver.acp", "driver.switch", "conversations")
+		if b.AgentDefaults != nil {
+			// agents.defaults: GET and PUT /v1/agents/defaults, how agents
+			// start when what starts them names no driver
+			// (agentdefaults.go), also in info as agent_defaults.
+			caps = append(caps, "agents.defaults")
+		}
 	}
 	if b.Artifacts != nil {
 		// artifacts: berthd artifact add, a worktree's artifacts and their

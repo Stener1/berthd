@@ -311,10 +311,11 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
-		if kind, err := wantStructured(req.Driver); err != nil {
+		// No driver named (another agent, the CLI): the box's default.
+		if kind, mode, err := b.startDriver(p, req.Driver, req.Mode); err != nil {
 			return err
 		} else if kind != "" {
-			l, err := b.launchStructured(kind, p, req.Model, req.Effort, req.Mode)
+			l, err := b.launchStructured(kind, p, req.Model, req.Effort, mode)
 			if err != nil {
 				return err
 			}
@@ -435,7 +436,7 @@ func (b *Box) enrich(ctx context.Context, all []Session) []Session {
 				s.AgentState, s.StateSince = st.State, st.Since
 			}
 			s.Turn, s.StateSeq, s.Fidelity = st.Turn, st.Seq, st.Fidelity
-			s.Queued = st.Queued
+			s.Queued, s.Unfinished, s.Parked = st.Queued, st.Unfinished && s.AgentState == "finished", st.Parked && s.AgentState == "finished"
 			if s.AgentState == "waiting" {
 				s.Ask = st.Ask
 				var choices []AskChoice

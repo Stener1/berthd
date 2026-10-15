@@ -8,23 +8,26 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 // AgentIcon marks which agent a session runs, in the agent's own colour.
-export function AgentIcon({ agent, className }: { agent?: string; className?: string }) {
+// Muted, it takes the colour of the text around it (currentColor), for
+// lists where every row has one and state should carry the colour.
+export function AgentIcon({ agent, className, muted }: { agent?: string; className?: string; muted?: boolean }) {
   const cls = cn("size-3.5 shrink-0", className);
+  const tone = (c: string) => (muted ? undefined : c);
   switch (agent) {
     case "claude":
-      return <AsteriskIcon className={cn(cls, "text-[#d97757]")} strokeWidth={2.75} />;
+      return <AsteriskIcon className={cn(cls, tone("text-[#d97757]"))} strokeWidth={2.75} />;
     case "codex":
-      return <HexagonIcon className={cn(cls, "text-foreground/80")} strokeWidth={2.25} />;
+      return <HexagonIcon className={cn(cls, tone("text-foreground/80"))} strokeWidth={2.25} />;
     case "gemini":
-      return <SparkleIcon className={cn(cls, "text-[#6f9bff]")} strokeWidth={2.25} />;
+      return <SparkleIcon className={cn(cls, tone("text-[#6f9bff]"))} strokeWidth={2.25} />;
     case "pi":
-      return <span className={cn("shrink-0 font-semibold text-[#a78bfa] text-xs leading-none", className)}>π</span>;
+      return <span className={cn("shrink-0 font-semibold text-xs leading-none", tone("text-[#a78bfa]"), className)}>π</span>;
     case "omp":
-      return <span className={cn("shrink-0 font-semibold text-[#f472b6] text-xs leading-none", className)}>π</span>;
+      return <span className={cn("shrink-0 font-semibold text-xs leading-none", tone("text-[#f472b6]"), className)}>π</span>;
     case "opencode":
-      return <SquareTerminalIcon className={cn(cls, "text-foreground/80")} />;
+      return <SquareTerminalIcon className={cn(cls, tone("text-foreground/80"))} />;
     default:
-      return <TerminalIcon className={cn(cls, "text-muted-foreground")} />;
+      return <TerminalIcon className={cn(cls, tone("text-muted-foreground"))} />;
   }
 }
 

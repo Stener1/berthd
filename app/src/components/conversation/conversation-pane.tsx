@@ -2,10 +2,9 @@ import { ArrowUpIcon, ListPlusIcon, MessageSquareTextIcon, MessagesSquareIcon, R
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
-import { DitherBand } from "@/components/art/dither-band";
+import { HeaderBand, useHeaderPicture } from "@/components/art/header-band";
 import { TaskComposer } from "@/components/conversation/task-composer";
 import { AttachmentChips, useAttachments } from "@/components/conversation/attachments";
-import { HARBOUR, HARBOUR_MUTE, useHarbourLight } from "@/components/art/harbour-art";
 import { Scene, type SceneName } from "@/components/art/scenes";
 import { ChatBackground } from "@/components/conversation/chat-background";
 import { ChatControls } from "@/components/conversation/chat-controls";
@@ -890,17 +889,17 @@ function Reading() {
 
 const boxWord = (state?: string) => (state === "untrusted" ? "unreachable" : (state ?? "offline"));
 
-// FirstPrompt is an agent that hasn't been asked anything yet: the harbour
-// band, the worktree, and the composer for its first task, as everywhere
-// work starts.
+// FirstPrompt is an agent that hasn't been asked anything yet: the header
+// picture (the harbour unless chosen otherwise), the worktree, and the
+// composer for its first task, as everywhere work starts.
 function FirstPrompt({ box, session, agent, name, branch, onSend, onFail }: { box: string; session: string; agent?: string; name: string; branch?: string; onSend(text: string): Promise<void>; onFail(err: unknown): void }) {
-  const light = useHarbourLight();
+  const picture = useHeaderPicture();
   return (
     <div className="absolute inset-0 overflow-y-auto bg-background">
-      <DitherBand src={HARBOUR[light]} position={0.45} fade={0.5} mute={HARBOUR_MUTE[light]} className="absolute inset-x-0 top-0 h-[clamp(160px,30vh,280px)]" />
-      <div className="relative flex min-h-full items-start justify-center px-6 pt-[clamp(120px,24vh,230px)] pb-10">
+      {picture && <HeaderBand picture={picture} position={0.45} fade={0.5} className="absolute inset-x-0 top-0 h-[clamp(160px,30vh,280px)]" />}
+      <div className={cn("relative flex min-h-full items-start justify-center px-6 pb-10", picture ? "pt-[clamp(120px,24vh,230px)]" : "pt-[18vh]")}>
         <div className="w-full max-w-[calc(var(--berth-chat-w)-120px)]">
-          <header className="mb-4 px-2 [text-shadow:0_0_6px_var(--background),0_0_14px_var(--background)]">
+          <header className={cn("mb-4 px-2", picture && "[text-shadow:0_0_6px_var(--background),0_0_14px_var(--background)]")}>
             <h1 className="truncate font-semibold text-lg tracking-tight">{name}</h1>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
               {branch && <span className="min-w-0 truncate rounded bg-accent px-1.5 py-px font-mono text-[0.6875rem]">{branch}</span>}

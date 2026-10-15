@@ -24,6 +24,7 @@ import { findLeaf, leaves, paneWorktree } from "@/lib/layout";
 import { paneKey, toggleDrawer } from "@/lib/devtools";
 import { isOnboardingActive } from "@/views/onboarding/onboarding-state";
 import { firstFocusable, rescueFocus } from "@/lib/focus-home";
+import { setSwitchboardOpen, useSwitchboardOpen } from "@/lib/switchboard";
 
 // The app's shortcuts (lib/shortcuts.json) come two ways: as keys, caught on
 // the window before a terminal sees them, and, in the Mac app, from the menu
@@ -135,7 +136,12 @@ function run(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
       return true;
     case "palette":
       if (useFiles.getState().pickerOpen) setPickerOpen(false);
+      if (useSwitchboardOpen.getState().open) setSwitchboardOpen(false);
       s.setPaletteOpen(!s.paletteOpen);
+      return true;
+    case "switchboard":
+      if (s.paletteOpen) s.setPaletteOpen(false);
+      setSwitchboardOpen(!useSwitchboardOpen.getState().open);
       return true;
     case "files":
       // ⌘P finds a file in the worktree you are acting in.
@@ -160,7 +166,9 @@ function run(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
       handOff("[data-testid=files-panel]", "[data-testid=files-panel]");
       return true;
     case "save-file": {
-      // ⌘S in a File tab, wherever in it the focus is.
+      // ⌘S in a File tab, wherever in it the focus is. Over the
+      // Switchboard, ⌘S stars its highlighted row instead.
+      if (useSwitchboardOpen.getState().open) return false;
       const leaf = inWorkspace && tab && wsKey ? findLeaf(tab.root, tab.focus) : undefined;
       if (!leaf || leaf.content.kind !== "file" || !wsKey) return false;
       void save(docKey(paneWorktree(wsKey, leaf), leaf.content.path));
@@ -241,7 +249,7 @@ function fromKey(e: KeyboardEvent): [string, (number | Dir)?] | undefined {
   if (key === ".") return ["zen"];
   if (key === "\\") return ["sidebar"];
   if (key === "/" && !shift) return ["shortcuts"];
-  if (key === "k") return ["palette"];
+  if (key === "k") return [shift ? "switchboard" : "palette"];
   if (key === "p" && !shift) return ["files"];
   if (key === "s" && !shift) return ["save-file"];
   if (key === "e" && shift) return ["file-tree"];

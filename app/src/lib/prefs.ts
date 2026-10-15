@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { type ChatBackground, DEFAULT_CHAT_BACKGROUND, normalizeChatBackground } from "@/lib/chat-background";
+import { DEFAULT_HEADER_PICTURE, type HeaderPicture, normalizeHeaderPicture } from "@/lib/header-picture";
 import type { HomeLayout } from "@/lib/home-layout";
 import { clampWidth, SIDEBAR_DEFAULT } from "@/lib/sidebar-width";
 import { load, save } from "@/lib/storage";
@@ -59,6 +60,9 @@ export interface Prefs {
   // The picture behind conversations and its effects (Settings ›
   // Appearance › Chat background); none by default.
   chatBackground: ChatBackground;
+  // The picture across the top of a new chat, the launcher and Home
+  // (Settings › Appearance › Header picture); the harbour by default.
+  headerPicture: HeaderPicture;
   // How wide the conversation's column is (Settings › Appearance › Chat).
   chatWidth: ChatWidth;
   // Show the reply Claude is writing as it grows (lib/draft), read from its
@@ -108,6 +112,7 @@ const DEFAULTS: Prefs = {
   zen: false,
   autoUpdateBoxes: false,
   chatBackground: DEFAULT_CHAT_BACKGROUND,
+  headerPicture: DEFAULT_HEADER_PICTURE,
   chatWidth: "default",
   chatDrafts: true,
   filesPanel: false,
@@ -155,6 +160,7 @@ export const usePrefs = create<Prefs>()(() => ({
   notify: { ...DEFAULTS.notify, ...saved.notify },
   systemThemes: { ...DEFAULTS.systemThemes, ...saved.systemThemes },
   chatBackground: normalizeChatBackground(saved.chatBackground),
+  headerPicture: normalizeHeaderPicture(saved.headerPicture),
   sidebarWidth: clampWidth(saved.sidebarWidth ?? SIDEBAR_DEFAULT),
 }));
 
@@ -201,6 +207,10 @@ export function setPrefs(patch: Partial<Prefs>) {
 
 export function setChatBackground(patch: Partial<ChatBackground>) {
   usePrefs.setState((p) => ({ chatBackground: { ...p.chatBackground, ...patch } }));
+}
+
+export function setHeaderPicture(patch: Partial<HeaderPicture>) {
+  usePrefs.setState((p) => ({ headerPicture: { ...p.headerPicture, ...patch } }));
 }
 
 export function setTerminalPrefs(patch: Partial<TerminalPrefs>) {

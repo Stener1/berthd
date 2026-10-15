@@ -1,4 +1,4 @@
-import { SquareIcon } from "lucide-react";
+import { HourglassIcon, SquareIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
@@ -112,6 +112,24 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
           {crowded && ` · started ${startedAt(session.created)}`}
           {where?.worktree.branch && where.worktree.branch !== place && <span className="opacity-70"> · {where.worktree.branch}</span>}
         </div>
+        {/* Its turn ended, but turn check read the work as still going on. */}
+        {state === "running" && session.unfinished && (
+          <Tip label="Its turn ended while its work runs on: a delegated task, a build, a deploy or a watcher. It picks up by itself.">
+            <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-[11px] text-muted-foreground">
+              <HourglassIcon className="size-3" aria-hidden />
+              Waiting on its work
+            </div>
+          </Tip>
+        )}
+        {/* Turn check read the work as parked: nothing runs, nothing needs you. */}
+        {state === "ready" && session.parked && (
+          <Tip label="Its work is paused until someone else replies or a later time. Nothing runs and nothing needs you; it picks up by itself.">
+            <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-[11px] text-muted-foreground">
+              <HourglassIcon className="size-3" aria-hidden />
+              Parked: waiting on a reply or a later time
+            </div>
+          </Tip>
+        )}
         {prompt && (!work || !prompt.startsWith(work.replace(/…$/, ""))) && (
           <div className="mt-1 truncate pl-5.5 text-[11px] text-foreground/70 italic" title={prompt}>
             “{prompt}”

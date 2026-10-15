@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { berthThemes } from "@/themes/builtin";
 import { ChatBackgroundSettings, ChatWidthSettings } from "@/views/settings/chat-background-section";
 import { Segmented } from "@/views/settings/controls";
+import { HeaderPictureSettings } from "@/views/settings/header-picture-section";
 import { Code, SettingsGroup, SettingsPage, SettingsRow } from "@/views/settings/rows";
 import { IS_LINUX } from "@/lib/platform";
 
@@ -91,6 +92,8 @@ export function AppearanceSection() {
       <ChatWidthSettings />
 
       <ChatBackgroundSettings />
+
+      <HeaderPictureSettings />
     </SettingsPage>
   );
 }

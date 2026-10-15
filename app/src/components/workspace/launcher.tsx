@@ -2,9 +2,8 @@ import { ArchiveIcon, CodeXmlIcon, GlobeIcon, SquareTerminalIcon } from "lucide-
 import { useEffect, useRef, useState } from "react";
 
 import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
-import { DitherBand } from "@/components/art/dither-band";
+import { HeaderBand, useHeaderPicture } from "@/components/art/header-band";
 import { TaskComposer } from "@/components/conversation/task-composer";
-import { HARBOUR, HARBOUR_MUTE, useHarbourLight } from "@/components/art/harbour-art";
 import { Scene } from "@/components/art/scenes";
 import { usePrefs } from "@/lib/prefs";
 import { openEditor } from "@/components/editors/open";
@@ -48,7 +47,8 @@ interface Row {
 // to start an agent on a task here, then a compact command panel, like an
 // empty state in Raycast or Linear: one list of what to start here, each
 // with its shortcut, then the agents closed as tabs that are still running,
-// to pick up again. Arrow keys move, Enter runs. Labs adds the harbour.
+// to pick up again. Arrow keys move, Enter runs. Labs adds the header
+// picture (the harbour unless chosen otherwise).
 export function Launcher({ worktree: ref }: { worktree: WorktreeRef }) {
   useStore((s) => s.boxes[ref.box]?.info);
   const loc = useStore((s) => s.boxes[ref.box]?.locations?.find((l) => l.name === ref.location));
@@ -61,7 +61,9 @@ export function Launcher({ worktree: ref }: { worktree: WorktreeRef }) {
   const list = useRef<HTMLDivElement>(null);
   const name = useTitleAt(ref.box, ref.path) ?? (ref.main ? ref.location : ref.worktree);
   const labs = usePrefs((p) => p.labs);
-  const light = useHarbourLight();
+  // Labs puts the header picture (Settings › Appearance) across the top.
+  const picture = useHeaderPicture();
+  const band = labs ? picture : undefined;
 
   const rows: Row[] = [
     ...agentPresets(ref.box, ref.location).map((p) => ({
@@ -114,8 +116,8 @@ export function Launcher({ worktree: ref }: { worktree: WorktreeRef }) {
 
   return (
     <div className="absolute inset-0 overflow-y-auto bg-background">
-      {labs && <DitherBand src={HARBOUR[light]} position={0.45} fade={0.5} mute={HARBOUR_MUTE[light]} className="absolute inset-x-0 top-0 h-[clamp(160px,30vh,280px)]" />}
-      <div className={cn("relative flex min-h-full items-start justify-center px-6 pb-10", labs ? "pt-[clamp(120px,24vh,230px)]" : "pt-[18vh]")}>
+      {band && <HeaderBand picture={band} position={0.45} fade={0.5} className="absolute inset-x-0 top-0 h-[clamp(160px,30vh,280px)]" />}
+      <div className={cn("relative flex min-h-full items-start justify-center px-6 pb-10", band ? "pt-[clamp(120px,24vh,230px)]" : "pt-[18vh]")}>
         <div ref={list} onKeyDown={onKeyDown} className="w-full max-w-[560px]">
           {/* A boat tied up and ready: the same drawing language as a pane
               whose session ended. Fixed size, so nothing below moves. */}
@@ -124,7 +126,7 @@ export function Launcher({ worktree: ref }: { worktree: WorktreeRef }) {
               <Scene name="moored" width={144} />
             </div>
           )}
-          <header className={cn("mb-4 px-2", labs && "[text-shadow:0_0_6px_var(--background),0_0_14px_var(--background)]")}>
+          <header className={cn("mb-4 px-2", band && "[text-shadow:0_0_6px_var(--background),0_0_14px_var(--background)]")}>
             <h1 className="truncate font-semibold text-lg tracking-tight" title={name}>
               {name}
             </h1>

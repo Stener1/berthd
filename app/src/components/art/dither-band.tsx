@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 // dither of its lightness, strongest along edges and in gradients and faint
 // in flat areas, so it reads as the painting first and the dots second. The
 // colour is left smooth (dithering each channel apart is what makes static).
-// It can be muted toward the page's background, which calms a busy night.
+// It can be muted toward the page's background, which calms a busy night,
+// and dimmed, which brings a daylight picture into a dark theme.
 // Toward its foot the picture dissolves dot by dot (a threshold ramp, not a
 // fade) into whatever is behind it, so set the band on the page's background
 // and it melts into it in light and dark alike.
@@ -35,10 +36,13 @@ export interface DitherBandProps {
   fade?: number;
   // How far to mute the picture toward the page's background, 0 to 1.
   mute?: number;
+  // How far to darken it first, 0 to 1: its light falls but its contrast
+  // and hues stay, where muting alone would only grey it.
+  dim?: number;
   className?: string;
 }
 
-export function DitherBand({ src, position = 0.5, cell = 2, levels = 6, fade = 0.4, mute = 0, className }: DitherBandProps) {
+export function DitherBand({ src, position = 0.5, cell = 2, levels = 6, fade = 0.4, mute = 0, dim = 0, className }: DitherBandProps) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [drawn, setDrawn] = useState(false);
@@ -94,7 +98,7 @@ export function DitherBand({ src, position = 0.5, cell = 2, levels = 6, fade = 0
         soft.width = soft.height = 0;
       }
       const frame = ctx.getImageData(0, 0, w, h);
-      dither(frame, levels, fade, mute, backgroundOf(el));
+      dither(frame, levels, fade, mute, dim, backgroundOf(el));
       ctx.putImageData(frame, 0, 0);
       setDrawn(true);
     };
@@ -119,10 +123,10 @@ export function DitherBand({ src, position = 0.5, cell = 2, levels = 6, fade = 0
       cv.width = 0;
       cv.height = 0;
     };
-  }, [src, position, cell, levels, fade, mute]);
+  }, [src, position, cell, levels, fade, mute, dim]);
 
   return (
-    <div ref={wrap} aria-hidden className={cn("pointer-events-none overflow-hidden", className)}>
+    <div ref={wrap} aria-hidden data-drawn={drawn || undefined} className={cn("pointer-events-none overflow-hidden", className)}>
       <canvas ref={canvas} className={cn("block [image-rendering:pixelated] transition-opacity duration-500", drawn ? "opacity-100" : "opacity-0")} />
     </div>
   );
@@ -144,12 +148,17 @@ function backgroundOf(el: HTMLElement): [number, number, number] {
 // gradients, about a third in flat areas. Then it clears the dots below a
 // ramp toward the foot, with the matrix shifted so the dissolve's pattern
 // does not line up with the grain's.
-function dither(frame: ImageData, levels: number, fade: number, mute: number, bg: [number, number, number]) {
+function dither(frame: ImageData, levels: number, fade: number, mute: number, dim: number, bg: [number, number, number]) {
   const { data, width: w, height: h } = frame;
   const L = levels - 1;
   const from = h * (1 - fade);
   const lum = new Float32Array(w * h);
   for (let i = 0, p = 0; p < w * h; i += 4, p++) {
+    if (dim) {
+      data[i] *= 1 - dim;
+      data[i + 1] *= 1 - dim;
+      data[i + 2] *= 1 - dim;
+    }
     if (mute) {
       data[i] += (bg[0] - data[i]) * mute;
       data[i + 1] += (bg[1] - data[i + 1]) * mute;

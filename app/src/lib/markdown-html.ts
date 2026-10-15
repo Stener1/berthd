@@ -106,6 +106,16 @@ const MARK = (n: number) => `﷐${n}﷑`;
 const MARKS = /﷐(\d+)﷑/g;
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const unescapeHtml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+
+// A code block of math: ```math, as GitHub writes a display, or ```latex
+// and ```tex holding only equations. One that is a document (to compile
+// with pdflatex, not to read here) stays code, as does one still open in
+// a draft: a half-written formula would only show KaTeX's errors.
+const MATH_LANGS = "math|latex|tex|katex";
+const MATH_CODE = new RegExp(`<pre><code class="language-(${MATH_LANGS})">([\\s\\S]*?)<\\/code><\\/pre>`, "gi");
+const MATH_FENCE_CLOSED = new RegExp(`^ {0,3}(\`{3,}|~{3,})[ \\t]*(?:${MATH_LANGS})\\b[^\\n]*\\n[\\s\\S]*?\\n {0,3}\\1[ \\t]*$`, "gim");
+const TEX_DOCUMENT = /\\(documentclass|usepackage|begin\{document\}|section|subsection|title|maketitle|author|chapter|item)\b/;
 
 interface Formula {
   tex: string;
@@ -194,6 +204,14 @@ export function markdownHtml(text: string, tex?: TexRender, shape: (html: string
     if (!unclosed.length || unclosed[0] < 0) break;
     source = `${source.slice(0, unclosed[0])}\\${source.slice(unclosed[0])}`;
   }
+  let closed = (source.match(MATH_FENCE_CLOSED) ?? []).length;
+  html = html.replace(MATH_CODE, (all, lang: string, body: string) => {
+    if (closed-- <= 0) return all;
+    const src = unescapeHtml(body).replace(/\n$/, "");
+    if (!src.trim() || (lang.toLowerCase() !== "math" && TEX_DOCUMENT.test(src))) return all;
+    formulas.push({ tex: src, display: true, source: `\`\`\`${lang}\n${src}\n\`\`\`` });
+    return `<div class="cv-math-block">${MARK(formulas.length - 1)}</div>`;
+  });
   if (!formulas.length) return { html: shape(html), math: false };
   // $$…$$ on a line of its own is a display, as a $$ block is.
   html = html.replace(/<p>﷐(\d+)﷑<\/p>/g, (all, n) => {

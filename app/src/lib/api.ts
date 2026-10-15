@@ -256,6 +256,9 @@ export const boxApi = {
   stats: (c: Client, box: string) => c.box<Stats>(box, "GET", "stats"),
   services: async (c: Client, box: string) => (await c.box<Service[] | null>(box, "GET", "services")) ?? [],
   info: (c: Client, box: string) => c.box<BoxInfo>(box, "GET", "info"),
+  // How the box starts agents that name no driver (lib/box-defaults.ts;
+  // boxes with "agents.defaults").
+  putAgentDefaults: (c: Client, box: string, d: { structured: boolean; mode?: string }) => c.box<{ structured: boolean; mode?: string }>(box, "PUT", "agents/defaults", d),
   addLocation: (c: Client, box: string, name: string, path: string) => c.box<Location>(box, "POST", "locations", { name, path }),
   addWorktree: (c: Client, box: string, location: string, req: { name: string; branch?: string; base?: string }) =>
     c.box<Worktree>(box, "POST", `locations/${encodeURIComponent(location)}/worktrees`, req),
@@ -268,8 +271,12 @@ export const boxApi = {
   stopSession: (c: Client, box: string, name: string) => c.box(box, "DELETE", `sessions/${encodeURIComponent(name)}`),
   // A structured agent's conversations, those that worked in path
   // ("conversations" capability).
-  conversations: async (c: Client, box: string, path?: string) =>
-    (await c.box<Conversation[] | null>(box, "GET", `conversations${path ? `?path=${encodeURIComponent(path)}` : ""}`)) ?? [],
+  conversations: async (c: Client, box: string, path?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (limit) params.set("limit", String(limit));
+    return (await c.box<Conversation[] | null>(box, "GET", `conversations${params.size ? `?${params}` : ""}`)) ?? [];
+  },
   // Carries a conversation on: in its session, started again if it ended,
   // or in a new one when that is gone.
   resumeConversation: (c: Client, box: string, id: string) => c.box<Session>(box, "POST", `conversations/${encodeURIComponent(id)}/resume`),
