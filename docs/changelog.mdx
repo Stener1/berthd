@@ -33,6 +33,19 @@ again.
   systemd 258 or later, every new tab started with *D-Bus property
   CPUAccounting is deprecated*. Sessions still report their CPU use as
   before. Needs the box upgraded.
+## Unreleased
+
+- **Keep a project off the Agent Dashboard.** In **Settings → Agents →
+  Agent Dashboard**, pick projects whose agents you follow somewhere else,
+  such as on a plugin's own board. Their agents leave the dashboard and the
+  waiting and working counts in the sidebar and status bar, and the
+  dashboard's header says how many projects are kept off. They still show
+  in the sidebar, on Home and in notifications. **Show** brings a project
+  back.
+- **Project changes made quickly all stick.** Renaming a project, moving it
+  between sections or keeping it off the dashboard twice in a row could
+  lose the first change, because both saves read the same version of your
+  projects. They now save one after the other.
 
 ## v0.3.21
 

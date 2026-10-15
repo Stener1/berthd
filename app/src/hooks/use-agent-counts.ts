@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 
 import type { Session, Status } from "@/lib/api";
-import { type SessionState, sessionState } from "@/lib/derive";
+import { offBoard, type SessionState, sessionState } from "@/lib/derive";
 import { lastOf } from "@/lib/last-of";
+import { useBoardHidden } from "@/lib/project-groups";
 import { type BoxData, useStore } from "@/lib/store";
 
 export interface SessionEntry {
@@ -27,8 +28,18 @@ const allSessions = lastOf((boxes: Record<string, BoxData>, status: Status | und
     .flatMap(([box, d]) => (d.sessions ?? []).map((session) => ({ box, session, state: sessionState(session, d.stats) })));
 });
 
-export function useAgentCounts() {
+// useBoardSessions is useAllSessions without the projects kept off the
+// Agent Dashboard (Settings → Agents): the board and its counts.
+export function useBoardSessions(): SessionEntry[] {
   const all = useAllSessions();
+  const boxes = useStore((s) => s.boxes);
+  const hidden = useBoardHidden();
+  return useMemo(() => (hidden.size ? all.filter((e) => !offBoard(boxes[e.box]?.locations, e.box, e.session, hidden)) : all), [all, boxes, hidden]);
+}
+
+// useAgentCounts is the board's counts, for the sidebar and the status bar.
+export function useAgentCounts() {
+  const all = useBoardSessions();
   return useMemo(
     () => ({
       waiting: all.filter((e) => e.state === "waiting").length,
