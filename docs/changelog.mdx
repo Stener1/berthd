@@ -11,6 +11,13 @@ again.
 
 ## Unreleased
 
+- **A plugin's sidebar item can show a count.** `addSidebarItem` takes
+  `useCount`, shaped like a Home widget's: an amber count on the item's row,
+  and on More's while the item is under More. Sessions waiting in a plugin's
+  own place, such as a project kept off the Agent Dashboard, now have
+  somewhere in the menu to show. A `useCount` that throws shows no count
+  and leaves the sidebar alone. See
+  [Sidebar counts](/reference/plugin-sdk#sidebar-counts).
 - **A box with a full hostname is named by its first label.** A cloud VM
   whose hostname is `devbox.europe-north1-a.c.example.internal` called itself
   by all of it: the phone and notifications showed the whole name, and it

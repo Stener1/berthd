@@ -21,7 +21,7 @@ import { ConfirmHost } from "@/components/sidebar/confirm";
 import { ErrorDetailsHost } from "@/components/error-note";
 import { ShortcutsSheet } from "@/components/shortcuts-sheet";
 import { WhatsNewDialog } from "@/components/whats-new/whats-new-dialog";
-import { CustomizeSidebarSheet } from "@/components/sidebar/nav";
+import { CustomizeSidebarSheet, PluginNavCounts } from "@/components/sidebar/nav";
 import { ToastProvider } from "@/components/ui/toast";
 import { FileDropGuard } from "@/components/file-drop-guard";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -220,6 +220,7 @@ export default function App() {
           <TeamKitSheet />
           <PluginConsentDialog />
           <CustomizeSidebarSheet />
+          <PluginNavCounts />
           <ShortcutsSheet />
           <ReviewSheet />
           <PrReviewSheet />

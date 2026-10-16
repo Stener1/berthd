@@ -1,3 +1,4 @@
+import type { SidebarItem } from "@berth/plugin";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -17,7 +18,7 @@ import {
   SlidersHorizontalIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 
 import { type Action, ContextRow } from "@/components/sidebar/actions";
@@ -28,11 +29,14 @@ import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPop
 import { SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { useAgentCounts } from "@/hooks/use-agent-counts";
 import { arrange, type NavList, navActions, useNav } from "@/lib/nav";
+import { type NavBadge, readNavBadge } from "@/lib/nav-badge";
 import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { goHome, homeBox, useWorkspaces } from "@/lib/workspaces";
-import { useRegistry } from "@/plugins/registry";
+import { PluginReactContext } from "@/plugins/context";
+import { pluginContexts } from "@/plugins/plugin-boundary";
+import { type Contribution, useRegistry } from "@/plugins/registry";
 import { Icon } from "@/plugins/ui";
 import { useReviewCount } from "@/views/review/review-store";
 
@@ -48,7 +52,7 @@ export interface NavItem {
   active: boolean;
   // go opens the place. Every way in (a row, the rail, zen, ⌘K) calls it.
   go(): void;
-  badge?: { count: number; loud?: boolean; title: string };
+  badge?: NavBadge;
 }
 
 // useNavItems is every place there is, in its default order.
@@ -63,6 +67,7 @@ export function useNavItems(): NavItem[] {
   const noWorktree = useWorkspaces((s) => !s.current || !!homeBox(s.current));
   const labs = usePrefs((p) => p.labs);
   const plugins = useRegistry((s) => s.sidebarItems);
+  const pluginBadges = usePluginBadges();
   const counts = useAgentCounts();
   const toReview = useReviewCount();
   return useMemo(() => {
@@ -81,15 +86,101 @@ export function useNavItems(): NavItem[] {
       ...(labs ? [{ id: "dashboard", ...dashboard }] : []),
       { id: "kits", label: "Kits", icon: <PackageIcon />, go: open({ kind: "kits" }), active: view.kind === "kits" },
       ...plugins.map(({ plugin, item }) => ({
-        id: `plugin:${plugin}:${item.id}`,
+        id: pluginNavId(plugin, item),
         label: item.title,
         icon: <Icon name={item.icon ?? "Puzzle"} />,
         go: open({ kind: "plugin", screen: item.screen }),
         active: view.kind === "plugin" && view.screen === item.screen,
+        badge: pluginBadges[pluginNavId(plugin, item)],
       })),
     ];
     return items;
-  }, [view, noWorktree, labs, plugins, counts.waiting, toReview]);
+  }, [view, noWorktree, labs, plugins, pluginBadges, counts.waiting, toReview]);
+}
+
+const pluginNavId = (plugin: string, item: SidebarItem) => `plugin:${plugin}:${item.id}`;
+
+// The badges plugin sidebar items have, by nav id. A list that changes
+// can't call a hook per item, so each item's useCount runs in its own
+// PluginNavCount, under its plugin's context like the plugin's components,
+// and puts what it says here.
+const usePluginBadges = create<Record<string, NavBadge>>()(() => ({}));
+
+// One key per contribution, so a plugin that reloads gets a fresh count and
+// a fresh boundary.
+const countKeys = new WeakMap<Contribution<SidebarItem>, number>();
+let nextCountKey = 0;
+const countKey = (c: Contribution<SidebarItem>) => {
+  let k = countKeys.get(c);
+  if (k === undefined) countKeys.set(c, (k = nextCountKey++));
+  return k;
+};
+
+// PluginNavCounts runs the plugins' sidebar counts. It draws nothing; App
+// mounts it once, so the sidebar, the rail and zen's switcher all see them.
+// What a count throws while its plugin is removed (an effect's cleanup)
+// passes its own boundary, which goes with it, so the outer one stays to
+// catch it there rather than in App's; it tries again when the list changes.
+export function PluginNavCounts() {
+  const items = useRegistry((s) => s.sidebarItems);
+  return (
+    <CountBoundary reset={items}>
+      {items.map((c) =>
+        c.item.useCount ? (
+          <PluginReactContext.Provider key={countKey(c)} value={pluginContexts.get(c.plugin) ?? null}>
+            <CountBoundary plugin={c.plugin}>
+              <PluginNavCount id={pluginNavId(c.plugin, c.item)} plugin={c.plugin} title={c.item.title} use={c.item.useCount} />
+            </CountBoundary>
+          </PluginReactContext.Provider>
+        ) : null,
+      )}
+    </CountBoundary>
+  );
+}
+
+function PluginNavCount({ id, plugin, title, use }: { id: string; plugin: string; title: string; use: NonNullable<SidebarItem["useCount"]> }) {
+  // Logged once, not on every render it fails in.
+  const logged = useRef(false);
+  const badge = readNavBadge(title, use, (err) => {
+    if (logged.current) return;
+    logged.current = true;
+    console.error(`plugin ${plugin}: the count for sidebar item ${title} failed`, err);
+  });
+  const count = badge?.count;
+  const loud = badge?.loud;
+  const tip = badge?.title;
+  useEffect(() => {
+    if (count === undefined || tip === undefined) return;
+    usePluginBadges.setState({ [id]: { count, loud, title: tip } });
+    return () =>
+      usePluginBadges.setState((s) => {
+        const { [id]: _, ...rest } = s;
+        return rest;
+      }, true);
+  }, [id, count, loud, tip]);
+  return null;
+}
+
+// CountBoundary is the backstop for a count that breaks React itself (a
+// hook called a different number of times): it logs, and the badge goes.
+class CountBoundary extends Component<{ plugin?: string; reset?: unknown; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(this.props.plugin ? `plugin ${this.props.plugin}: a sidebar count failed` : "a plugin's sidebar count failed", error, info.componentStack);
+  }
+
+  componentDidUpdate(prev: { reset?: unknown }) {
+    if (this.state.failed && prev.reset !== this.props.reset) this.setState({ failed: false });
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
 }
 
 // useArrangedNav is the items in their lists.
@@ -157,7 +248,7 @@ function dragProps(id: string) {
 function RowBadge({ badge }: { badge: NonNullable<NavItem["badge"]> }) {
   return (
     <Tip label={badge.title} side="right">
-      <SidebarMenuBadge className={cn("top-1/2 h-4.5 min-w-4.5 -translate-y-1/2 peer-data-[size=sm]/menu-button:top-1/2 rounded-full px-1 text-[10px] leading-none", badge.loud ? "bg-warning/15 text-warning-foreground" : "bg-sidebar-accent text-sidebar-foreground")}>
+      <SidebarMenuBadge data-testid="nav-badge" className={cn("top-1/2 h-4.5 min-w-4.5 -translate-y-1/2 peer-data-[size=sm]/menu-button:top-1/2 rounded-full px-1 text-[10px] leading-none", badge.loud ? "bg-warning/15 text-warning-foreground" : "bg-sidebar-accent text-sidebar-foreground")}>
         {badge.count}
       </SidebarMenuBadge>
     </Tip>
@@ -227,6 +318,7 @@ export function Nav() {
               render={
                 <SidebarMenuButton
                   size="sm"
+                  data-testid="nav-more"
                   isActive={!!here}
                   className={cn(rowClass, "data-popup-open:bg-sidebar-accent", dragging && over?.list === "more" && "bg-sidebar-accent ring-1 ring-ring")}
                 />
