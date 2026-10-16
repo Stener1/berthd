@@ -33,6 +33,15 @@ again.
   systemd 258 or later, every new tab started with *D-Bus property
   CPUAccounting is deprecated*. Sessions still report their CPU use as
   before. Needs the box upgraded.
+## Unreleased
+
+- **Turn check: a check-in an agent scheduled for itself is Idle.** An
+  agent that ends its turn saying it will check again at a later time
+  ("tomorrow morning I'll check the numbers"), with nothing running now,
+  shows as **Idle**, even when the machine is kept awake for that check.
+  It used to show as **Working**. Work still running in the background, a
+  re-check or a watcher that reports back, stays **Working**.
+  [Sessions and agents](/concepts/sessions-and-agents#agent-state)
 
 ## v0.3.21
 
