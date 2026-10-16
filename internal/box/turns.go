@@ -60,6 +60,9 @@ type Span struct {
 	Start  time.Time `json:"start"`
 	End    time.Time `json:"end,omitzero"`
 	Reason string    `json:"reason,omitempty"`
+	// Hooked is set when the agent's own hooks reported it: only they end
+	// it, as the screen may not show the question (see screenEvent).
+	Hooked bool `json:"hooked,omitempty"`
 	// Ask is what the agent asked for, from its own hooks, when it said.
 	Ask *Ask `json:"ask,omitempty"`
 }
@@ -655,6 +658,13 @@ func (t *Turns) agentEvent(e events.Event) {
 		s.Agent = str(e.Data, "agent")
 	}
 	cur := s.current()
+	if source == "" && cur != nil && cur.Fidelity == "screen" && adapters.CapsFor(s.Agent).Finished &&
+		(e.Type == adapters.Started || e.Type == adapters.Waiting) {
+		// Sent before its hooks said anything (its first prompt, given as
+		// it started), the turn was left for the screen to end. They speak
+		// for it now: its Stop ends it, not a quiet screen.
+		cur.Fidelity = "partial"
+	}
 	switch e.Type {
 	case adapters.Ready:
 		// Turn check's "unfinished, not yours": still running (working) or
@@ -728,10 +738,12 @@ func (t *Turns) agentEvent(e events.Event) {
 		}
 		if cur != nil {
 			if cur.State != "waiting" {
-				cur.Waits = append(cur.Waits, Span{Start: e.Time, Reason: str(e.Data, "reason")})
+				cur.Waits = append(cur.Waits, Span{Start: e.Time, Reason: str(e.Data, "reason"), Hooked: source == ""})
 				if len(cur.Waits) > 20 {
 					cur.Waits = cur.Waits[len(cur.Waits)-20:]
 				}
+			} else if n := len(cur.Waits); source == "" && n > 0 && cur.Waits[n-1].End.IsZero() {
+				cur.Waits[n-1].Hooked = true // the screen saw it first
 			}
 			cur.State = "waiting"
 		}
@@ -1384,33 +1396,48 @@ func (t *Turns) openForScreen() []string {
 	return out
 }
 
-// screenSeen records a capture and says how many polls it has been the
-// same.
-func (t *Turns) screenSeen(name, screen string) (same int, state string, fidelity string, reconcile bool) {
+// screenEvent records a capture of a session's screen and says what it
+// reports, if anything: the event the screen adapter publishes for it, and
+// its data (pollScreens adds the path).
+func (t *Turns) screenEvent(name, screen string) (string, map[string]any) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s := t.sess[name]
 	if s == nil {
-		return 0, "", "", false
+		return "", nil
 	}
 	if screen == s.lastScreen {
 		s.sameFor++
 	} else {
 		s.lastScreen, s.sameFor = screen, 0
 	}
-	fid := ""
+	fidelity, hookedWait := "", false
 	if tr := s.current(); tr != nil {
-		fid = tr.Fidelity
+		fidelity = tr.Fidelity
+		n := len(tr.Waits)
+		hookedWait = tr.State == "waiting" && n > 0 && tr.Waits[n-1].End.IsZero() && tr.Waits[n-1].Hooked
 	}
-	return s.sameFor, s.State, fid, s.Reconcile
-}
-
-func (t *Turns) forgetScreen(name string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if s := t.sess[name]; s != nil {
+	data := map[string]any{"session": name, "source": "screen"}
+	typ := ""
+	switch seen := adapters.ScreenState(screen); {
+	case seen == "waiting" && s.State != "waiting":
+		typ, data["reason"] = adapters.Waiting, "screen"
+	case hookedWait:
+		// A wait the agent's hooks reported is theirs to end: a screen
+		// that shows no question, or stops changing, may be one it cannot
+		// read (Claude Code's question form, a plan to approve).
+	case seen != "waiting" && s.State == "waiting" && s.sameFor == 0 && fidelity == "screen":
+		typ, data["signal"] = adapters.Started, "tool"
+	case s.sameFor >= screenQuiet && (fidelity == "screen" || s.Reconcile):
+		typ = adapters.Finished
+		if s.Reconcile {
+			data["source"] = "reconcile"
+		}
+	}
+	if typ != "" {
 		s.lastScreen, s.sameFor = "", 0
 	}
+	return typ, data
 }
 
 // save writes the ledger, the inbox, the legacy states and the archive.
@@ -1670,24 +1697,9 @@ func (b *Box) pollScreens(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		same, state, fidelity, reconcile := b.Turns.screenSeen(name, screen)
-		data := map[string]any{"session": name, "path": sess.Dir, "source": "screen"}
-		publish := func(typ string) {
-			b.Turns.forgetScreen(name)
+		if typ, data := b.Turns.screenEvent(name, screen); typ != "" {
+			data["path"] = sess.Dir
 			b.Events.Publish(events.Event{Type: typ, Box: b.Name, Origin: "screen", Data: data})
-		}
-		switch seen := adapters.ScreenState(screen); {
-		case seen == "waiting" && state != "waiting":
-			data["reason"] = "screen"
-			publish(adapters.Waiting)
-		case seen != "waiting" && state == "waiting" && same == 0 && fidelity == "screen":
-			data["signal"] = "tool"
-			publish(adapters.Started)
-		case same >= screenQuiet && (fidelity == "screen" || reconcile):
-			if reconcile {
-				data["source"] = "reconcile"
-			}
-			publish(adapters.Finished)
 		}
 	}
 }

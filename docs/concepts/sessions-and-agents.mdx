@@ -232,7 +232,11 @@ berth session turns devl/SESSION                            # the last ten
 said when it started and ended), `partial` (the agent cannot say when it
 starts, so its turn starts when Shipyard sends the prompt) or `screen` (no hooks
 reported: Shipyard reads the terminal every two seconds, and a screen that stops
-changing ends the turn).
+changing ends the turn). A prompt sent before the agent's hooks said anything,
+such as the first prompt of a task, starts a `screen` turn; once its hooks
+report a start or a wait for it, it becomes `partial` and its own Stop ends
+it. A wait the agent's hooks reported is ended only by them, whatever the
+screen shows.
 
 | Agent | Ready | Started | Waiting | Finished | Through |
 | --- | --- | --- | --- | --- | --- |

@@ -11,6 +11,13 @@ again.
 
 ## Unreleased
 
+- **An agent asking you a question no longer reads as done.** When a task's
+  first prompt led Claude Code to ask something (its question form, with
+  choices), Shipyard could read the question off the screen as nothing,
+  end the wait and mark the agent finished while it waited for you. Now a
+  wait Claude's hooks report lasts until Claude goes on, the turn ends at
+  Claude's own Stop, and the screen recognises the question form too.
+  [Sessions and agents](/concepts/sessions-and-agents)
 - **A box newer than the app is no longer called outdated.** An older
   Shipyard used to offer to update a box that already ran a newer release,
   and *Update all* (or updating boxes automatically) would put its older
