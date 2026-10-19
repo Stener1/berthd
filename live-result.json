@@ -1,0 +1,16 @@
+{
+  "scenario": "chat-ask-card",
+  "ok": true,
+  "steps": [
+    "open http://localhost:1429/?agent=http%3A%2F%2F127.0.0.1%3A47378&token=…",
+    "open devl/acme's agent as its chat",
+    "give it a first task",
+    "send /rc from the reply box: Remote Control's menu, no card",
+    "switch to bypass from the mode menu: no card, no dialog",
+    "a last message that asks in words: Needs you, with no card",
+    "at that wait, /rc and a mode switch: still no card",
+    "a permission prompt still gets its card",
+    "a real question (AskUserQuestion) still gets its card"
+  ],
+  "failures": []
+}
