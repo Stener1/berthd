@@ -1,0 +1,13 @@
+{
+  "scenario": "worktree-archive",
+  "ok": false,
+  "steps": [
+    "open http://localhost:1433/?mock=1&slowremove=4000&sidebar=list",
+    "gpu/ci-flake (no archive script): Archive… asks first",
+    "press Archive: the dialog goes at once and the row says Archiving…",
+    "the dialog closed 4638 ms after Archive was pressed"
+  ],
+  "failures": [
+    "scenario failed: the dialog stayed open 4638 ms, waiting on the box"
+  ]
+}

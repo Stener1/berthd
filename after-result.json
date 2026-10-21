@@ -1,0 +1,21 @@
+{
+  "scenario": "worktree-archive",
+  "ok": true,
+  "steps": [
+    "open http://localhost:1433/?mock=1&slowremove=4000&sidebar=list",
+    "gpu/ci-flake (no archive script): Archive… asks first",
+    "press Archive: the dialog goes at once and the row says Archiving…",
+    "the dialog closed 149 ms after Archive was pressed",
+    "archive gpu/judge-v2 straight after: it waits its turn on gpu, marked too",
+    "the dialog closed 276 ms after Archive was pressed",
+    "when gpu answers, ci-flake goes and says its branch is kept",
+    "Archived ci-flake toast 4239 ms after Archive",
+    "judge-v2 goes after it, one at a time per box",
+    "Archived judge-v2 toast 8663 ms after the first Archive",
+    "devl/qa-deck (archive script pnpm db:drop): the box runs it in the background",
+    "the dialog closed 295 ms after Archive was pressed",
+    "devl/checkout-fix (uncommitted work): kept, and a warning says why",
+    "the dialog closed 308 ms after Archive was pressed"
+  ],
+  "failures": []
+}
