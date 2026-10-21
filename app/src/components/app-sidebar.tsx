@@ -3,6 +3,7 @@ import { useMemo } from "react";
 
 import { NotificationBell } from "@/components/notifications/notification-center";
 import { newSection } from "@/components/sidebar/actions";
+import { BackForward } from "@/components/sidebar/back-forward";
 import { MoreItems, Nav as PlacesNav, RowKeys, rowClass, useArrangedNav } from "@/components/sidebar/nav";
 import { ProjectsColumn, ShowTasks, TasksColumn, usePicked } from "@/components/sidebar/columns";
 import { Projects, useSidebarPrefs } from "@/components/sidebar/projects";
@@ -118,14 +119,15 @@ function ColumnsSidebar({ prefs, update }: SidebarPrefsProps) {
 }
 
 // WindowStrip is the sidebar's top: room for the macOS traffic lights, then
-// the notifications and the way to fold the sidebar; the strip drags the
-// window. The Linux app has no lights, and says it is an alpha there
-// instead. extra goes before the fold (the two-column sidebar's way back
-// to its tasks).
+// Back and Forward, the notifications and the way to fold the sidebar; the
+// strip drags the window. The Linux app has no lights, and says it is an
+// alpha there instead. extra goes before the fold (the two-column sidebar's
+// way back to its tasks).
 function WindowStrip({ extra }: { extra?: React.ReactNode }) {
   return (
     <div data-tauri-drag-region className="flex h-bar shrink-0 items-center justify-end gap-0.5 px-edge">
       {LINUX_ALPHA && <AlphaBadge link className="mr-auto" />}
+      <BackForward />
       <NotificationBell className="size-7 rounded-lg [&_svg]:size-4" />
       {extra}
       <Tip label={"Hide the sidebar (⌘\\)"} side="bottom" align="end">

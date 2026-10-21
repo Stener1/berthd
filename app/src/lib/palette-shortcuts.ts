@@ -7,7 +7,7 @@
 export const OWN_ITEMS = ["new-worktree", "new-terminal", "new-browser", "open-editor", "split-worktree", "zen", "dashboard", "switchboard", "notifications", "shortcuts", "rename"] as const;
 
 // These it lists as the shortcut table names them; labs ones with Labs on.
-export const FROM_TABLE = ["files", "split-right", "split-down", "compare", "close-pane", "close-group", "file-tree", "devtools", "sidebar", "zoom-in", "zoom-out", "zoom-reset", "compare-swap", "prev-group", "next-group"] as const;
+export const FROM_TABLE = ["back", "forward", "files", "split-right", "split-down", "compare", "close-pane", "close-group", "file-tree", "devtools", "sidebar", "zoom-in", "zoom-out", "zoom-reset", "compare-swap", "prev-group", "next-group"] as const;
 
 // And these it doesn't, because they act on where the keyboard already is,
 // or are ⌘K itself.

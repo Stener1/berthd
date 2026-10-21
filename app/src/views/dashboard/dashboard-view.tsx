@@ -1,5 +1,5 @@
 import { BrushCleaningIcon, ChevronRightIcon, ListChecksIcon, PlusIcon, SendIcon, ServerIcon, SquareIcon, TerminalIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Scene } from "@/components/art/scenes";
 import { BoxFilter, shownBoxes as shownOf } from "@/components/box-filter";
@@ -40,6 +40,10 @@ const COLUMNS: Column[] = [
 // Cards in a column: the longest in that state first, so what has waited
 // longest is on top.
 const sinceOf = (e: SessionEntry) => new Date(e.session.state_since ?? e.session.created).getTime();
+
+// Where the board was scrolled to, so coming back to it (Back, ⌘J) finds
+// the card you left from where it was. Until the window closes.
+let scrolled = 0;
 
 // DashboardView is every agent on every box as a board, by what it needs:
 // you, time, a look at what it did, or a first prompt.
@@ -91,6 +95,35 @@ export function DashboardView() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  const board = useRef<HTMLDivElement>(null);
+  const hasBoard = agents.length > 0;
+  useLayoutEffect(() => {
+    const el = board.current;
+    const grid = el?.firstElementChild;
+    if (!hasBoard || !el || !grid) return;
+    const want = scrolled;
+    // The cards' screens arrive after they draw, and the board grows with
+    // them: follow it down (from its first size, before it paints) until
+    // there is room, or the person scrolls.
+    const grow = new ResizeObserver(() => {
+      el.scrollTop = want;
+      if (el.scrollTop >= want) stop();
+    });
+    const stop = () => {
+      grow.disconnect();
+      el.removeEventListener("wheel", stop);
+      el.removeEventListener("pointerdown", stop);
+    };
+    grow.observe(grid);
+    el.addEventListener("wheel", stop, { passive: true });
+    el.addEventListener("pointerdown", stop);
+    const t = window.setTimeout(stop, 3000);
+    return () => {
+      window.clearTimeout(t);
+      stop();
+    };
+  }, [hasBoard]);
 
   const hide = (next: string[]) => {
     setHidden(next);
@@ -164,7 +197,7 @@ export function DashboardView() {
           )}
         </Empty>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={board} data-testid="dashboard-board" onScroll={(e) => (scrolled = e.currentTarget.scrollTop)} className="min-h-0 flex-1 overflow-y-auto">
           <div className="grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] items-start gap-x-4 gap-y-6 px-page pt-4 pb-6">
             {COLUMNS.map((c) => {
               const items = visible.filter((e) => e.state === c.state).sort((a, b) => sinceOf(a) - sinceOf(b));

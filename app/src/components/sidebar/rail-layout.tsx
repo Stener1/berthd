@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { NotificationBell } from "@/components/notifications/notification-center";
 import { ContextRow, DotsMenu, projectGroupActions } from "@/components/sidebar/actions";
+import { BackForward } from "@/components/sidebar/back-forward";
 import { switchTo, usePicked } from "@/components/sidebar/columns";
 import { ink, inkScale } from "@/components/sidebar/ink";
 import { MoreItems, type NavItem, useArrangedNav } from "@/components/sidebar/nav";
@@ -87,11 +88,12 @@ export function RailSidebar({ prefs, update, places }: { prefs: SidebarPrefs; up
 }
 
 // TopStrip is the window's strip over both: room for the traffic lights,
-// then the notifications and the way to fold the sidebar. It drags the
-// window.
+// then Back and Forward, the notifications and the way to fold the sidebar.
+// It drags the window.
 function TopStrip() {
   return (
     <div data-tauri-drag-region className="flex h-bar shrink-0 items-center justify-end gap-0.5 px-edge">
+      <BackForward />
       <NotificationBell className="size-7 rounded-lg [&_svg]:size-4" />
       <Tip label={"Hide the sidebar (⌘\\)"} side="bottom" align="end">
         <button
