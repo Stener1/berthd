@@ -741,7 +741,14 @@ func (t *Turns) agentEvent(e events.Event) {
 		signal := str(e.Data, "signal")
 		if signal == "tool" && cur == nil && helperTool(e.Data) {
 			// A helper the agent left working in the background, after its
-			// turn ended: the agent itself has not started again.
+			// turn ended: the agent itself has not started again. Its tool
+			// running ends a permission it asked for meanwhile, and the
+			// session is done again.
+			if s.helperWait() {
+				s.set("finished", e)
+				t.kickInbox()
+				t.bump()
+			}
 			return
 		}
 		s.AsyncAsk = false
@@ -936,7 +943,14 @@ func (t *Turns) Redundant(typ string, data map[string]any) bool {
 	if !tool {
 		return notifyAfterHooks(s, typ, data)
 	}
-	return s.State == "running" || (helperTool(data) && s.current() == nil)
+	return s.State == "running" || (helperTool(data) && s.current() == nil && !s.helperWait())
+}
+
+// helperWait says the session waits, with no turn open, on its hooks' word:
+// a permission a helper left running in the background asked for after
+// the agent's turn ended. Turn check's wait is the agent's own question.
+func (s *sessTrack) helperWait() bool {
+	return s.State == "waiting" && !s.SoftWait && s.current() == nil
 }
 
 // helperTool says a tool use was a helper's (a subagent's), not the agent's.
