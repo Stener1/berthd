@@ -1,7 +1,9 @@
 import { toastError } from "@/components/error-note";
 import { toastManager } from "@/components/ui/toast";
 import type { Client } from "@/lib/api";
+import { plainError } from "@/lib/errors";
 import { errorMessage } from "@/lib/format";
+import { finishJob, setItem, startJob } from "@/lib/jobs";
 import { keptReason } from "@/lib/kept-reason";
 import { unpinWorktree } from "@/lib/pinned-worktrees";
 import { clearRemoving, inTurn, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
@@ -47,11 +49,37 @@ export async function removeWorktreeOnBox(
 // dialog) can close, and goes when its box gets to it, one at a time per
 // box (inTurn). Its branch stays, and git still refuses to lose uncommitted
 // work: then a toast says so, and a removal's offers to remove it anyway.
-export function queueRemoval(box: string, location: string, wt: Leaving, opts: { kind?: RemovalKind; force?: boolean } = {}) {
+// With tray, it is a one-row job in the background-jobs tray (lib/jobs.ts)
+// too, so a slow one can be watched.
+export function queueRemoval(box: string, location: string, wt: Leaving, opts: { kind?: RemovalKind; force?: boolean; tray?: boolean } = {}) {
   const kind = opts.kind ?? "remove";
   if (removalOf(useRemovals.getState().byKey, box, wt.path)) return;
   markRemoving(box, wt.path, kind, wt.name);
-  void inTurn(box, () => send(box, location, wt, kind, opts.force));
+  const job = opts.tray ? trayJob(box, wt, kind) : undefined;
+  void inTurn(box, () => send(box, location, wt, kind, opts.force, job));
+}
+
+const KEY = "worktree";
+
+function trayJob(box: string, wt: Leaving, kind: RemovalKind) {
+  const doing = kind === "archive" ? "Archiving" : "Removing";
+  const id = startJob({ title: `${doing} ${wt.name}`, items: [{ key: KEY, group: box, label: wt.name, aside: wt.branch, message: `Waiting for ${box}` }] });
+  const word = kind === "archive" ? "archive" : "remove";
+  return {
+    sent: () => setItem(id, KEY, { state: "running", message: `${doing}…` }),
+    done: (res: { archive?: string }) => {
+      setItem(id, KEY, { state: "done", message: res.archive ? "Archiving: its archive script runs, then it goes" : kind === "archive" ? "Archived; its branch is kept" : "Removed" });
+      finishJob(id, res.archive ? `Archiving ${wt.name}` : `${kind === "archive" ? "Archived" : "Removed"} ${wt.name}`);
+    },
+    kept: () => {
+      setItem(id, KEY, { state: "kept", message: "Kept: uncommitted changes" });
+      finishJob(id, `Kept ${wt.name}`);
+    },
+    failed: (err: unknown) => {
+      setItem(id, KEY, { state: "failed", message: `Couldn't ${word}: ${plainError(err)}` });
+      finishJob(id, `Couldn't ${word} ${wt.name}`);
+    },
+  };
 }
 
 type Leaving = { name: string; path: string; branch?: string };
@@ -59,11 +87,13 @@ type Leaving = { name: string; path: string; branch?: string };
 // keepsWork is git refusing, in its own words, to lose uncommitted work.
 export const keepsWork = (err: unknown) => /modified|untracked|uncommitted|contains/i.test(errorMessage(err));
 
-async function send(box: string, location: string, wt: Leaving, kind: RemovalKind, force?: boolean) {
+async function send(box: string, location: string, wt: Leaving, kind: RemovalKind, force?: boolean, job?: ReturnType<typeof trayJob>) {
   try {
     const client = useStore.getState().client;
     if (!client) throw new Error("not connected");
+    job?.sent();
     const res = await removeWorktreeOnBox(client, box, location, wt, kind, { force });
+    job?.done(res);
     if (kind === "remove") return;
     if (res.archive) toastManager.add({ title: `Archiving ${wt.name}`, description: "Its archive script is running on the box; the worktree goes when it finishes.", type: "info" });
     else toastManager.add({ title: `Archived ${wt.name}`, description: wt.branch ? `Branch ${wt.branch} is kept.` : box, type: "success" });
@@ -71,6 +101,7 @@ async function send(box: string, location: string, wt: Leaving, kind: RemovalKin
     clearRemoving(box, wt.path);
     const why = force ? null : keptReason(errorMessage(err));
     if (why) {
+      job?.kept();
       if (kind === "archive") {
         toastManager.add({
           type: "warning",
@@ -85,7 +116,10 @@ async function send(box: string, location: string, wt: Leaving, kind: RemovalKin
           actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
         });
       }
-    } else toastError(err, { title: `Couldn't ${kind} ${wt.name}`, box });
+    } else {
+      job?.failed(err);
+      toastError(err, { title: `Couldn't ${kind} ${wt.name}`, box });
+    }
   }
 }
 
