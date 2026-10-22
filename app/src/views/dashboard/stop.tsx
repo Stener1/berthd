@@ -17,7 +17,8 @@ import type { SessionEntry } from "@/hooks/use-agent-counts";
 import { boxApi } from "@/lib/api";
 import { agentOf, type SessionState } from "@/lib/derive";
 import { plainError } from "@/lib/errors";
-import { keepsWork, removeWorktreeOnBox } from "@/lib/remove-worktree";
+import { plural } from "@/lib/format";
+import { removeWorktreeOnBox } from "@/lib/remove-worktree";
 import { load, save } from "@/lib/storage";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { runStopJob } from "@/lib/stop-job";
@@ -33,7 +34,6 @@ import { type AgentNames, describeAgent, startedAt } from "@/views/dashboard/nam
 
 export const entryKey = (e: SessionEntry) => `${e.box}/${e.session.name}`;
 const sinceOf = (e: SessionEntry) => new Date(e.session.state_since ?? e.session.created).getTime();
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 // Busy agents: stopping one loses the turn it is in.
 const busy = (s: SessionState) => s === "running" || s === "waiting";
@@ -77,7 +77,6 @@ async function stopInBackground(rows: Row[], archive: boolean) {
         if (!client) throw new Error("Not connected to the laptop agent");
         return removeWorktreeOnBox(client, box, location, wt, "archive");
       },
-      keepsWork,
       errorText: plainError,
     },
   );
