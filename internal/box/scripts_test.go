@@ -131,3 +131,30 @@ func TestArchiveRunsBeforeRemovalAndAFailureKeepsTheWorktree(t *testing.T) {
 		t.Fatal("a successful archive did not remove the worktree")
 	}
 }
+
+func TestADirtyWorktreeIsRefusedBeforeItsArchiveScriptRuns(t *testing.T) {
+	repo := gitRepo(t)
+	t.Setenv("SHELL", "/bin/sh")
+	ctx := context.Background()
+	b := &Box{Name: "devbox", Locations: NewLocations(filepath.Join(t.TempDir(), "locations.json")), Events: &events.Bus{}, LogDir: t.TempDir()}
+	loc, _ := b.Locations.Add(ctx, "cal", repo)
+	wt, _ := b.Locations.CreateWorktree(ctx, "cal", "billing", "", "")
+	if err := os.WriteFile(filepath.Join(wt.Path, "notes.txt"), []byte("not committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ran := filepath.Join(t.TempDir(), "ran")
+	loc.Scripts.Archive = "touch " + ran
+
+	async, err := b.dropWorktree("app", loc, wt.Name, wt.Path, "", false, "removed", nil)
+	// git's own words, as its refusal would have been: the app keys on them.
+	if err == nil || async || !strings.Contains(err.Error(), "contains modified or untracked files") {
+		t.Fatalf("a dirty worktree was not refused up front: async=%v err=%v", async, err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatal("the archive script ran on a dirty worktree")
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "notes.txt")); err != nil {
+		t.Fatal("the uncommitted file is gone")
+	}
+}
