@@ -30,4 +30,4 @@ A worktree that is done goes one of two ways. **Archive…** asks first, then st
 - `?slowremove=MS` slows only a worktree with no archive script; one with a script (devl's shop) answers at once and finishes 1.5 s later, as on a box. `checkout-fix` always refuses without force.
 - The default sidebar is the rail, which shows one project at a time; the scenario sets `sidebar=list` to see devl's and gpu's worktrees together, as the e2e specs do.
 - A worktree already marked is ignored by a second Archive or Remove until its mark goes.
-- The real box's slow part (deleting a big folder inside `git worktree remove`) isn't in the mock; a real box is needed to time it (`../scripts/dev-box.sh`).
+- The real box's slow part (deleting a big folder inside `git worktree remove`) isn't in the mock; a real box is needed to time it (`../scripts/dev-box.sh`). `dashboard-stop-live` (see [dashboard-stop.md](dashboard-stop.md)) archives `verify-solo` from the sidebar on one and checks git agrees.
