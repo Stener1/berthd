@@ -537,6 +537,18 @@ func git(ctx context.Context, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+// dirtyWorktree says git would refuse to remove dir unless forced: it has
+// uncommitted or untracked files. When git can't tell, it says no, and git's
+// own check at removal decides.
+func dirtyWorktree(dir string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
 func expandHome(path string) string {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
