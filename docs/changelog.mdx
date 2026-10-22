@@ -54,6 +54,19 @@ again.
   question) with its answers, otherwise the last lines of its reply, and
   the prompt it started with. Cards for agents in a terminal are as
   before.
+- **Stopping and archiving carry on in the background.** Confirming
+  **Stop N agents?** (or Clean up) now closes the dialog at once, and the
+  work goes on in a tray in the bottom-right corner: each agent and how
+  far it got, grouped by box. Fold it to one line, or press **Stop the
+  rest** to send no more. When all went well it sums up and fades away;
+  when something was kept or failed, it stays as a short report of those
+  until you close it. It keeps going while you work elsewhere in the app.
+- **Archiving a worktree no longer holds its dialog open.** Archive…
+  still asks first, but the dialog closes as soon as you press Archive:
+  the worktree shows Archiving… and goes when its box gets to it, one at
+  a time, so you can archive several in a row. It shows in the tray too,
+  and a note says when it's done, or that one with uncommitted changes
+  was left as it is.
 
 ## v0.3.30
 
