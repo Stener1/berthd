@@ -8,7 +8,7 @@ import { RowLayer } from "@/components/sidebar/row-layer";
 import { Tip } from "@/components/tip";
 import { useTones } from "@/components/workspace/worktree-tone";
 import type { Location, Session, Worktree } from "@/lib/api";
-import { agentLabel, agentOf, type SessionState, sessionState } from "@/lib/derive";
+import { agentLabel, agentOf, ON_ITS_WORK, onItsWork, type SessionState, sessionState } from "@/lib/derive";
 import { ago } from "@/lib/format";
 import { usePrefs } from "@/lib/prefs";
 import { useProjects } from "@/lib/project-groups";
@@ -140,7 +140,7 @@ export function AgentCard({ e }: { e: RailAgent }) {
             </>
           ) : (
             <>
-              <StateGlyph state={e.state} className="size-3" />
+              <StateGlyph state={e.state} session={e.session} noTip className="size-3" />
               <span className={cn(e.state === "waiting" && "text-warning-foreground", e.state === "running" && "text-info-foreground", e.state === "finished" && "text-success-foreground")}>{sessionWord(e.state)}</span>
               {since && <span>· {since}</span>}
             </>
@@ -148,6 +148,7 @@ export function AgentCard({ e }: { e: RailAgent }) {
         </span>
       </span>
       <span className="text-desc font-medium text-foreground">{e.session.title ?? (e.wt.main ? "Main checkout" : worktreeLabel(e.wt))}</span>
+      {e.state === "running" && !e.away && onItsWork(e.session) && <span className="text-muted-foreground">{ON_ITS_WORK}</span>}
       {ask && (ask.input || ask.message) && (
         <span className="line-clamp-2 break-words rounded bg-muted/60 px-1.5 py-0.5 font-mono text-tag text-foreground/80">
           {ask.tool ? `${ask.tool}: ` : ""}

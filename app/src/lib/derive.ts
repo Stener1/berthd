@@ -38,6 +38,21 @@ export function sessionState(s: Session, stats?: Stats): SessionState {
   return agentOf(s) ? "running" : "idle";
 }
 
+// onItsWork says a session shown as running is not in a turn: its turn
+// ended, and turn check read its work as running on without it (a delegated
+// task it waits on, a build, a deploy, a watcher). It is drawn with an
+// hourglass, not a live turn's spinner, and says why in ON_ITS_WORK.
+export const onItsWork = (s: Session | undefined): boolean => !!s && !s.exited && !s.service && s.agent_state === "finished" && !!s.unfinished;
+
+export const ON_ITS_WORK = "Its turn ended while its work runs on: a delegated task, a build, a deploy or a watcher. It picks up by itself.";
+
+// allOnItsWork says every session of these shown as running is on its work,
+// with no live turn among them: a row that sums them up shows the hourglass.
+export function allOnItsWork(sessions: Session[], stats?: Stats): boolean {
+  const running = sessions.filter((s) => sessionState(s, stats) === "running");
+  return running.length > 0 && running.every(onItsWork);
+}
+
 export function worktreeSessions(sessions: Session[] | undefined, wt: Worktree): Session[] {
   // A service's terminal is the service, not work in the worktree.
   return (sessions ?? []).filter((s) => s.dir === wt.path && !s.service);
