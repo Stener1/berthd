@@ -9,15 +9,15 @@ import { attachApi, localPaths, MAX_ATTACHMENT } from "./attachments.ts";
 // and as the laptop agent for a file on this computer.
 function fakeClient() {
   const calls: { box: string; path: string; body: Blob; onProgress?: unknown; signal?: AbortSignal }[] = [];
-  const laptop: { method: string; path: string; body: unknown }[] = [];
+  const laptop: { method: string; path: string; body: unknown; signal?: AbortSignal }[] = [];
   const client = {
     upload: async (box: string, path: string, body: Blob, onProgress?: unknown, signal?: AbortSignal) => {
       calls.push({ box, path, body, onProgress, signal });
       const name = new URLSearchParams(path.split("?")[1]).get("name") ?? "";
       return { path: `/home/me/acme/.berth/attachments/${name}`, name, type: body.type, size: body.size };
     },
-    laptop: async (method: string, path: string, body: unknown) => {
-      laptop.push({ method, path, body });
+    laptop: async (method: string, path: string, body: unknown, signal?: AbortSignal) => {
+      laptop.push({ method, path, body, signal });
       return { path: "/home/me/acme/.berth/attachments/20261022-101502-shot.png", name: "20261022-101502-shot.png", type: "image/png", size: 9 };
     },
   } as unknown as Client;
@@ -65,10 +65,17 @@ test("a path on this computer goes up through the laptop agent, to a session or 
   await attach("devl", { location: "acme", worktree: "fix/login" }, "/var/folders/xy/T/shot.png");
   assert.equal(calls.length, 0);
   assert.deepEqual(laptop, [
-    { method: "POST", path: "/v1/boxes/devl/attach-local", body: { path: "/Users/me/Desktop/shot.png", session: "acme web" } },
-    { method: "POST", path: "/v1/boxes/devl/attach-local", body: { path: "/var/folders/xy/T/shot.png", location: "acme", worktree: "fix/login" } },
+    { method: "POST", path: "/v1/boxes/devl/attach-local", body: { path: "/Users/me/Desktop/shot.png", session: "acme web" }, signal: undefined },
+    { method: "POST", path: "/v1/boxes/devl/attach-local", body: { path: "/var/folders/xy/T/shot.png", location: "acme", worktree: "fix/login" }, signal: undefined },
   ]);
   assert.equal(a.path, "/home/me/acme/.berth/attachments/20261022-101502-shot.png");
+});
+
+test("a path's upload goes with the signal that stops it", async () => {
+  const { client, laptop } = fakeClient();
+  const stop = new AbortController();
+  await attachApi(client, () => "100.64.0.7:7544")("devl", { session: "s" }, "/Users/me/Desktop/shot.png", { signal: stop.signal });
+  assert.equal(laptop[0].signal, stop.signal);
 });
 
 test("a path on a box that runs on this computer is the box's own: it resolves as it is, with no upload", async () => {

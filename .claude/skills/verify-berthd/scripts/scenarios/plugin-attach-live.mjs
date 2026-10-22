@@ -7,7 +7,8 @@
 // attached with pasted: true goes up shrunk, as WebP. A path pasted as text
 // (api.localPaths) is a file on this computer: on a box paired at 127.0.0.1
 // it is the box's own and resolves as it is, with nothing uploaded; on a box
-// at another address the laptop agent uploads it.
+// at another address the laptop agent uploads it, and an aborted signal
+// stops it before anything reaches the box.
 //
 // On a dev box of this checkout (../dev-box.sh, which exports
 // VERIFY_WORKTREE and the token, and runs session "ask" in acme-shop), once
@@ -55,6 +56,11 @@ export default function (berth) {
       say("localPaths: " + JSON.stringify(paths));
       for (const p of paths) berth.api.attach(${JSON.stringify(BOX)}, { session: ${JSON.stringify(SESSION)} }, p).then((a) => show("path", a), (e) => say("path refused: " + e.message));
     };
+    const cancelled = () => {
+      const stop = new AbortController();
+      stop.abort();
+      for (const p of berth.api.localPaths(text)) berth.api.attach(${JSON.stringify(BOX)}, { session: ${JSON.stringify(SESSION)} }, p, { signal: stop.signal }).then((a) => show("cancelled path", a), (e) => say("cancelled path refused: " + e.name));
+    };
     // A retina-sized screenshot of noise: several MB of PNG, as a paste gives.
     const screenshot = async () => {
       const c = document.createElement("canvas");
@@ -75,6 +81,7 @@ export default function (berth) {
       h("textarea", { "aria-label": "Pasted text", value: text, onChange: (e) => setText(e.target.value) }),
       h("button", { onClick: paste }, "Attach the pasted paths"),
       h("button", { onClick: screenshot }, "Paste a screenshot"),
+      h("button", { onClick: cancelled }, "Attach the pasted paths, cancelled"),
       h("p", null, "api.attach is a " + typeof berth.api.attach),
       h("input", { type: "file", "aria-label": "File to attach", onChange: (e) => setFile(e.target.files[0] ?? null) }),
       h("button", { onClick: () => go({ session: ${JSON.stringify(SESSION)} }, "session") }, "Attach to the session"),
@@ -130,7 +137,7 @@ export async function run({ page, shot, step, expect, call }) {
 
     step("paste text that only mentions a path: localPaths finds none");
     await page.getByLabel("Pasted text").fill("see /tmp/shot.png");
-    await page.getByRole("button", { name: "Attach the pasted paths" }).click();
+    await page.getByRole("button", { name: "Attach the pasted paths", exact: true }).click();
     await expect(results.nth(3)).toHaveText("localPaths: []");
 
     const status = await call("/v1/status");
@@ -142,7 +149,7 @@ export async function run({ page, shot, step, expect, call }) {
     const before = readdirSync(`${mainPath}/.berth/attachments`).length;
     step(`paste a path on this computer, ${laptopFile}, with ${BOX} at ${address} (${here ? "this computer" : "another computer"})`);
     await page.getByLabel("Pasted text").fill(`file://${laptopFile}`);
-    await page.getByRole("button", { name: "Attach the pasted paths" }).click();
+    await page.getByRole("button", { name: "Attach the pasted paths", exact: true }).click();
     await expect(results.nth(4)).toHaveText(`localPaths: ${JSON.stringify([laptopFile])}`);
     if (here) {
       await expect(results.nth(5)).toHaveText(`path: ${laptopFile} (shot.png, image/png, 0 bytes)`);
@@ -151,14 +158,18 @@ export async function run({ page, shot, step, expect, call }) {
       const uploaded = (await results.nth(5).textContent()).match(/^path: (\S+)/)[1];
       if (!readFileSync(uploaded).equals(png)) throw new Error(`${uploaded} differs from ${laptopFile}`);
       step(`${uploaded} on the box is ${laptopFile} byte for byte`);
+      step("the same path with a signal already aborted: refused, and nothing reaches the box");
+      await page.getByRole("button", { name: "Attach the pasted paths, cancelled" }).click();
+      await expect(page.getByText("cancelled path refused: AbortError")).toBeVisible();
     }
 
     step("paste a 2400x1600 screenshot with pasted: true: it goes up shrunk, as WebP");
     await page.getByRole("button", { name: "Paste a screenshot" }).click();
-    await expect(results.nth(6)).toHaveText(/^screenshot: a \d+ byte PNG, 2400x1600$/);
-    await expect(results.nth(7)).toHaveText(new RegExp(`^pasted: ${mainPath}/\\.berth/attachments/(\\d{8}-\\d{6}-pasted-\\d{6}(-\\d+)?\\.webp) \\(\\1, image/webp, \\d+ bytes\\)$`), { timeout: 30_000 });
-    const pngSize = Number((await results.nth(6).textContent()).match(/a (\d+) byte/)[1]);
-    const webpSize = Number((await results.nth(7).textContent()).match(/, (\d+) bytes\)$/)[1]);
+    const shift = here ? 0 : 1;
+    await expect(results.nth(6 + shift)).toHaveText(/^screenshot: a \d+ byte PNG, 2400x1600$/);
+    await expect(results.nth(7 + shift)).toHaveText(new RegExp(`^pasted: ${mainPath}/\\.berth/attachments/(\\d{8}-\\d{6}-pasted-\\d{6}(-\\d+)?\\.webp) \\(\\1, image/webp, \\d+ bytes\\)$`), { timeout: 30_000 });
+    const pngSize = Number((await results.nth(6 + shift).textContent()).match(/a (\d+) byte/)[1]);
+    const webpSize = Number((await results.nth(7 + shift).textContent()).match(/, (\d+) bytes\)$/)[1]);
     if (!(webpSize < pngSize)) throw new Error(`the shrunk screenshot (${webpSize}) is no smaller than the PNG (${pngSize})`);
     step(`the ${pngSize} byte PNG went up as a ${webpSize} byte WebP`);
     await shot("2-paths-and-paste");

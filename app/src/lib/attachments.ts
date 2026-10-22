@@ -176,10 +176,10 @@ export function onThisComputer(address?: string): boolean {
 }
 
 // uploadLocalFile has the laptop agent read a file on this computer and
-// upload it to the box.
-export function uploadLocalFile(client: Client, target: AttachTarget, path: string): Promise<Attachment> {
+// upload it to the box; signal stops it, upload and all.
+export function uploadLocalFile(client: Client, target: AttachTarget, path: string, signal?: AbortSignal): Promise<Attachment> {
   const { box, ...to } = target;
-  return client.laptop<Attachment>("POST", `/v1/boxes/${encodeURIComponent(box)}/attach-local`, { path, ...to });
+  return client.laptop<Attachment>("POST", `/v1/boxes/${encodeURIComponent(box)}/attach-local`, { path, ...to }, signal);
 }
 
 const LOCAL_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf" };
@@ -193,7 +193,7 @@ export const attachApi =
   async (box, target, f, o = {}) => {
     const to = { ...target, box };
     if (typeof f !== "string") return uploadAttachment(client, to, o.pasted ? await shrinkImage(f) : f, o);
-    if (!onThisComputer(address(box))) return uploadLocalFile(client, to, f);
+    if (!onThisComputer(address(box))) return uploadLocalFile(client, to, f, o.signal);
     const name = f.split("/").pop() ?? f;
     return { path: f, name, type: LOCAL_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "", size: 0 };
   };
