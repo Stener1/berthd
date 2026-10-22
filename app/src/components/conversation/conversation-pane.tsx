@@ -36,7 +36,7 @@ import { joinDraft, listenForQuotes, type QuoteFill } from "@/lib/chat-quote";
 import { canPickPast } from "@/lib/commands";
 import { resumeWords } from "@/lib/resume-words";
 import { keyOf, useConversations } from "@/lib/conversation-store";
-import { agentLabel, agentOf, atQuestion, firstPrompt, guessAgent, sessionState, worktreeOf } from "@/lib/derive";
+import { agentLabel, agentOf, atQuestion, chatState, firstPrompt, guessAgent, onItsWork, replyMode, worktreeOf } from "@/lib/derive";
 import type { NextStep } from "@/lib/errors";
 import { errorMessage } from "@/lib/format";
 import { useNotifications } from "@/lib/notifications";
@@ -86,7 +86,10 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const away = !!boxStatus && boxStatus.state !== "online";
   // Gone: the box lists its sessions and this one isn't among them.
   const gone = !away && !!listed && !s;
-  const state = gone ? "exited" : s ? sessionState(s, stats) : undefined;
+  // A session on its work is between turns here (chatState): a message
+  // starts a new one.
+  const state = gone ? "exited" : s ? chatState(s, stats) : undefined;
+  const parked = !gone && onItsWork(s);
   const [attempt, setAttempt] = useState(0);
   const feed = useTranscriptFeed(box, session, s?.dir, visible && !mock && !away, attempt);
   // Turn check's wait asks in the agent's last message, which the reply
@@ -156,7 +159,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   useEffect(() => {
     if (!mock || !s || useConversations.getState().items[key]) return;
     const wt = worktreeOf(locations, s);
-    const state = sessionState(s, stats);
+    const state = chatState(s, stats);
     void mockConversation().then((m) => {
       if (!useConversations.getState().items[key]) m.seedTranscript(box, session, state, wt ? (wt.worktree.main ? wt.location.name : wt.worktree.name) : session);
     });
@@ -173,7 +176,8 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   // What the box does not send, from the session's state: thinking while it
   // works, its question while it waits.
   const shown = useMemo(() => {
-    if (mock) return withDraft(items, drafts.draft).items;
+    const onWork: TranscriptItem[] = parked ? [{ kind: "on-its-work", id: "live:on-its-work" }] : [];
+    if (mock) return [...withDraft(items, drafts.draft).items, ...onWork];
     const sentNow: TranscriptItem[] = [];
     // Started with a prompt it hasn't read yet, as it waits at a question
     // of its own (whether to trust its folder): the prompt shows as sent.
@@ -207,6 +211,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
     // Started with a prompt, it is about to work, not waiting for a first
     // task: say so until its own record arrives.
     else if (prompted && !items.length && (state === "ready" || state === "idle")) out.push({ kind: "thinking", id: "live:starting", since: Date.parse(s?.created ?? "") || Date.now() });
+    out.push(...onWork);
     const decided = answered && answered.at === s?.state_since ? answered.key : undefined;
     // A form of questions draws itself (its question item); one the chat
     // can't read from the record (an older box) only its screen answers.
@@ -223,7 +228,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
       out.push({ kind: "ask", id: "live:ask", tool: "Question", detail: s?.ask?.message || ask.detail, choices: ask.choices, decided });
     }
     return out;
-  }, [mock, items, state, s?.state_since, s?.ask, s?.created, startedWith, ask, answered, sent, prompted, onScreen, last, formAsk, drafts.draft, drafts.status, drafts.supported]);
+  }, [mock, items, state, parked, s?.state_since, s?.ask, s?.created, startedWith, ask, answered, sent, prompted, onScreen, last, formAsk, drafts.draft, drafts.status, drafts.supported]);
 
   const edits = useMemo<EditActions | undefined>(() => {
     if (!client || (!canDiff && !mock)) return undefined;
@@ -597,7 +602,7 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
             comments={reviewKey ? toSend.length : 0}
             live={live.show}
             terminal={!!onShowTerminal}
-            mode={state === "running" ? "queue" : state === "waiting" ? "answer" : "send"}
+            mode={replyMode(state)}
             blocked={(asking && atMenu) || live.show}
             hint={live.show ? (liveWhy ?? `${who} is showing its own screen: answer it above`) : wantsWords ? `Tell ${who} what to change, then press Enter` : answerable ? `Answer ${who}'s ${openQ?.questions.length === 1 ? "question" : "questions"} above` : undefined}
             actions={actions}
