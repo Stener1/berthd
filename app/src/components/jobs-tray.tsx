@@ -1,10 +1,10 @@
 import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CircleStopIcon, MinusIcon, XIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Tip } from "@/components/tip";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { cancelJob, dismissJob, FADE_MS, type Job, type JobItem, leftOver, outcomeOf, progressOf, setFolded, useJobs } from "@/lib/jobs";
+import { cancelJob, dismissJob, FADE_MS, type Job, type JobItem, leftOver, outcomeOf, progressOf, setFolded, settled, useJobs } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 
 // The background-jobs tray (lib/jobs.ts): bottom right, above the status
@@ -41,15 +41,13 @@ export function JobsTray() {
   if (!jobs.length) return null;
   const style = { bottom: `max(calc(var(--berth-status-h, ${STATUS_BAR}px) + ${GAP}px + var(--berth-loops-h, 0px)), var(--berth-bar-lift, 0px))`, right: `calc(${GAP}px + var(--berth-dock-w, 0px))` };
   if (folded) {
-    const running = jobs.filter((j) => outcomeOf(j) === "running");
-    const report = jobs.some((j) => outcomeOf(j) === "report");
-    const one = jobs.length === 1 ? jobs[0] : undefined;
-    const p = jobs.reduce((a, j) => ({ settled: a.settled + progressOf(j).settled, total: a.total + progressOf(j).total }), { settled: 0, total: 0 });
-    const label = one ? lineOf(one) : `${jobs.length} jobs${running.length ? ` · ${p.settled}/${p.total}` : ""}`;
+    const outcomes = jobs.map(outcomeOf);
+    const all = jobs.flatMap((j) => j.items);
+    const label = jobs.length === 1 ? lineOf(jobs[0]) : `${jobs.length} jobs${outcomes.includes("running") ? ` · ${all.filter(settled).length}/${all.length}` : ""}`;
     return (
       <div ref={ref} style={style} className="fixed z-40" role="region" aria-label="Background jobs">
         <Button size="sm" variant="outline" className="max-w-88 rounded-full bg-popover shadow-lg/5" onClick={() => setFolded(false)} aria-expanded={false}>
-          {running.length ? <Spinner className="size-3.5" /> : report ? <AlertTriangleIcon className="text-warning-foreground" /> : <CheckIcon className="text-success" />}
+          <OutcomeIcon outcome={outcomes.includes("running") ? "running" : outcomes.includes("report") ? "report" : "clean"} />
           <span className="truncate tabular-nums">{label}</span>
           <ChevronUpIcon />
         </Button>
@@ -73,7 +71,13 @@ function lineOf(j: Job) {
   return p.total > 1 ? `${j.title} · ${p.settled}/${p.total}` : j.title;
 }
 
-function JobCard({ job: j }: { job: Job }) {
+function OutcomeIcon({ outcome }: { outcome: ReturnType<typeof outcomeOf> }) {
+  if (outcome === "running") return <Spinner className="size-3.5 shrink-0" />;
+  if (outcome === "report") return <AlertTriangleIcon className="size-3.5 shrink-0 text-warning-foreground" />;
+  return <CheckIcon className="size-3.5 shrink-0 text-success" />;
+}
+
+const JobCard = memo(function JobCard({ job: j }: { job: Job }) {
   const outcome = outcomeOf(j);
   const fading = useFading(j, outcome === "clean");
   // Running, every row; a report, only what didn't go as asked; clean,
@@ -94,20 +98,20 @@ function JobCard({ job: j }: { job: Job }) {
       style={{ transitionDuration: `${FADE}ms` }}
     >
       <div className="flex items-center gap-2">
-        {outcome === "running" ? <Spinner className="size-3.5 shrink-0" /> : outcome === "report" ? <AlertTriangleIcon className="size-3.5 shrink-0 text-warning-foreground" /> : <CheckIcon className="size-3.5 shrink-0 text-success" />}
+        <OutcomeIcon outcome={outcome} />
         <span className="min-w-0 flex-1 break-words font-medium tabular-nums">
           {lineOf(j)}
         </span>
         <Tip label="Fold">
-          <button type="button" aria-label="Fold" aria-expanded className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setFolded(true)}>
-            <ChevronDownIcon className="size-3.5" />
-          </button>
+          <Button size="icon-xs" variant="ghost" className="shrink-0 text-muted-foreground" aria-label="Fold" aria-expanded onClick={() => setFolded(true)}>
+            <ChevronDownIcon />
+          </Button>
         </Tip>
         {outcome !== "running" && (
           <Tip label="Dismiss">
-            <button type="button" aria-label="Dismiss" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => dismissJob(j.id)}>
-              <XIcon className="size-3.5" />
-            </button>
+            <Button size="icon-xs" variant="ghost" className="shrink-0 text-muted-foreground" aria-label="Dismiss" onClick={() => dismissJob(j.id)}>
+              <XIcon />
+            </Button>
           </Tip>
         )}
       </div>
@@ -123,7 +127,7 @@ function JobCard({ job: j }: { job: Job }) {
                     <span className="flex-1">{g}</span>
                     {outcome === "running" && (
                       <span className="tabular-nums">
-                        {progressOf({ ...j, items: all }).settled}/{all.length}
+                        {all.filter(settled).length}/{all.length}
                       </span>
                     )}
                   </div>
@@ -148,7 +152,7 @@ function JobCard({ job: j }: { job: Job }) {
       )}
     </div>
   );
-}
+});
 
 // useFading starts a clean job's fade just before the store lets it go.
 function useFading(j: Job, clean: boolean) {
@@ -161,32 +165,30 @@ function useFading(j: Job, clean: boolean) {
   return fading;
 }
 
-function JobRow({ item: i }: { item: JobItem }) {
-  const warn = i.state === "kept" || i.state === "cancelled";
+// How a row looks in each state: its icon, and the colour of its message.
+const looks: Record<JobItem["state"], { icon: ReactNode; tone: string }> = {
+  queued: { icon: <MinusIcon className="size-3.5 text-muted-foreground" />, tone: "text-muted-foreground" },
+  running: { icon: <Spinner className="size-3.5" />, tone: "text-muted-foreground" },
+  done: { icon: <CheckIcon className="size-3.5 text-success" />, tone: "text-muted-foreground" },
+  kept: { icon: <AlertTriangleIcon className="size-3.5 text-warning-foreground" />, tone: "text-warning-foreground" },
+  cancelled: { icon: <AlertTriangleIcon className="size-3.5 text-warning-foreground" />, tone: "text-warning-foreground" },
+  failed: { icon: <XIcon className="size-3.5 text-destructive-foreground" />, tone: "text-destructive-foreground" },
+};
+
+const JobRow = memo(function JobRow({ item: i }: { item: JobItem }) {
+  const look = looks[i.state];
   return (
     <li className="flex items-start gap-2.5 px-3 py-1.5">
-      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
-        {i.state === "running" ? (
-          <Spinner className="size-3.5" />
-        ) : i.state === "done" ? (
-          <CheckIcon className="size-3.5 text-success" />
-        ) : i.state === "failed" ? (
-          <XIcon className="size-3.5 text-destructive-foreground" />
-        ) : warn ? (
-          <AlertTriangleIcon className="size-3.5 text-warning-foreground" />
-        ) : (
-          <MinusIcon className="size-3.5 text-muted-foreground" />
-        )}
-      </span>
+      <span className="flex h-5 w-4 shrink-0 items-center justify-center">{look.icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="max-w-[70%] shrink-0 truncate">{i.label}</span>
           {i.aside && <span className="min-w-0 truncate text-muted-foreground text-meta">{i.aside}</span>}
         </span>
         {i.message && (
-          <span className={cn("block whitespace-normal break-words text-meta", i.state === "failed" ? "text-destructive-foreground" : warn ? "text-warning-foreground" : "text-muted-foreground")}>{i.message}</span>
+          <span className={cn("block whitespace-normal break-words text-meta", look.tone)}>{i.message}</span>
         )}
       </span>
     </li>
   );
-}
+});

@@ -433,7 +433,7 @@ export function archiveWorktree(box: string, loc: Location, wt: Worktree) {
     description: `${script ? "The repo's archive script runs, then its" : "Its"} folder on ${box} goes and its sessions and services stop. ${wt.branch ? `Branch ${wt.branch} stays, so you can pick it up again.` : ""}`,
     detail: script ? <span className="font-mono">{script}</span> : undefined,
     confirm: "Archive",
-    run: () => queueRemoval(box, loc.name, wt, { kind: "archive", tray: true }),
+    run: () => queueRemoval(box, loc.name, wt, { kind: "archive" }),
   });
 }
 

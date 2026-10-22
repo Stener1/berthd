@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { errorMessage } from "./format.ts";
 import { oneAtATime } from "./one-at-a-time.ts";
 
 // Worktrees on their way out. The box answers a removal once the folder is
@@ -76,6 +77,13 @@ export function inTurn<T>(box: string, job: () => Promise<T>): Promise<T> {
 
 // removalLabel is what a row says meanwhile.
 export const removalLabel = (r: Removal) => (r.kind === "archive" ? "Archiving…" : "Removing…");
+
+// keepsWork is git refusing, in its own words, to lose uncommitted work.
+export const keepsWork = (err: unknown) => /modified|untracked|uncommitted|contains/i.test(errorMessage(err));
+
+// What a row says once its box answered an archive, and when git kept it.
+export const archivedMessage = (res: { archive?: string }) => (res.archive ? "Archiving: its archive script runs, then it goes" : "Archived; its branch is kept");
+export const KEPT_DIRTY = "Kept: uncommitted changes";
 
 // removeResult reads a DELETE's answer. Older boxes sent the 202 of
 // an archive as text/plain, which the client hands back as a string.
