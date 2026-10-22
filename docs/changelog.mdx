@@ -35,6 +35,22 @@ again.
   also reads a handoff as done: an agent that started a worker it won't
   follow and told you that you can close the session no longer shows as
   working.
+- **A chat whose turn ended no longer looks busy.** When an agent's turn
+  ends while its work runs on (turn check read a build, a deploy or a
+  delegated task as still going), its chat now ends on an hourglass,
+  **Waiting on its work**, instead of a spinner and a ticking timer, and
+  the reply box shows **Send** rather than Stop: what you type starts a
+  new turn.
+- **Turn check reads a status report on another session as done.** A
+  reply that says how another session or worker is getting on and offers
+  to follow it up ("I can nudge it, or tell you when its turn ends") no
+  longer keeps the session showing as working. Waiting on another session
+  still counts as working when the agent says it will act once that
+  session reports back.
+- **A helper working in the background no longer restarts a finished
+  turn.** Tool use by a Claude Code subagent left running after the
+  agent's turn ended used to put the session back to running until your
+  next prompt.
 - **Stopping several agents can archive their worktrees too.** The Agent
   Dashboard's Stop and Clean up dialogs have a box, **Archive their
   worktrees where it's safe**. Ticked, each stopped agent's worktree is

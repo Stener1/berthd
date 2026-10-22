@@ -1,0 +1,72 @@
+{
+  "request_sha256": "b5d8a357dd745521ddb52f6cea05d7b716cc7381280f3d59a5da37015326bd64",
+  "answer": {
+    "answers": {
+      "status": {
+        "type": "choice",
+        "choice": "parked",
+        "probabilities": {
+          "blocked": 0,
+          "done": 0,
+          "idle": 0,
+          "needs_input": 0,
+          "parked": 0.92,
+          "ready_to_ship": 0,
+          "working": 0.08
+        },
+        "confidence": 0.91
+      }
+    },
+    "model": "typesafe-ai/jev",
+    "providerMetadata": {
+      "typesafe": {
+        "confidence": {
+          "status": 0.91
+        }
+      },
+      "gateway": {
+        "routing": {
+          "originalModelId": "typesafe-ai/jev",
+          "resolvedProvider": "typesafe-ai",
+          "fallbacksAvailable": [
+            "digitalocean"
+          ],
+          "planningReasoning": "System credentials planned for: typesafe-ai, digitalocean. Disallow prompt training requested: all 2 attempts disallow prompt training",
+          "canonicalSlug": "typesafe-ai/jev",
+          "finalProvider": "typesafe-ai",
+          "modelAttemptCount": 1,
+          "modelAttempts": [
+            {
+              "canonicalSlug": "typesafe-ai/jev",
+              "success": true,
+              "providerAttemptCount": 1,
+              "providerAttempts": [
+                {
+                  "provider": "typesafe-ai",
+                  "credentialType": "system",
+                  "success": true,
+                  "startTime": 1792668577319,
+                  "endTime": 1792668577505,
+                  "statusCode": 200
+                }
+              ]
+            }
+          ],
+          "totalProviderAttemptCount": 1
+        },
+        "cost": "0.000060732",
+        "marketCost": "0.000060732",
+        "surchargeCost": "0",
+        "gatewayCost": "0.000060732",
+        "inferenceCost": "0.000060732",
+        "inputInferenceCost": "0.000060732",
+        "outputInferenceCost": "0",
+        "generationId": "gen_01M5HNZBG2R6BR97D213TC3Q1H"
+      }
+    },
+    "usage": {
+      "inputTokens": 1446,
+      "outputTokens": 71
+    }
+  }
+}

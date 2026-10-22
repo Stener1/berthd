@@ -1,0 +1,72 @@
+{
+  "request_sha256": "42d2de4ed302d6d354db5933d3a04693e12b5b8c8c9f11f63f2e5a0143960c1e",
+  "answer": {
+    "answers": {
+      "status": {
+        "type": "choice",
+        "choice": "working",
+        "probabilities": {
+          "blocked": 0,
+          "done": 0,
+          "idle": 0,
+          "needs_input": 0,
+          "parked": 0.01,
+          "ready_to_ship": 0,
+          "working": 0.99
+        },
+        "confidence": 0.99
+      }
+    },
+    "model": "typesafe-ai/jev",
+    "providerMetadata": {
+      "typesafe": {
+        "confidence": {
+          "status": 0.99
+        }
+      },
+      "gateway": {
+        "routing": {
+          "originalModelId": "typesafe-ai/jev",
+          "resolvedProvider": "typesafe-ai",
+          "fallbacksAvailable": [
+            "digitalocean"
+          ],
+          "planningReasoning": "System credentials planned for: typesafe-ai, digitalocean. Disallow prompt training requested: all 2 attempts disallow prompt training",
+          "canonicalSlug": "typesafe-ai/jev",
+          "finalProvider": "typesafe-ai",
+          "modelAttemptCount": 1,
+          "modelAttempts": [
+            {
+              "canonicalSlug": "typesafe-ai/jev",
+              "success": true,
+              "providerAttemptCount": 1,
+              "providerAttempts": [
+                {
+                  "provider": "typesafe-ai",
+                  "credentialType": "system",
+                  "success": true,
+                  "startTime": 1792668513027,
+                  "endTime": 1792668513243,
+                  "statusCode": 200
+                }
+              ]
+            }
+          ],
+          "totalProviderAttemptCount": 1
+        },
+        "cost": "0.000058842",
+        "marketCost": "0.000058842",
+        "surchargeCost": "0",
+        "gatewayCost": "0.000058842",
+        "inferenceCost": "0.000058842",
+        "inputInferenceCost": "0.000058842",
+        "outputInferenceCost": "0",
+        "generationId": "gen_01M5HNXCNRP6EHWKNMX4SB17TP"
+      }
+    },
+    "usage": {
+      "inputTokens": 1401,
+      "outputTokens": 70
+    }
+  }
+}
