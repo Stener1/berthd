@@ -1,0 +1,72 @@
+{
+  "request_sha256": "ab2e92d8df1d088f9fcb0494f2c4f96ece38d9755d3c48f010412bb50b53d99c",
+  "answer": {
+    "answers": {
+      "status": {
+        "type": "choice",
+        "choice": "working",
+        "probabilities": {
+          "blocked": 0,
+          "done": 0.06,
+          "idle": 0,
+          "needs_input": 0,
+          "parked": 0,
+          "ready_to_ship": 0,
+          "working": 0.9400000000000001
+        },
+        "confidence": 0.93
+      }
+    },
+    "model": "typesafe-ai/jev",
+    "providerMetadata": {
+      "typesafe": {
+        "confidence": {
+          "status": 0.93
+        }
+      },
+      "gateway": {
+        "routing": {
+          "originalModelId": "typesafe-ai/jev",
+          "resolvedProvider": "typesafe-ai",
+          "fallbacksAvailable": [
+            "digitalocean"
+          ],
+          "planningReasoning": "System credentials planned for: typesafe-ai, digitalocean. Disallow prompt training requested: all 2 attempts disallow prompt training",
+          "canonicalSlug": "typesafe-ai/jev",
+          "finalProvider": "typesafe-ai",
+          "modelAttemptCount": 1,
+          "modelAttempts": [
+            {
+              "canonicalSlug": "typesafe-ai/jev",
+              "success": true,
+              "providerAttemptCount": 1,
+              "providerAttempts": [
+                {
+                  "provider": "typesafe-ai",
+                  "credentialType": "system",
+                  "success": true,
+                  "startTime": 1792668463865,
+                  "endTime": 1792668464088,
+                  "statusCode": 200
+                }
+              ]
+            }
+          ],
+          "totalProviderAttemptCount": 1
+        },
+        "cost": "0.000075096",
+        "marketCost": "0.000075096",
+        "surchargeCost": "0",
+        "gatewayCost": "0.000075096",
+        "inferenceCost": "0.000075096",
+        "inputInferenceCost": "0.000075096",
+        "outputInferenceCost": "0",
+        "generationId": "gen_01M5HNVWP5880PR398Z21MD5X7"
+      }
+    },
+    "usage": {
+      "inputTokens": 1788,
+      "outputTokens": 70
+    }
+  }
+}
