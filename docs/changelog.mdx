@@ -28,6 +28,13 @@ again.
   path on the box to put in a prompt. A pasted screenshot shrinks first, and
   a path to a file on this computer (`berth.api.localPaths` finds them in
   pasted text) goes up through Shipyard. Files up to 20 MB.
+- **An agent waiting on its own work no longer looks like a live turn.**
+  When turn check reads a finished turn as work still running (a build, a
+  deploy, a task it waits on), the sidebar and its tab show an hourglass
+  that says so, instead of the spinner of a turn still going. Turn check
+  also reads a handoff as done: an agent that started a worker it won't
+  follow and told you that you can close the session no longer shows as
+  working.
 - **Stopping several agents can archive their worktrees too.** The Agent
   Dashboard's Stop and Clean up dialogs have a box, **Archive their
   worktrees where it's safe**. Ticked, each stopped agent's worktree is
