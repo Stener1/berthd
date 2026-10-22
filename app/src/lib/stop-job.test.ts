@@ -1,9 +1,10 @@
 // node --experimental-strip-types --test src/lib/stop-job.test.ts (pnpm test)
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 
 import { KEPT_OTHER_AGENT } from "./archive-after-stop.ts";
 import { cancelJob, jobOf, useJobs } from "./jobs.ts";
+import { inTurn, markRemoving, removalOf, useRemovals } from "./removing.ts";
 import { runStopJob, type StopDeps, type StopItem, stopSummary } from "./stop-job.ts";
 
 const row = (session: string, wt?: string, box = "devl"): StopItem => ({
@@ -28,6 +29,9 @@ function fakeBoxes(over: Partial<StopDeps> = {}) {
   };
   return { deps, calls };
 }
+
+// The real archive clears its mark when the box answers; the fakes don't.
+beforeEach(() => useRemovals.setState({ byKey: {} }));
 
 const itemsOf = (id: number) => Object.fromEntries(jobOf(id)!.items.map((i) => [i.key, `${i.state}: ${i.message}`]));
 
@@ -117,4 +121,45 @@ test("the job carries on in the store with nothing holding it", async () => {
 test("the summary names what was kept, failed and never sent", () => {
   assert.equal(stopSummary(17, 17, 0, Array(15).fill("archived")), "17 stopped, 15 archived");
   assert.equal(stopSummary(5, 3, 1, ["archived", "kept", "failed"]), "3 stopped, 1 archived, 1 kept, 2 failed, 1 not stopped");
+});
+
+test("an agent started in a worktree while its archive waited its turn keeps it", async () => {
+  let listings = 0;
+  const { deps, calls } = fakeBoxes({
+    // The first look finds nobody; by its turn someone has started there.
+    liveAgents: async () => (++listings === 1 ? [] : [{ dir: "/w/fix/app", name: "newcomer" }]),
+  });
+  const res = await runStopJob([row("a", "fix")], true, deps);
+  assert.equal(itemsOf(res.job)["devl/a"], `kept: Stopped · Kept: ${KEPT_OTHER_AGENT}`);
+  assert.deepEqual(calls.filter((c) => c.startsWith("archive")), []);
+  assert.equal(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"), undefined, "its mark goes with it");
+});
+
+test("a worktree already on its way out isn't asked for twice", async () => {
+  markRemoving("devl", "/w/fix", "archive", "fix");
+  const { deps, calls } = fakeBoxes();
+  const res = await runStopJob([row("a", "fix"), row("b", "perf")], true, deps);
+  assert.deepEqual(calls.filter((c) => c.startsWith("archive")), ["archive devl:perf"]);
+  assert.equal(itemsOf(res.job)["devl/a"], "done: Stopped · Already being archived");
+  assert.equal(res.clean, true);
+});
+
+test("while archives wait their turn they can still be held back", async () => {
+  // Another removal on devl holds the line.
+  let release!: () => void;
+  const busy = inTurn("devl", () => new Promise<void>((r) => (release = r)));
+  const { deps, calls } = fakeBoxes();
+  const running = runStopJob([row("a", "fix"), row("b", "perf")], true, deps);
+  for (let i = 0; i < 20 && jobOf(useJobs.getState().jobs[0].id)!.items.some((x) => x.state !== "queued"); i++) await new Promise((r) => setTimeout(r, 0));
+  const id = useJobs.getState().jobs[0].id;
+  assert.deepEqual(itemsOf(id), { "devl/a": "queued: Stopped · waiting to archive", "devl/b": "queued: Stopped · waiting to archive" });
+  // Marked, so Archive… from the sidebar leaves them be meanwhile.
+  assert.ok(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"));
+  cancelJob(id);
+  release();
+  await busy;
+  const res = await running;
+  assert.deepEqual(calls.filter((c) => c.startsWith("archive")), []);
+  assert.equal(itemsOf(res.job)["devl/a"], "cancelled: Stopped · Not archived");
+  assert.equal(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"), undefined);
 });

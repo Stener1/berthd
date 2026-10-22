@@ -11,7 +11,7 @@
 import { planArchive, type StopTarget, type WorktreeTarget } from "./archive-after-stop.ts";
 import { plural } from "./format.ts";
 import { finishJob, type JobItem, isCancelling, jobOf, outcomeOf, runPool, setItem, startJob } from "./jobs.ts";
-import { archivedMessage, inTurn, KEPT_DIRTY, keepsWork } from "./removing.ts";
+import { archivedMessage, clearRemoving, inTurn, KEPT_DIRTY, keepsWork, markRemoving, removalOf, useRemovals } from "./removing.ts";
 
 export interface StopItem extends StopTarget {
   session: string;
@@ -79,30 +79,51 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
       worktrees[w.key] = o;
       setRows(w, { state: o === "archived" || o === "archiving" ? "done" : o, message: `Stopped · ${message}` });
     };
-    // The boxes' own listing, fresh, so an agent started a moment ago
-    // counts. A box that doesn't answer keeps its worktrees.
-    const boxes = [...new Set(candidates.map((r) => r.box))];
-    const listed = await Promise.all(boxes.map(async (box) => ({ box, agents: await deps.liveAgents(box).catch(() => undefined) })));
-    const live = listed.flatMap(({ box, agents }) => (agents ?? []).map((a) => ({ box, ...a })));
-    const plan = planArchive(
-      candidates,
-      stopped,
-      live,
-      new Set(listed.filter((l) => !l.agents).map((l) => l.box)),
-    );
+    // planArchive over the box's own listing, fresh, so an agent started a
+    // moment ago counts. A box that doesn't answer keeps its worktrees.
+    const check = async (targets: StopItem[], box?: string) => {
+      const boxes = box ? [box] : [...new Set(targets.map((r) => r.box))];
+      const listed = await Promise.all(boxes.map(async (b) => ({ box: b, agents: await deps.liveAgents(b).catch(() => undefined) })));
+      const live = listed.flatMap(({ box: b, agents }) => (agents ?? []).map((a) => ({ box: b, ...a })));
+      return planArchive(targets, stopped, live, new Set(listed.filter((l) => !l.agents).map((l) => l.box)));
+    };
+    const plan = await check(candidates);
     for (const k of plan.kept) report(k, "kept", `Kept: ${k.why}`);
-    for (const w of plan.archive) setRows(w, { state: "running", message: "Stopped · waiting to archive" });
+    const queued = plan.archive.filter((w) => {
+      // Already on its way out (Archive… from the sidebar): its box needn't
+      // hear it twice.
+      if (removalOf(useRemovals.getState().byKey, w.box, w.wt.path)) {
+        report(w, "archiving", "Already being archived");
+        return false;
+      }
+      // Marked from now, so nothing else asks for it while it waits its turn.
+      markRemoving(w.box, w.wt.path, "archive", w.wt.name);
+      // Queued: not sent, so Stop the rest can still hold it back.
+      setRows(w, { state: "queued", message: "Stopped · waiting to archive" });
+      return true;
+    });
     await Promise.all(
-      plan.archive.map((w) =>
+      queued.map((w) =>
         inTurn(w.box, async () => {
-          if (isCancelling(job)) return report(w, "cancelled", "Not archived");
+          const leave = (o: WorktreeOutcome, message: string) => {
+            clearRemoving(w.box, w.wt.path);
+            report(w, o, message);
+          };
+          if (isCancelling(job)) return leave("cancelled", "Not archived");
           setRows(w, { state: "running", message: "Archiving…" });
+          // Its turn may come minutes later: look again for an agent
+          // started there meanwhile.
+          const again = await check(
+            candidates.filter((r) => w.rows.includes(r.key)),
+            w.box,
+          );
+          if (again.kept.length) return leave("kept", `Kept: ${again.kept[0].why}`);
           try {
             const res = await deps.archive(w.box, w.location, w.wt);
             report(w, res.archive ? "archiving" : "archived", archivedMessage(res));
           } catch (err) {
-            if (keepsWork(err)) report(w, "kept", KEPT_DIRTY);
-            else report(w, "failed", `Couldn't archive: ${deps.errorText(err)}`);
+            if (keepsWork(err)) leave("kept", KEPT_DIRTY);
+            else leave("failed", `Couldn't archive: ${deps.errorText(err)}`);
           }
         }),
       ),
