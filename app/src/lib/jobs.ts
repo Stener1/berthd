@@ -12,7 +12,7 @@ import { load, save } from "./storage.ts";
 //
 // No imports from "@/": pnpm test runs this file in plain node.
 
-export type ItemState = "queued" | "running" | "done" | "kept" | "failed" | "cancelled";
+type ItemState = "queued" | "running" | "done" | "kept" | "failed" | "cancelled";
 
 export interface JobItem {
   key: string;
@@ -69,8 +69,8 @@ export const isCancelling = (id: number) => !!jobOf(id)?.cancelling;
 
 // finishJob ends a job with its summary. A clean one goes after FADE_MS; one
 // with a row kept, failed or not sent stays until it's dismissed.
-export function finishJob(id: number, summary: string, now = Date.now()) {
-  patchJob(id, (j) => ({ ...j, summary, finished: now }));
+export function finishJob(id: number, summary: string) {
+  patchJob(id, (j) => ({ ...j, summary, finished: Date.now() }));
   const j = jobOf(id);
   if (!j || outcomeOf(j) !== "clean") return;
   // unref: node (pnpm test) needn't wait for it.
@@ -78,7 +78,7 @@ export function finishJob(id: number, summary: string, now = Date.now()) {
   (t as { unref?: () => void }).unref?.();
 }
 
-export const dismissJob = (id: number) => useJobs.setState((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }));
+export const dismissJob = (id: number) => useJobs.setState((s) => (s.jobs.some((j) => j.id === id) ? { jobs: s.jobs.filter((j) => j.id !== id) } : s));
 
 export function setFolded(folded: boolean) {
   useJobs.setState({ folded });

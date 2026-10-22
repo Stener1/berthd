@@ -2,8 +2,8 @@ import { useCallback, useRef, useState } from "react";
 
 import { boxApi } from "@/lib/api";
 import { plainError } from "@/lib/errors";
-import { keepsWork, removeWorktreeOnBox } from "@/lib/remove-worktree";
-import { removalOf, useRemovals } from "@/lib/removing";
+import { removeWorktreeOnBox } from "@/lib/remove-worktree";
+import { keepsWork, removalOf, useRemovals } from "@/lib/removing";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { type SyncMode, worktreesApi } from "@/lib/worktrees";
 import type { Row } from "@/views/worktrees/use-worktrees";

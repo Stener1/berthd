@@ -9,10 +9,11 @@
 // the boxes come in as deps (views/dashboard/stop.tsx).
 
 import { planArchive, type StopTarget, type WorktreeTarget } from "./archive-after-stop.ts";
-import { finishJob, isCancelling, jobOf, outcomeOf, runPool, setItem, startJob } from "./jobs.ts";
-import { inTurn } from "./removing.ts";
+import { plural } from "./format.ts";
+import { finishJob, type JobItem, isCancelling, jobOf, outcomeOf, runPool, setItem, startJob } from "./jobs.ts";
+import { archivedMessage, inTurn, KEPT_DIRTY, keepsWork } from "./removing.ts";
 
-export interface StopRow extends StopTarget {
+export interface StopItem extends StopTarget {
   session: string;
   // What the tray calls it: its place, and its name when the place is shared.
   label: string;
@@ -25,8 +26,6 @@ export interface StopDeps {
   // doesn't answer.
   liveAgents(box: string): Promise<{ dir: string; name: string }[] | undefined>;
   archive(box: string, location: string, wt: { name: string; path: string }): Promise<{ archive?: string }>;
-  // Git refusing, in its own words, to lose uncommitted work.
-  keepsWork(err: unknown): boolean;
   errorText(err: unknown): string;
 }
 
@@ -34,7 +33,6 @@ export type WorktreeOutcome = "archived" | "archiving" | "kept" | "failed" | "ca
 
 export interface StopResult {
   job: number;
-  stopped: Set<string>;
   // By worktree (removalKey).
   worktrees: Record<string, WorktreeOutcome>;
   clean: boolean;
@@ -42,18 +40,16 @@ export interface StopResult {
 
 // A few at a time, so a long list is quick without every request landing on
 // a box at once.
-export const CONCURRENCY = 3;
+const CONCURRENCY = 3;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-export async function runStopJob(rows: StopRow[], archive: boolean, deps: StopDeps): Promise<StopResult> {
+export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopDeps): Promise<StopResult> {
   const job = startJob({
     title: `Stopping ${plural(rows.length, "agent")}`,
     items: rows.map((r) => ({ key: r.key, group: r.box, label: r.label, aside: r.aside, message: "Waiting to stop" })),
     cancellable: true,
   });
   const stopped = new Set<string>();
-  const willArchive = (r: StopRow) => archive && !!r.where && !r.where.worktree.main;
+  const willArchive = (r: StopItem) => archive && !!r.where && !r.where.worktree.main;
   const unsent = await runPool(
     rows,
     CONCURRENCY,
@@ -72,13 +68,17 @@ export async function runStopJob(rows: StopRow[], archive: boolean, deps: StopDe
   for (const r of unsent) setItem(job, r.key, { state: "cancelled", message: "Not stopped" });
 
   const worktrees: Record<string, WorktreeOutcome> = {};
-  if (rows.some(willArchive)) {
+  const candidates = rows.filter(willArchive);
+  if (candidates.length) {
+    // Only a worktree's stopped rows: one kept because a stop failed there
+    // also has rows that say Failed.
+    const setRows = (w: WorktreeTarget, item: Pick<JobItem, "state" | "message">) => {
+      for (const k of w.rows) if (stopped.has(k)) setItem(job, k, item);
+    };
     const report = (w: WorktreeTarget, o: WorktreeOutcome, message: string) => {
       worktrees[w.key] = o;
-      const state = o === "archived" || o === "archiving" ? "done" : o;
-      for (const k of w.rows) if (stopped.has(k)) setItem(job, k, { state, message: `Stopped · ${message}` });
+      setRows(w, { state: o === "archived" || o === "archiving" ? "done" : o, message: `Stopped · ${message}` });
     };
-    const candidates = rows.filter(willArchive);
     // The boxes' own listing, fresh, so an agent started a moment ago
     // counts. A box that doesn't answer keeps its worktrees.
     const boxes = [...new Set(candidates.map((r) => r.box))];
@@ -91,18 +91,17 @@ export async function runStopJob(rows: StopRow[], archive: boolean, deps: StopDe
       new Set(listed.filter((l) => !l.agents).map((l) => l.box)),
     );
     for (const k of plan.kept) report(k, "kept", `Kept: ${k.why}`);
-    for (const w of plan.archive) for (const k of w.rows) if (stopped.has(k)) setItem(job, k, { state: "running", message: "Stopped · waiting to archive" });
+    for (const w of plan.archive) setRows(w, { state: "running", message: "Stopped · waiting to archive" });
     await Promise.all(
       plan.archive.map((w) =>
         inTurn(w.box, async () => {
           if (isCancelling(job)) return report(w, "cancelled", "Not archived");
-          for (const k of w.rows) if (stopped.has(k)) setItem(job, k, { state: "running", message: "Archiving…" });
+          setRows(w, { state: "running", message: "Archiving…" });
           try {
             const res = await deps.archive(w.box, w.location, w.wt);
-            if (res.archive) report(w, "archiving", "Archiving: its archive script runs, then it goes");
-            else report(w, "archived", "Archived; its branch is kept");
+            report(w, res.archive ? "archiving" : "archived", archivedMessage(res));
           } catch (err) {
-            if (deps.keepsWork(err)) report(w, "kept", "Kept: uncommitted changes");
+            if (keepsWork(err)) report(w, "kept", KEPT_DIRTY);
             else report(w, "failed", `Couldn't archive: ${deps.errorText(err)}`);
           }
         }),
@@ -112,7 +111,7 @@ export async function runStopJob(rows: StopRow[], archive: boolean, deps: StopDe
 
   finishJob(job, stopSummary(rows.length, stopped.size, unsent.length, Object.values(worktrees)));
   const done = jobOf(job);
-  return { job, stopped, worktrees, clean: !!done && outcomeOf(done) === "clean" };
+  return { job, worktrees, clean: !!done && outcomeOf(done) === "clean" };
 }
 
 // stopSummary is what a finished job says: "17 stopped, 15 archived", and

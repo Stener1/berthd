@@ -4,9 +4,9 @@ import { test } from "node:test";
 
 import { KEPT_OTHER_AGENT } from "./archive-after-stop.ts";
 import { cancelJob, jobOf, useJobs } from "./jobs.ts";
-import { runStopJob, type StopDeps, type StopRow, stopSummary } from "./stop-job.ts";
+import { runStopJob, type StopDeps, type StopItem, stopSummary } from "./stop-job.ts";
 
-const row = (session: string, wt?: string, box = "devl"): StopRow => ({
+const row = (session: string, wt?: string, box = "devl"): StopItem => ({
   key: `${box}/${session}`,
   box,
   session,
@@ -23,7 +23,6 @@ function fakeBoxes(over: Partial<StopDeps> = {}) {
       calls.push(`archive ${box}:${wt.name}`);
       return {};
     },
-    keepsWork: (err) => /uncommitted/.test(String(err)),
     errorText: (err) => (err instanceof Error ? err.message : String(err)),
     ...over,
   };
