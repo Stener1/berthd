@@ -8,8 +8,9 @@ import { cancelJob, dismissJob, FADE_MS, type Job, type JobItem, leftOver, outco
 import { cn } from "@/lib/utils";
 
 // The background-jobs tray (lib/jobs.ts): bottom right, above the status
-// bar (26px) and the loops panel (--berth-loops-h), with toasts stacked
-// above it through --berth-jobs-h. Jobs stack newest on top. Folded, it is
+// bar (26px) and the loops panel (--berth-loops-h), and above a bar floating
+// at a page's bottom (--berth-bar-lift, hooks/lift-toasts.ts) so it never
+// hides the bar's buttons. Toasts stack above it through --berth-jobs-h. Jobs stack newest on top. Folded, it is
 // one line with the progress. With no jobs it is gone and reserves no room.
 const STATUS_BAR = 26;
 const GAP = 12;
@@ -38,7 +39,7 @@ export function JobsTray() {
   }, [jobs.length, folded]);
 
   if (!jobs.length) return null;
-  const style = { bottom: `calc(var(--berth-status-h, ${STATUS_BAR}px) + ${GAP}px + var(--berth-loops-h, 0px))`, right: `calc(${GAP}px + var(--berth-dock-w, 0px))` };
+  const style = { bottom: `max(calc(var(--berth-status-h, ${STATUS_BAR}px) + ${GAP}px + var(--berth-loops-h, 0px)), var(--berth-bar-lift, 0px))`, right: `calc(${GAP}px + var(--berth-dock-w, 0px))` };
   if (folded) {
     const running = jobs.filter((j) => outcomeOf(j) === "running");
     const report = jobs.some((j) => outcomeOf(j) === "report");
@@ -64,12 +65,12 @@ export function JobsTray() {
   );
 }
 
-// lineOf is a job in one line: what it is doing and how far it got, or,
-// once done, what it did.
+// lineOf is a job in one line: what it is doing and how far it got (a
+// one-row job just says what it is doing), or, once done, what it did.
 function lineOf(j: Job) {
   if (j.summary !== undefined) return j.summary;
   const p = progressOf(j);
-  return `${j.title} · ${p.settled}/${p.total}`;
+  return p.total > 1 ? `${j.title} · ${p.settled}/${p.total}` : j.title;
 }
 
 function JobCard({ job: j }: { job: Job }) {
@@ -94,7 +95,7 @@ function JobCard({ job: j }: { job: Job }) {
     >
       <div className="flex items-center gap-2">
         {outcome === "running" ? <Spinner className="size-3.5 shrink-0" /> : outcome === "report" ? <AlertTriangleIcon className="size-3.5 shrink-0 text-warning-foreground" /> : <CheckIcon className="size-3.5 shrink-0 text-success" />}
-        <span className="min-w-0 flex-1 truncate font-medium tabular-nums" data-slot="job-title">
+        <span className="min-w-0 flex-1 break-words font-medium tabular-nums">
           {lineOf(j)}
         </span>
         <Tip label="Fold">
@@ -117,7 +118,7 @@ function JobCard({ job: j }: { job: Job }) {
             const all = j.items.filter((i) => i.group === g);
             return (
               <div key={g}>
-                {groups.length > 1 || outcome === "running" ? (
+                {groups.length > 1 || (outcome === "running" && j.items.length > 1) ? (
                   <div className="sticky top-0 z-1 flex items-center gap-2 border-b bg-muted/80 px-3 py-1 font-mono text-meta text-muted-foreground backdrop-blur-sm">
                     <span className="flex-1">{g}</span>
                     {outcome === "running" && (
@@ -179,8 +180,8 @@ function JobRow({ item: i }: { item: JobItem }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className="truncate">{i.label}</span>
-          {i.aside && <span className="shrink-0 text-muted-foreground text-meta">{i.aside}</span>}
+          <span className="max-w-[70%] shrink-0 truncate">{i.label}</span>
+          {i.aside && <span className="min-w-0 truncate text-muted-foreground text-meta">{i.aside}</span>}
         </span>
         {i.message && (
           <span className={cn("block whitespace-normal break-words text-meta", i.state === "failed" ? "text-destructive-foreground" : warn ? "text-warning-foreground" : "text-muted-foreground")}>{i.message}</span>
