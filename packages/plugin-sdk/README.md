@@ -45,8 +45,10 @@ the app's tree. Put the bundle and a `berth-plugin.json` in
 
 To give an agent a file (a pasted screenshot, a dropped log), upload it with
 `berth.api.attach(box, { session } | { location, worktree }, file)` and put
-the `path` it resolves with in the prompt, as the app's composer does. It
-came after the first SDK release, so check `typeof berth.api.attach ===
-"function"` before you offer it.
+the `path` it resolves with in the prompt, as the app's composer does. Pass
+`{ pasted: true }` for a pasted screenshot so it shrinks first. Pasted text
+that names files on this computer (`berth.api.localPaths(text)`) attaches
+too: pass each path as `file`. Both came after the first SDK release, so
+check `typeof berth.api.attach === "function"` before you offer them.
 
 See `plugins/hello-ports` in the Shipyard repository for a complete example.

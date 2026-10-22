@@ -144,13 +144,6 @@ export async function uploadAttachment(client: Client, target: AttachTarget, f: 
   return client.upload<Attachment>(target.box, `${route}?${new URLSearchParams({ name: fileName(f) })}`, body, o.onProgress, o.signal);
 }
 
-// attachApi is a plugin's api.attach: an upload the way the composer sends
-// one, to a target named apart from its box.
-export const attachApi =
-  (client: Client): BerthApi["attach"] =>
-  (box, target, f, o) =>
-    uploadAttachment(client, { ...target, box }, f, o);
-
 // withAttachments is a prompt with the attachments' paths after it, one to a
 // line, as Claude Code reads them.
 export function withAttachments(text: string, paths: string[]): string {
@@ -188,3 +181,19 @@ export function uploadLocalFile(client: Client, target: AttachTarget, path: stri
   const { box, ...to } = target;
   return client.laptop<Attachment>("POST", `/v1/boxes/${encodeURIComponent(box)}/attach-local`, { path, ...to });
 }
+
+const LOCAL_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf" };
+
+// attachApi is a plugin's api.attach: a file goes up the way the composer
+// sends one (pasted: a screenshot shrinks first), a path on this computer
+// through the laptop agent. On a box that runs here a path is the box's own,
+// so it is the attachment as it is, unread (size 0). address is a box's.
+export const attachApi =
+  (client: Client, address: (box: string) => string | undefined): BerthApi["attach"] =>
+  async (box, target, f, o = {}) => {
+    const to = { ...target, box };
+    if (typeof f !== "string") return uploadAttachment(client, to, o.pasted ? await shrinkImage(f) : f, o);
+    if (!onThisComputer(address(box))) return uploadLocalFile(client, to, f);
+    const name = f.split("/").pop() ?? f;
+    return { path: f, name, type: LOCAL_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "", size: 0 };
+  };
