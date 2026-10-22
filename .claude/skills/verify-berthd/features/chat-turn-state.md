@@ -23,4 +23,4 @@ The chat's foot and its reply box say whether the agent is in a turn. In a live 
 
 - The tab strip and the sidebar still draw a spinner for a session on its work; giving them the hourglass is a separate change.
 - On a real box the hourglass needs the box's turn check to say `working` at 0.65 or more. A reply that only reports another session's progress and offers to follow it up is `done`, so it ends as a plain finished turn.
-- A helper (subagent) left running in the background keeps using tools after the agent's Stop. Claude Code marks those hooks with `agent_id`, and the box ignores them while no turn is open, so they don't bring back the live turn.
+- A helper (subagent) left running in the background keeps using tools after the agent's Stop. Claude Code marks those hooks with `agent_id`, and the box ignores them while no turn is open, so they don't bring back the live turn. One that asks for a permission then still makes the session wait, and its tool running once that is granted ends the wait.
