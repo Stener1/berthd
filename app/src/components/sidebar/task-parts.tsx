@@ -1,6 +1,7 @@
 import { EllipsisIcon, ServerIcon, ServerOffIcon, SettingsIcon, PlusIcon } from "lucide-react";
 import { useSyncExternalStore } from "react";
 
+import { WorkGlyph } from "@/components/agent-glyph";
 import { type Action, ActionItems, boxActions, ContextRow } from "@/components/sidebar/actions";
 import { boxLoad } from "@/components/sidebar/box-load";
 import { ink } from "@/components/sidebar/ink";
@@ -41,8 +42,11 @@ export function toneOf(state?: SessionState) {
 // TaskGlyph is a row's status lane: an amber dot while its agent needs you,
 // a blue arc while it works, a quiet check once it's done, and nothing at
 // all otherwise (the lane keeps its width, so titles line up). small is a
-// child row's narrower lane.
-export function TaskGlyph({ state, small }: { state?: SessionState; small?: boolean }) {
+// child row's narrower lane. onWork is a row whose agents' turns ended while
+// their work runs on (allOnItsWork): an hourglass with why in its tip, not
+// the arc of a turn still going.
+export function TaskGlyph({ state, small, onWork }: { state?: SessionState; small?: boolean; onWork?: boolean }) {
+  if (state === "running" && onWork) return <WorkGlyph className={cn("w-3.5", small ? "h-[11px]" : "h-3")} />;
   const label = state && state !== "exited" ? sessionWord(state) : "Idle";
   return (
     <span role="img" aria-label={label} className={cn("inline-flex shrink-0 items-center justify-center", "w-3.5")}>

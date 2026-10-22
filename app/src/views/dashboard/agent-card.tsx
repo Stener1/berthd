@@ -10,7 +10,7 @@ import { toastManager } from "@/components/ui/toast";
 import type { SessionEntry } from "@/hooks/use-agent-counts";
 import { boxApi } from "@/lib/api";
 import { asksIn, chatCard, shownPrompt } from "@/lib/chat-card";
-import { agentOf, atQuestion } from "@/lib/derive";
+import { agentOf, atQuestion, ON_ITS_WORK } from "@/lib/derive";
 import { errorMessage } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { isStructured } from "@/lib/structured";
@@ -126,7 +126,7 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
         </div>
         {/* Its turn ended, but turn check read the work as still going on. */}
         {state === "running" && session.unfinished && (
-          <Tip label="Its turn ended while its work runs on: a delegated task, a build, a deploy or a watcher. It picks up by itself.">
+          <Tip label={ON_ITS_WORK}>
             <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-meta text-muted-foreground">
               <HourglassIcon className="size-3" aria-hidden />
               Waiting on its work

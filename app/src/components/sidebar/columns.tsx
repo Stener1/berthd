@@ -169,7 +169,9 @@ export function ProjectsColumn({ prefs, update, picked }: { prefs: SidebarPrefs;
 function ProjectColumnRow({ project: p, selected }: { project: Project; selected: boolean }) {
   // Only its own boxes' data: agents changing on another box leave it be.
   const memberData = useStore(useShallow((s) => p.members.map((m) => s.boxes[m.box.name])));
-  const state = mostUrgent(p.members.map((m, i) => (m.box.state === "online" ? summary((memberData[i]?.sessions ?? []).filter((s) => inWorktrees(m.loc, s)), memberData[i]).state : undefined)));
+  const sums = p.members.map((m, i) => (m.box.state === "online" ? summary((memberData[i]?.sessions ?? []).filter((s) => inWorktrees(m.loc, s)), memberData[i]) : undefined));
+  const state = mostUrgent(sums.map((x) => x?.state));
+  const onWork = state === "running" && sums.every((x) => x?.state !== "running" || x.onWork);
   const online = p.members.some((m) => m.box.state === "online");
   const def = p.members.find((m) => m.box.name === p.defaultBox) ?? p.members[0];
   return (
@@ -177,6 +179,7 @@ function ProjectColumnRow({ project: p, selected }: { project: Project; selected
       name={p.name}
       selected={selected}
       state={state}
+      onWork={onWork}
       away={online ? undefined : p.members.map((m) => m.box)}
       tip={<PlaceTip name={`${p.name}${p.slug ? ` (${p.slug})` : ""}`} lines={[...p.members.map((m) => `${m.box.name}: ${m.loc.path}`), ...p.members.filter((m) => m.box.state !== "online").map((m) => `${m.box.name} is ${awayText(m.box)}`)]} />}
       items={() => projectGroupActions(p)}
@@ -193,12 +196,14 @@ function RepoColumnRow({ repo, selected }: { repo: Repo; selected: boolean }) {
   const { box, loc } = repo;
   const data = useStore((s) => s.boxes[box.name]);
   const online = box.state === "online";
-  const state = online ? mostUrgent([summary((data?.sessions ?? []).filter((s) => inWorktrees(loc, s)), data).state]) : undefined;
+  const sum = online ? summary((data?.sessions ?? []).filter((s) => inWorktrees(loc, s)), data) : undefined;
+  const state = mostUrgent([sum?.state]);
   return (
     <ColumnRow
       name={loc.name}
       selected={selected}
       state={state}
+      onWork={sum?.onWork}
       away={online ? undefined : [box]}
       tip={<PlaceTip name={`${loc.name} on ${box.name}`} lines={[loc.path, ...(online ? [] : [`${box.name} is ${awayText(box)}`])]} />}
       items={() => projectActions(box.name, loc)}
@@ -218,6 +223,7 @@ function ColumnRow({
   name,
   selected,
   state,
+  onWork,
   away,
   tip,
   items,
@@ -230,6 +236,8 @@ function ColumnRow({
   name: string;
   selected: boolean;
   state?: SessionState;
+  // Running with no turn going: only work its agents wait on.
+  onWork?: boolean;
   away?: BoxStatus[];
   tip: ReactNode;
   items: () => Action[];
@@ -265,7 +273,7 @@ function ColumnRow({
             <span className="min-w-0 truncate">{name}</span>
             {marks}
             <span className="ml-auto" />
-            {away ? <AwayWord boxes={away} /> : state ? <TaskGlyph state={state} small /> : null}
+            {away ? <AwayWord boxes={away} /> : state ? <TaskGlyph state={state} small onWork={onWork} /> : null}
           </SidebarMenuButton>
         </Tip>
         <RowOverlay selected={selected}>

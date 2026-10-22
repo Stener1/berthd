@@ -27,7 +27,7 @@ import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, Me
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar";
 import { agentPresets, startAgent, startSession } from "@/lib/actions";
 import { type BoxStatus, type Location, type Session, type Worktree } from "@/lib/api";
-import { agentOf, type SessionState, sessionName, sessionState, worktreeSessions } from "@/lib/derive";
+import { agentOf, allOnItsWork, type SessionState, sessionName, sessionState, worktreeSessions } from "@/lib/derive";
 import { load, save } from "@/lib/storage";
 import { type BoxData, NONE, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -79,11 +79,13 @@ export function useSidebarPrefs() {
 
 const urgency: Record<SessionState, number> = { waiting: 0, running: 1, finished: 2, ready: 3, idle: 4, exited: 5 };
 
-// summary is the one status a row shows: its most urgent session's.
-export function summary(sessions: Session[], data?: BoxData): { state?: SessionState; count: number } {
+// summary is the one status a row shows: its most urgent session's. onWork
+// says that is running with no turn going, only work its agents wait on
+// (allOnItsWork), which the row draws as an hourglass.
+export function summary(sessions: Session[], data?: BoxData): { state?: SessionState; onWork: boolean; count: number } {
   const states = sessions.map((s) => sessionState(s, data?.stats)).filter((s) => s !== "exited");
   states.sort((a, b) => urgency[a] - urgency[b]);
-  return { state: states[0], count: sessions.length };
+  return { state: states[0], onWork: states[0] === "running" && allOnItsWork(sessions, data?.stats), count: sessions.length };
 }
 
 export interface Repo {
@@ -352,6 +354,7 @@ interface Fold {
   count: number;
   closed: boolean;
   state?: SessionState;
+  onWork?: boolean;
   toggle(): void;
 }
 
@@ -400,7 +403,7 @@ const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, se
   // A row names the task: the worktree's own display name when it has one,
   // else what its most urgent agent works on, else the worktree.
   const live = away ? [] : sessions;
-  const { state } = summary(live, data);
+  const { state, onWork } = summary(live, data);
   const top = topSession(live, data, state);
   const task = wt.title?.trim() ? undefined : top?.title?.trim() || undefined;
   const name = task || self;
@@ -437,7 +440,7 @@ const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, se
             onPointerDown={(e: React.PointerEvent<HTMLElement>) => labs && !away && armDrag(e, { kind: "worktree", key }, wt.main ? loc.name : self, wt.main ? <HomeIcon className="size-3" /> : <GitBranchIcon className="size-3" />)}
             className={cn(taskRowClass, child && childRowClass, toneOf(state), away && ink.quiet)}
           >
-            <TaskGlyph state={state} small={child} />
+            <TaskGlyph state={state} small={child} onWork={onWork} />
             <span className="mr-auto min-w-0 truncate">{name}</span>
             {/* Its own name beside the title, when the sidebar is wide enough. */}
             {((!wt.main && wt.title) || task) && (
@@ -519,8 +522,8 @@ const WorktreeNode = memo(function WorktreeNode({ node, depth, prefs, update }: 
   const inside = below(node);
   const closed = (prefs.collapsed[key] ?? false) && !inside.some((c) => c.selected);
   const n = node.children.length;
-  const { state } = n && closed ? summary(inside.flatMap((c) => (c.away ? [] : c.sessions)), r.data) : {};
-  const fold: Fold | undefined = n ? { count: n, closed, state, toggle: () => update({ collapsed: { ...prefs.collapsed, [key]: !closed } }) } : undefined;
+  const { state, onWork } = n && closed ? summary(inside.flatMap((c) => (c.away ? [] : c.sessions)), r.data) : {};
+  const fold: Fold | undefined = n ? { count: n, closed, state, onWork, toggle: () => update({ collapsed: { ...prefs.collapsed, [key]: !closed } }) } : undefined;
   const row = (
     <WorktreeRow box={r.box} loc={r.loc} wt={r.wt} sessions={r.sessions} data={r.data} selected={r.selected} chip={r.chip} away={r.away} fold={fold} child={depth > 0} onOpen={() => selectWorktree(refOf(r.box, r.loc, r.wt))} />
   );
@@ -569,7 +572,7 @@ function FoldChip({ fold, label }: { fold: Fold; label: string }) {
         onClick={fold.toggle}
         className={cn("absolute top-1/2 right-11 flex h-6 -translate-y-1/2 items-center gap-[3px] rounded-md px-1 text-tag tabular-nums outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring", ink.faint)}
       >
-        {urgent ? <TaskGlyph state={fold.state} small /> : <BranchMark />}
+        {urgent ? <TaskGlyph state={fold.state} small onWork={fold.onWork} /> : <BranchMark />}
         <span>{fold.count}</span>
       </button>
     </Tip>
@@ -992,9 +995,9 @@ function ProjectGroupBody({ project: p, chips, prefs, update }: { project: Proje
 // HeaderState is a folded project's agent that needs you or works, on its
 // header; done and idle say nothing there.
 function HeaderState({ sessions, data }: { sessions: Session[]; data?: BoxData }) {
-  const { state } = summary(sessions, data);
+  const { state, onWork } = summary(sessions, data);
   if (state !== "running" && state !== "waiting") return null;
-  return <TaskGlyph state={state} small />;
+  return <TaskGlyph state={state} small onWork={onWork} />;
 }
 
 const ProjectGroup = memo(ProjectGroupBody, (a, b) => a.chips === b.chips && a.prefs === b.prefs && a.update === b.update && sameProject(a.project, b.project));
