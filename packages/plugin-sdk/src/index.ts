@@ -199,6 +199,26 @@ export interface BerthApi {
   renameSession(box: string, session: string, title: string): Promise<Session>;
   // The private URL of a port on a box, served by the laptop's proxy.
   serviceUrl(box: string, port: number): string;
+  // Uploads a file for an agent the way the app's composer does: raw bytes into a
+  // running session's worktree, or a worktree an agent is about to start in
+  // (.berth/attachments, which git ignores). Resolves with where it is on the box
+  // (pass path to the agent in the prompt). Up to 20 MB; larger is refused. An
+  // older Shipyard has no attach: check typeof berth.api.attach === "function".
+  attach(
+    box: string,
+    target: { session: string } | { location: string; worktree: string },
+    file: File,
+    opts?: { onProgress?(sent: number, total: number): void; signal?: AbortSignal },
+  ): Promise<Attachment>;
+}
+
+// A file uploaded by api.attach: path is where it is on the box, name what
+// it was named there (a pasted "image.png" becomes "pasted-101502.png").
+export interface Attachment {
+  path: string;
+  name: string;
+  type: string;
+  size: number;
 }
 
 // What a loop reports while it runs, and how it ends; see orchestrate.loop.

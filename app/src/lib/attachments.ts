@@ -1,3 +1,5 @@
+import type { Attachment, BerthApi } from "@berth/plugin";
+
 import type { Client } from "@/lib/api";
 
 // Attachments are files pasted or dropped for an agent: a screenshot, a PDF,
@@ -22,12 +24,7 @@ const TEXT_EXT = /\.(txt|md|log|csv|tsv|json|ya?ml|toml|xml|html|css|jsx?|tsx?|g
 // agent is about to start in.
 export type AttachTarget = { box: string; session: string } | { box: string; location: string; worktree: string };
 
-export interface Attachment {
-  path: string;
-  name: string;
-  type: string;
-  size: number;
-}
+export type { Attachment };
 
 export const isImage = (type: string) => IMAGE_TYPES.includes(type);
 
@@ -146,6 +143,13 @@ export async function uploadAttachment(client: Client, target: AttachTarget, f: 
   const body = /json/i.test(f.type) ? f.slice(0, f.size, "application/octet-stream") : f;
   return client.upload<Attachment>(target.box, `${route}?${new URLSearchParams({ name: fileName(f) })}`, body, o.onProgress, o.signal);
 }
+
+// attachApi is a plugin's api.attach: an upload the way the composer sends
+// one, to a target named apart from its box.
+export const attachApi =
+  (client: Client): BerthApi["attach"] =>
+  (box, target, f, o) =>
+    uploadAttachment(client, { ...target, box }, f, o);
 
 // withAttachments is a prompt with the attachments' paths after it, one to a
 // line, as Claude Code reads them.

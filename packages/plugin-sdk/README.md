@@ -43,4 +43,10 @@ the app's tree. Put the bundle and a `berth-plugin.json` in
 { "id": "hello", "name": "Hello", "version": "0.1.0", "main": "dist/index.js" }
 ```
 
+To give an agent a file (a pasted screenshot, a dropped log), upload it with
+`berth.api.attach(box, { session } | { location, worktree }, file)` and put
+the `path` it resolves with in the prompt, as the app's composer does. It
+came after the first SDK release, so check `typeof berth.api.attach ===
+"function"` before you offer it.
+
 See `plugins/hello-ports` in the Shipyard repository for a complete example.

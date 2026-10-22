@@ -193,6 +193,7 @@ A built-in plugin that is off until turned on can list its widgets' titles in `b
 | `createTask(box, task)` | `TaskResult`: a worktree with an agent in it (`title?` names the work) |
 | `renameSession(box, session, title)` | `Session`: names a session's work, as the app shows it; `""` clears it |
 | `serviceUrl(box, port)` | The private URL of a port on a box |
+| `attach(box, target, file, opts?)` | `Attachment` (`{ path, name, type, size }`): uploads a `File` for an agent the way the composer does, as raw bytes, into `.berth/attachments` (which git ignores) of a running session's worktree (`target: { session }`) or a worktree an agent is about to start in (`{ location, worktree }`). A pasted `image.png` is named `pasted-HHMMSS.png`. Up to 20 MB; a larger file is refused before anything is sent. `opts` takes `onProgress(sent, total)` and an abort `signal`. Put `path` in the prompt you send. An older Shipyard has no `attach`: check `typeof berth.api.attach === "function"` |
 
 ## orchestrate
 
