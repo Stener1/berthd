@@ -177,7 +177,7 @@ export default function App() {
           it through --berth-bar-lift (hooks/lift-toasts.ts). With a dialog
           or sheet open they move to a corner clear of it; see
           components/ui/toast.tsx. The stack is as wide as the loops panel. */}
-      <ToastProvider position="bottom-right" viewportClassName="max-w-88 data-[position=bottom-right]:bottom-[max(calc(var(--berth-status-h,26px)+12px+var(--berth-loops-h,0px)+var(--berth-jobs-h,0px)),var(--berth-bar-lift,0px))] data-[position=bottom-right]:right-3 data-[position=bottom-left]:bottom-[calc(var(--berth-status-h,26px)+12px)] data-[position=bottom-left]:left-3 data-[position=top-left]:top-3 data-[position=top-left]:left-3 data-[position=top-right]:top-3 data-[position=top-right]:right-3">
+      <ToastProvider position="bottom-right" viewportClassName="max-w-88 data-[position=bottom-right]:bottom-[max(calc(var(--berth-status-h,26px)+12px+var(--berth-loops-h,0px)+var(--berth-jobs-h,0px)),calc(var(--berth-bar-lift,0px)+var(--berth-jobs-h,0px)))] data-[position=bottom-right]:right-3 data-[position=bottom-left]:bottom-[calc(var(--berth-status-h,26px)+12px)] data-[position=bottom-left]:left-3 data-[position=top-left]:top-3 data-[position=top-left]:left-3 data-[position=top-right]:top-3 data-[position=top-right]:right-3">
         <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
           {fakeTrafficLights() && <FakeTrafficLights />}
           <div className="flex min-h-0 flex-1">

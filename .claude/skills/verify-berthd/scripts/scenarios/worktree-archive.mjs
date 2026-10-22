@@ -1,6 +1,6 @@
 // Archive… from a worktree's menu: the dialog closes as soon as Archive is
-// pressed, the row says "Archiving…" until its box is done, and a toast
-// says how it went. The mock's box takes 4 s to remove a worktree with no
+// pressed, the row says "Archiving…" until its box is done, it is a
+// one-row job in the background-jobs tray, and a toast says how it went. The mock's box takes 4 s to remove a worktree with no
 // archive script (?slowremove), as one with a big node_modules does.
 // features/worktree-archive.md.
 
@@ -11,6 +11,7 @@ const SLOW = 4000;
 export async function run({ page, shot, step, expect }) {
   const toast = (text) => page.locator("[data-slot=toast-viewport] > *", { hasText: text });
   const leaving = (name) => page.locator("[data-leaving]", { hasText: name });
+  const job = (name) => page.getByRole("region", { name: "Background jobs" }).getByRole("group", { name: `Archiving ${name}` });
   const archive = async (w) => {
     await page.locator(`[data-testid=worktree-row][data-worktree="${w}"]`).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Archive…" }).click();
@@ -41,11 +42,14 @@ export async function run({ page, shot, step, expect }) {
   step("press Archive: the dialog goes at once and the row says Archiving…");
   const t0 = await pressArchive(dialog, "2-just-after-archive");
   await expect(leaving("ci-flake")).toContainText("Archiving…");
+  await expect(job("ci-flake").getByRole("listitem")).toContainText("Archiving…");
 
   step("archive gpu/judge-v2 straight after: it waits its turn on gpu, marked too");
   await pressArchive(await archive("gpu/judge-v2"), "3-second-archive");
   await expect(leaving("ci-flake")).toContainText("Archiving…");
   await expect(leaving("judge-v2")).toContainText("Archiving…");
+  step("the tray has both, judge-v2 waiting for gpu");
+  await expect(job("judge-v2").getByRole("listitem")).toContainText("Waiting for gpu");
   await shot("4-both-archiving");
 
   step("when gpu answers, ci-flake goes and says its branch is kept");
@@ -53,6 +57,7 @@ export async function run({ page, shot, step, expect }) {
   step(`Archived ci-flake toast ${Date.now() - t0} ms after Archive`);
   await expect(page.locator('[data-worktree="gpu/ci-flake"]')).toHaveCount(0);
   await expect(leaving("ci-flake")).toHaveCount(0);
+  await expect(job("ci-flake")).toContainText("Archived ci-flake");
   await expect(leaving("judge-v2")).toContainText("Archiving…");
   await shot("5-first-archived");
 
@@ -76,5 +81,10 @@ export async function run({ page, shot, step, expect }) {
   await expect(toast("Couldn't archive checkout-fix")).toContainText("checkout-fix has uncommitted changes, so it was left as it is. Commit them first, or use Remove worktree to discard them.");
   await expect(page.locator('[data-testid=worktree-row][data-worktree="devl/checkout-fix"]')).toBeVisible();
   await expect(leaving("checkout-fix")).toHaveCount(0);
+  step("the tray keeps a report of it until it's dismissed");
+  await expect(job("checkout-fix")).toContainText("Kept checkout-fix");
+  await expect(job("checkout-fix").getByRole("listitem")).toContainText("Kept: uncommitted changes");
   await shot("10-dirty-kept");
+  await job("checkout-fix").getByRole("button", { name: "Dismiss" }).click();
+  await expect(job("checkout-fix")).toHaveCount(0);
 }
