@@ -22,6 +22,18 @@ again.
 - **Back and Forward's tooltips show on hover.** Once an arrow had
   somewhere to go, hovering it showed nothing; only the keyboard's focus
   did.
+- **Stopping several agents can archive their worktrees too.** The Agent
+  Dashboard's Stop and Clean up dialogs have a box, **Archive their
+  worktrees where it's safe**. Ticked, each stopped agent's worktree is
+  archived once its agents are stopped: the archive script runs and the
+  branch is kept. A worktree with uncommitted changes, or with another
+  agent still running in it, is kept as it is, and its row says why. The
+  dialog remembers whether you ticked it.
+- **Archiving never tears down uncommitted work.** A box now refuses to
+  archive or remove a worktree with uncommitted or untracked files before
+  it stops anything or runs the archive script, instead of running the
+  script first and only then finding that git won't remove it. Remove
+  anyway still forces it.
 
 ## v0.3.30
 
