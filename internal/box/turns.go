@@ -738,8 +738,13 @@ func (t *Turns) agentEvent(e events.Event) {
 		if source == "screen" && cur != nil && cur.State == "waiting" && lastWait(cur) == "question" {
 			return
 		}
-		s.AsyncAsk = false
 		signal := str(e.Data, "signal")
+		if signal == "tool" && cur == nil && helperTool(e.Data) {
+			// A helper the agent left working in the background, after its
+			// turn ended: the agent itself has not started again.
+			return
+		}
+		s.AsyncAsk = false
 		switch {
 		case source == "send":
 			// Said by berth for an agent that cannot: the turn exists.
@@ -911,7 +916,8 @@ func (t *Turns) kickInbox() {
 }
 
 // Redundant says whether an agent event would change nothing: a tool use
-// while the agent is already working, which is frequent, or Codex's notify
+// while the agent is already working, which is frequent, a helper's after
+// the turn ended (agentEvent), or Codex's notify
 // once its hooks are heard (notifyAfterHooks). The box does not publish
 // them.
 func (t *Turns) Redundant(typ string, data map[string]any) bool {
@@ -930,7 +936,13 @@ func (t *Turns) Redundant(typ string, data map[string]any) bool {
 	if !tool {
 		return notifyAfterHooks(s, typ, data)
 	}
-	return s.State == "running"
+	return s.State == "running" || (helperTool(data) && s.current() == nil)
+}
+
+// helperTool says a tool use was a helper's (a subagent's), not the agent's.
+func helperTool(data map[string]any) bool {
+	helper, _ := data["helper"].(bool)
+	return helper
 }
 
 // Track makes sure a live session is in the ledger and returns its state.

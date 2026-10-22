@@ -38,6 +38,25 @@ export function sessionState(s: Session, stats?: Stats): SessionState {
   return agentOf(s) ? "running" : "idle";
 }
 
+// onItsWork says a session shown as running is not in a turn: its turn
+// ended, and turn check read its work as running on without it (a delegated
+// task it waits on, a build, a deploy, a watcher). It is drawn with an
+// hourglass, not a live turn's spinner, and says why in ON_ITS_WORK.
+export const onItsWork = (s: Session | undefined): boolean => !!s && !s.exited && !s.service && s.agent_state === "finished" && !!s.unfinished;
+
+export const ON_ITS_WORK = "Its turn ended while its work runs on: a delegated task, a build, a deploy or a watcher. It picks up by itself.";
+
+// chatState is the state a chat draws a session in: one on its work is
+// between turns, so its chat is a finished turn's (Send; no spinner, timer
+// or Stop), with the hourglass at its foot. Everywhere else it is running.
+export function chatState(s: Session, stats?: Stats): SessionState {
+  return onItsWork(s) ? "finished" : sessionState(s, stats);
+}
+
+// replyMode is what a chat's reply box does at a state: queue a message
+// for when a live turn ends, answer the agent's question, or send it.
+export const replyMode = (state: string | undefined): "send" | "queue" | "answer" => (state === "running" ? "queue" : state === "waiting" ? "answer" : "send");
+
 export function worktreeSessions(sessions: Session[] | undefined, wt: Worktree): Session[] {
   // A service's terminal is the service, not work in the worktree.
   return (sessions ?? []).filter((s) => s.dir === wt.path && !s.service);
