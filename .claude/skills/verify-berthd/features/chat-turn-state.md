@@ -17,6 +17,7 @@ The chat's foot and its reply box say whether the agent is in a turn. In a live 
 ## Driving it with drive.mjs
 
 - On the mock: `scenarios/chat-turn-state.mjs` opens both and asserts the literal row text, the tooltip, and the buttons (**Send** and no **Stop …** on its work; **Stop Claude** and **Queue** in a live turn). `app/e2e/chat.spec.ts` ("a turn that ended while its work runs on …") asserts the same.
+- On a real box: `scenarios/chat-turn-state-live.mjs` (`export const live = true`), on a dev box of this checkout with turn check on (the commands in [chat-ask-card.md](chat-ask-card.md)). It has Claude Code start `sleep 600` in the background and end its turn, waits for the box to list the session `finished` with `unfinished: true`, and asserts the same as the mock; then a foreground `sleep 45` for a live turn (`agent_state: running`, the timer, **Stop Claude**, **Queue**). Second view: the box's `sessions` through the agent (`call`).
 - Turn check's verdicts themselves are Go's: `TestTurnCheckReplays` in `internal/box/turncheck_test.go` replays recorded AI Gateway answers (`internal/box/testdata/turncheck/`), each tied to its exact request by a sha256. A changed prompt fails it until it is recorded again, which asks the gateway: `BERTH_TURNCHECK_RECORD_KEY_FILE=<key file> go test ./internal/box -run TestTurnCheckReplays`.
 
 ## Gotchas

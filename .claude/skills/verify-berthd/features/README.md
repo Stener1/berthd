@@ -18,7 +18,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 | Plugins: built-in and your own, what they add (screens, sidebar items, widgets, panels) | [plugins.md](plugins.md) | `plugin-nav-badges` (sidebar items) |
 | Home's widget grid | [home-widgets.md](home-widgets.md) | none yet; `app/e2e/home-widgets.spec.ts` asserts it |
 | Questions in chat: an agent's form of questions as a card, answered on a real box; kept with Retry and Copy when it can't be | [chat-questions.md](chat-questions.md) | `chat-questions-live` (a real box, `--agent`); `app/e2e/chat.spec.ts` on the mock |
-| Chat's foot and reply box: a live turn's spinner, timer, Stop and Queue; a turn that ended while its work runs on shows an hourglass and Send | [chat-turn-state.md](chat-turn-state.md) | `chat-turn-state`; `app/e2e/chat.spec.ts` asserts it |
+| Chat's foot and reply box: a live turn's spinner, timer, Stop and Queue; a turn that ended while its work runs on shows an hourglass and Send | [chat-turn-state.md](chat-turn-state.md) | `chat-turn-state`; `chat-turn-state-live` (a real box, `--agent`); `app/e2e/chat.spec.ts` asserts it |
 | Chat and board: no question card or answers but the options the agent's screen shows; the mode menu while turn check waits | [chat-ask-card.md](chat-ask-card.md) | `chat-ask-card` (a real box, `--agent`); `app/e2e/ask-card.spec.ts` on a stand-in box |
 
 ## Proof and skip reporting
