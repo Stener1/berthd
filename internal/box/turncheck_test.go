@@ -265,12 +265,32 @@ var (
 		title: "🚀 ACME-2002 watch window",
 		reply: "The 15-minute re-check is still running in the background. I'll finish when it reports back.",
 	}
+	// It started a worker for the fix and handed it over: the user closes
+	// this session, and the worker's news no longer comes here. The worker
+	// runs on, but this agent won't follow it, so it is done.
+	handoffTurn = turnFixture{
+		title:  "Bot replacement: vendor picks, control chat",
+		prompt: "Just start a worker to fix it and i will close this session",
+		reply: "I've started a worker to fix it, so you can close this session.\n\n" +
+			"- **Issue:** ACME-2262, \"Intake: an issue id in a title the card titler wrote shouldn't count as a live session\" (repo:acme-skills, Bug, unassigned). It's what I described: skip ids that appear only in a title the titler wrote, keep the current behaviour when there's no summary file, plus unit tests and a check on the box with throwaway sessions.\n" +
+			"- **Worker:** `acme-skills-acme-2262-intake-titler-ids-c-1af9`, running `/ship ACME-2262`. I turned off its notifications to this session since you're closing it. Follow it in Shipyard.\n\n" +
+			"The task file is updated with where things stand. Three things are still open there:\n" +
+			"- **ACME-2253 intake:** clicking **Start intake** should work now.\n" +
+			"- **The earlier ACME-2253 attempt:** its uncommitted code is still in `acme-skills-acme-2253-control-chat`. Keep it for intake or throw it away.\n" +
+			"- **Product decisions:** which box hosts it, and which mail and notes servers it uses.",
+	}
+	// It started a build and waits on it to act on the result: working.
+	delegatedTurn = turnFixture{
+		title:  "ACME-2270 release build",
+		prompt: "Build the release and tell me if it's green",
+		reply:  "I've started the release build in a worker (`acme-release-build-7c1d`). I'll check the result when it reports back and tell you whether it's green.",
+	}
 )
 
 // Every provider is asked with parked beside working, each with its own
 // definition, and gets the turn as it is.
 func TestTurnCheckAsksWhetherWorkIsParked(t *testing.T) {
-	for name, turn := range map[string]turnFixture{"parked": parkedTurn, "running": runningTurn, "scheduled": scheduledTurn, "background": backgroundTurn} {
+	for name, turn := range map[string]turnFixture{"parked": parkedTurn, "running": runningTurn, "scheduled": scheduledTurn, "background": backgroundTurn, "handoff": handoffTurn, "delegated": delegatedTurn} {
 		t.Run(name, func(t *testing.T) {
 			b, bus, sess, calls := checkedBox(t, true, turn.prompt, turn.reply, jevSays("done", 0.9))
 			if err := b.Sessions.SetTitle(context.Background(), sess.Name, turn.title); err != nil {
@@ -325,6 +345,74 @@ func TestTurnCheckAsksWhetherWorkIsParked(t *testing.T) {
 		if !strings.Contains(jevInstructions, want) {
 			t.Fatalf("instructions lack %q", want)
 		}
+	}
+	// A delegated task is working only while this agent waits on it; one
+	// handed to a worker or session it won't follow is done, even as the
+	// worker runs on.
+	for _, want := range []string{"a delegated task it waits on or will act on when it reports back", "handed to a separate worker or session that this agent won't follow is not work in progress"} {
+		if !strings.Contains(jevCriteria["working"], want) {
+			t.Fatalf("working %q lacks %q", jevCriteria["working"], want)
+		}
+	}
+	for _, want := range []string{"handed to a separate worker or session that this agent won't follow", "tells the user they can close this session", "followed elsewhere", "turned off that worker's notifications to this session", "even while the worker still runs"} {
+		if !strings.Contains(jevInstructions, want) {
+			t.Fatalf("instructions lack %q", want)
+		}
+	}
+	if !strings.Contains(jevCriteria["done"], "handed off (for example to a separate worker or session it won't follow") {
+		t.Fatalf("done %q", jevCriteria["done"])
+	}
+}
+
+// A turn that handed its work to a worker it won't follow, read as done,
+// stays plainly finished: neither unfinished nor parked.
+func TestTurnCheckLeavesAHandoffDone(t *testing.T) {
+	b, bus, sess, calls := checkedBox(t, true, handoffTurn.prompt, handoffTurn.reply, jevSays("done", 0.93))
+	b.Sessions.SetTitle(context.Background(), sess.Name, handoffTurn.title)
+	endTurn(bus, sess)
+	waitCall(t, calls)
+	time.Sleep(300 * time.Millisecond)
+	if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || got.Unfinished || got.Parked {
+		t.Fatalf("the session reads %s, unfinished %v, parked %v", got.AgentState, got.Unfinished, got.Parked)
+	}
+}
+
+// TestTurnCheckLive asks the real provider about the fixtures, with the
+// prompt as it is now: a replay of real turns, never run in CI. Point
+// BERTH_TURNCHECK_LIVE_KEY_FILE at a gateway key (a box keeps its own in
+// turncheck.key) and set BERTH_TURNCHECK_LIVE_MODEL to the model to ask.
+func TestTurnCheckLive(t *testing.T) {
+	keyFile, model := os.Getenv("BERTH_TURNCHECK_LIVE_KEY_FILE"), os.Getenv("BERTH_TURNCHECK_LIVE_MODEL")
+	if keyFile == "" || model == "" {
+		t.Skip("set BERTH_TURNCHECK_LIVE_KEY_FILE and BERTH_TURNCHECK_LIVE_MODEL to ask the real provider")
+	}
+	raw, err := os.ReadFile(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := strings.TrimSpace(string(raw))
+	cfg := TurnCheckConfig{Enabled: true, Provider: ProviderGateway, Model: model}
+	c := &TurnCheck{timeout: 60 * time.Second}
+	for name, want := range map[string]struct {
+		turn   turnFixture
+		choice string
+	}{
+		"handoff":    {handoffTurn, "done"},
+		"delegated":  {delegatedTurn, "working"},
+		"deploy":     {runningTurn, "working"},
+		"background": {backgroundTurn, "working"},
+		"scheduled":  {scheduledTurn, "parked"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			choice, p, err := c.ask(context.Background(), &Box{}, cfg, key, want.turn.title, want.turn.prompt, want.turn.reply)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s: %s at %.2f", name, choice, p)
+			if choice != want.choice {
+				t.Errorf("%s: want %s, got %s at %.2f", name, want.choice, choice, p)
+			}
+		})
 	}
 }
 
@@ -391,7 +479,7 @@ func TestTurnCheckMarksWorkWaitingOnAReplyParked(t *testing.T) {
 
 // A deploy or a re-check still running is working, not parked.
 func TestTurnCheckMarksARunningDeployUnfinished(t *testing.T) {
-	for name, turn := range map[string]turnFixture{"deploy": runningTurn, "background": backgroundTurn} {
+	for name, turn := range map[string]turnFixture{"deploy": runningTurn, "background": backgroundTurn, "delegated": delegatedTurn} {
 		t.Run(name, func(t *testing.T) {
 			b, bus, sess, calls := checkedBox(t, true, turn.prompt, turn.reply, jevSays("working", 0.9))
 			b.Sessions.SetTitle(context.Background(), sess.Name, turn.title)

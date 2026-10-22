@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 
 
 import { Tip } from "@/components/tip";
-import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
+import { AgentIcon, StateGlyph, withWork } from "@/components/agent-glyph";
 import { FileGlyph } from "@/components/files/file-bits";
 import { EmptySide } from "@/components/workspace/compare-view";
 import { CrashProbe } from "@/components/workspace/pane-guard";
@@ -399,12 +399,12 @@ function PaneTitle({ pane }: { pane: Leaf }) {
   // Near the box's per-session memory ceiling: said here and in its chat.
   const near = away ? undefined : memoryNote(session?.usage);
   return (
-    <Tip label={c.kind === "terminal" ? `${c.session} on ${c.box}${away ? ` · ${c.box} is offline` : ""}${near ? ` · ${near}` : ""}` : undefined} align="start">
+    <Tip label={c.kind === "terminal" ? withWork(`${c.session} on ${c.box}${away ? ` · ${c.box} is offline` : ""}${near ? ` · ${near}` : ""}`, state, session) : undefined} align="start">
       <span className="flex min-w-0 items-center gap-1.5">
         <PaneIcon content={c} agent={agent} />
         <span className="truncate">{label}</span>
         {secondary && <span className="shrink-0 text-muted-foreground">{secondary}</span>}
-        {state && <StateGlyph state={state} className="size-3" />}
+        {state && <StateGlyph state={state} session={session} noTip className="size-3" />}
         {near && session?.usage && (
           <span data-testid="pane-memory" className="flex shrink-0 items-center gap-1 text-tag text-warning-foreground tabular-nums dark:text-warning">
             <GaugeIcon className="size-3" aria-hidden />

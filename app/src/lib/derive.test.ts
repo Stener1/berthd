@@ -4,7 +4,28 @@ import { test } from "node:test";
 
 import type { Session } from "@berth/plugin";
 
-import { firstPrompt, offBoard, restartCommand, sessionState } from "./derive.ts";
+import { allOnItsWork, firstPrompt, offBoard, onItsWork, restartCommand, sessionState } from "./derive.ts";
+
+test("a finished turn turn check read as working is on its work, a live turn is not", () => {
+  const s = { name: "a", dir: "/w", created: "2026-10-12T10:00:00Z", attached: 0, exited: false, agent: "claude", agent_state: "finished", unfinished: true } as Session;
+  // Still running to everything that counts or groups it.
+  assert.equal(sessionState(s), "running");
+  assert.equal(onItsWork(s), true);
+  const live: Session = { ...s, name: "b", agent_state: "running", unfinished: false };
+  assert.equal(sessionState(live), "running");
+  assert.equal(onItsWork(live), false);
+  // A later turn started, or it ended: back to how it reads anyway.
+  assert.equal(onItsWork({ ...s, agent_state: "running" }), false);
+  assert.equal(onItsWork({ ...s, unfinished: false }), false);
+  assert.equal(onItsWork({ ...s, exited: true }), false);
+  assert.equal(onItsWork(undefined), false);
+  // A row sums its sessions up: the hourglass only with no live turn there.
+  assert.equal(allOnItsWork([s]), true);
+  assert.equal(allOnItsWork([s, live]), false);
+  assert.equal(allOnItsWork([s, { ...s, name: "c", agent_state: "finished", unfinished: false }]), true);
+  assert.equal(allOnItsWork([{ ...s, unfinished: false }]), false);
+  assert.equal(allOnItsWork([]), false);
+});
 
 test("a preset session's first prompt is read back from its command", () => {
   assert.equal(firstPrompt({ preset: "claude", command: "claude --model haiku 'fix the flaky test'" }), "fix the flaky test");
