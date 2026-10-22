@@ -578,9 +578,10 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 
 // dropWorktree removes a worktree: its services stop, and with an archive
 // script the script runs in the background and the removal follows if it
-// succeeds (async); without one it goes at once. done, when set, hears how
-// it ended. A review worktree's removal is journaled as review.removed,
-// with why.
+// succeeds (async); without one it goes at once. Unless forced, a worktree
+// with uncommitted or untracked files is refused before any of that, in
+// git's words. done, when set, hears how it ended. A review worktree's
+// removal is journaled as review.removed, with why.
 func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error)) (async bool, err error) {
 	_, mark := b.Locations.reviewAt(dir)
 	if mark != nil && branch == "" {
@@ -592,6 +593,14 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 	finish := func(err error) {
 		if done != nil {
 			done(err)
+		}
+	}
+	// git refuses a worktree with uncommitted or untracked files unless
+	// forced. Ask before anything is torn down, so an archive script never
+	// runs on work that git will then keep.
+	if !force {
+		if dirtyWorktree(dir) {
+			return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
 		}
 	}
 	b.stopServices(loc.Name, name)
