@@ -163,3 +163,18 @@ test("while archives wait their turn they can still be held back", async () => {
   assert.equal(itemsOf(res.job)["devl/a"], "cancelled: Stopped · Not archived");
   assert.equal(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"), undefined);
 });
+
+test("Stop the rest pressed while an archive looks for agents still holds it back", async () => {
+  let listings = 0;
+  const { deps, calls } = fakeBoxes({
+    // The second look, in its turn, is when Stop the rest is pressed.
+    liveAgents: async () => {
+      if (++listings === 2) cancelJob(useJobs.getState().jobs[0].id);
+      return [];
+    },
+  });
+  const res = await runStopJob([row("a", "fix")], true, deps);
+  assert.deepEqual(calls.filter((c) => c.startsWith("archive")), []);
+  assert.equal(itemsOf(res.job)["devl/a"], "cancelled: Stopped · Not archived");
+  assert.equal(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"), undefined);
+});
