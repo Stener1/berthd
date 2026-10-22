@@ -118,6 +118,8 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
             w.box,
           );
           if (again.kept.length) return leave("kept", `Kept: ${again.kept[0].why}`);
+          // Stop the rest may have come while it looked.
+          if (isCancelling(job)) return leave("cancelled", "Not archived");
           try {
             const res = await deps.archive(w.box, w.location, w.wt);
             report(w, res.archive ? "archiving" : "archived", archivedMessage(res));
