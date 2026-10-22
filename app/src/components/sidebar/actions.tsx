@@ -419,7 +419,8 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
 // then its folder goes. Its branch stays, and git refuses to lose
 // uncommitted work, so nothing is lost; Remove is the way to discard. The
 // dialog closes as soon as it is confirmed; the row says "Archiving…" until
-// the box is done, and a toast says how it went (lib/remove-worktree.ts).
+// the box is done, as a one-row job in the background-jobs tray, and a
+// toast says how it went (lib/remove-worktree.ts).
 export function archiveWorktree(box: string, loc: Location, wt: Worktree) {
   const script = loc.scripts?.archive;
   confirm({
@@ -427,7 +428,7 @@ export function archiveWorktree(box: string, loc: Location, wt: Worktree) {
     description: `${script ? "The repo's archive script runs, then its" : "Its"} folder on ${box} goes and its sessions and services stop. ${wt.branch ? `Branch ${wt.branch} stays, so you can pick it up again.` : ""}`,
     detail: script ? <span className="font-mono">{script}</span> : undefined,
     confirm: "Archive",
-    run: () => queueRemoval(box, loc.name, wt, { kind: "archive" }),
+    run: () => queueRemoval(box, loc.name, wt, { kind: "archive", tray: true }),
   });
 }
 

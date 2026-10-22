@@ -104,6 +104,8 @@ const fresh = new URLSearchParams(location.search).has("fresh");
 // archive script, as one with a big node_modules does, and answers once it
 // is gone.
 const slowRemove = Number(new URLSearchParams(location.search).get("slowremove")) || 0;
+// ?mock=1&slowstop=MS: a box takes that long to answer a session's stop.
+const slowStop = Number(new URLSearchParams(location.search).get("slowstop")) || undefined;
 if (fresh) {
   status.boxes = [];
   status.forwards = [];
@@ -915,7 +917,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
     const name = decodeURIComponent(path.slice("sessions/".length));
     sessions[box] = sessions[box].filter((s) => s.name !== name);
     setTimeout(() => emit({ type: "session.stopped", box, data: { name } }), 50);
-    return delay({ removed: name });
+    return delay({ removed: name }, slowStop);
   }
   if (key === "POST locations") {
     const r = body as { name: string; path: string };
