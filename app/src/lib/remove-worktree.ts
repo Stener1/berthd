@@ -6,7 +6,7 @@ import { errorMessage } from "@/lib/format";
 import { finishJob, setItem, startJob } from "@/lib/jobs";
 import { keptReason } from "@/lib/kept-reason";
 import { unpinWorktree } from "@/lib/pinned-worktrees";
-import { clearRemoving, inTurn, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
+import { archivedMessage, clearRemoving, inTurn, KEPT_DIRTY, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { forgetWorktree } from "@/lib/workspaces";
 import { worktreesApi } from "@/lib/worktrees";
@@ -49,45 +49,35 @@ export async function removeWorktreeOnBox(
 // dialog) can close, and goes when its box gets to it, one at a time per
 // box (inTurn). Its branch stays, and git still refuses to lose uncommitted
 // work: then a toast says so, and a removal's offers to remove it anyway.
-// With tray, it is a one-row job in the background-jobs tray (lib/jobs.ts)
+// An archive is a one-row job in the background-jobs tray (lib/jobs.ts)
 // too, so a slow one can be watched.
-export function queueRemoval(box: string, location: string, wt: Leaving, opts: { kind?: RemovalKind; force?: boolean; tray?: boolean } = {}) {
+export function queueRemoval(box: string, location: string, wt: Leaving, opts: { kind?: RemovalKind; force?: boolean } = {}) {
   const kind = opts.kind ?? "remove";
   if (removalOf(useRemovals.getState().byKey, box, wt.path)) return;
   markRemoving(box, wt.path, kind, wt.name);
-  const job = opts.tray ? trayJob(box, wt, kind) : undefined;
+  const job = kind === "archive" ? archiveJob(box, wt) : undefined;
   void inTurn(box, () => send(box, location, wt, kind, opts.force, job));
 }
 
 const KEY = "worktree";
 
-function trayJob(box: string, wt: Leaving, kind: RemovalKind) {
-  const doing = kind === "archive" ? "Archiving" : "Removing";
-  const id = startJob({ title: `${doing} ${wt.name}`, items: [{ key: KEY, group: box, label: wt.name, aside: wt.branch, message: `Waiting for ${box}` }] });
-  const word = kind === "archive" ? "archive" : "remove";
+function archiveJob(box: string, wt: Leaving) {
+  const id = startJob({ title: `Archiving ${wt.name}`, items: [{ key: KEY, group: box, label: wt.name, aside: wt.branch, message: `Waiting for ${box}` }] });
+  const end = (item: Parameters<typeof setItem>[2], summary: string) => {
+    setItem(id, KEY, item);
+    finishJob(id, summary);
+  };
   return {
-    sent: () => setItem(id, KEY, { state: "running", message: `${doing}…` }),
-    done: (res: { archive?: string }) => {
-      setItem(id, KEY, { state: "done", message: res.archive ? "Archiving: its archive script runs, then it goes" : kind === "archive" ? "Archived; its branch is kept" : "Removed" });
-      finishJob(id, res.archive ? `Archiving ${wt.name}` : `${kind === "archive" ? "Archived" : "Removed"} ${wt.name}`);
-    },
-    kept: () => {
-      setItem(id, KEY, { state: "kept", message: "Kept: uncommitted changes" });
-      finishJob(id, `Kept ${wt.name}`);
-    },
-    failed: (err: unknown) => {
-      setItem(id, KEY, { state: "failed", message: `Couldn't ${word}: ${plainError(err)}` });
-      finishJob(id, `Couldn't ${word} ${wt.name}`);
-    },
+    sent: () => setItem(id, KEY, { state: "running", message: "Archiving…" }),
+    done: (res: { archive?: string }) => end({ state: "done", message: archivedMessage(res) }, `${res.archive ? "Archiving" : "Archived"} ${wt.name}`),
+    kept: () => end({ state: "kept", message: KEPT_DIRTY }, `Kept ${wt.name}`),
+    failed: (err: unknown) => end({ state: "failed", message: `Couldn't archive: ${plainError(err)}` }, `Couldn't archive ${wt.name}`),
   };
 }
 
 type Leaving = { name: string; path: string; branch?: string };
 
-// keepsWork is git refusing, in its own words, to lose uncommitted work.
-export const keepsWork = (err: unknown) => /modified|untracked|uncommitted|contains/i.test(errorMessage(err));
-
-async function send(box: string, location: string, wt: Leaving, kind: RemovalKind, force?: boolean, job?: ReturnType<typeof trayJob>) {
+async function send(box: string, location: string, wt: Leaving, kind: RemovalKind, force?: boolean, job?: ReturnType<typeof archiveJob>) {
   try {
     const client = useStore.getState().client;
     if (!client) throw new Error("not connected");
