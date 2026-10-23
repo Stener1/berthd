@@ -376,7 +376,8 @@ func TestAHelpersWordDoesntAnswerTheAgentsQuestion(t *testing.T) {
 		t.Fatalf("the hand-back isn't shown: %s", kinds(res.Items))
 	}
 	res = readAll(t, append(lines, user("Skip the questions, just write it"))...)
-	if q := only(t, res.Items, "question"); len(q) != 1 || !q[0].Done {
+	// It closes them unanswered: the prompt is no answer to them.
+	if q := only(t, res.Items, "question"); len(q) != 1 || !q[0].Done || !q[0].Error || len(q[0].Answers) != 0 {
 		t.Fatalf("after the person's prompt: %+v", q)
 	}
 }
