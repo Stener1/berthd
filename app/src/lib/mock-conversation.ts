@@ -8,6 +8,7 @@ import { type Question, type QuestionAnswer, shownAnswer } from "@/lib/questions
 import { mockReports } from "@/lib/mock-reports";
 import { MESSAGES_SESSION, messagesChat } from "@/lib/mock-agent-messages";
 import { benchToolDetail } from "@/lib/mock-bench";
+import { useStore } from "@/lib/store";
 
 // The demo's stand-in for berthd's transcript stream: a short scripted turn
 // played into the conversation store, so the view can be tried with ?mock=1.
@@ -251,21 +252,28 @@ export function seedTranscript(box: string, session: string, state: string, work
     useConversations.setState((s) => (s.items[keyOf(box, session)] ? s : { items: { ...s.items, [keyOf(box, session)]: chat } }));
     return chat;
   }
+  // The turn's calls are timed back from when it finished (or from now, at
+  // work), so the dashboard's cards can say how long each step took.
+  const ended = state === "finished" ? Date.parse(useStore.getState().boxes[box]?.sessions?.find((x) => x.name === session)?.state_since ?? "") || Date.now() : Date.now();
+  const t0 = ended - (state === "finished" ? 13_400 : 40_000);
   const items: TranscriptItem[] = [
-    { kind: "user", id: id(), text: `Pick up ${worktree}: read the issue and get it to green.` },
+    { kind: "user", id: id(), text: `Pick up ${worktree}: read the issue and get it to green.`, at: t0 - 1200 },
     { kind: "text", id: id(), text: `I’ll start from the failing test in ${worktree} and work outwards.` },
-    { kind: "tools", id: id(), verb: "Read", done: true, items: [{ verb: "Read", target: "README.md", file: true }, { verb: "Read", target: "package.json", file: true }] },
+    { kind: "tools", id: id(), verb: "Read", done: true, items: [{ verb: "Read", target: "README.md", file: true, at: t0 }, { verb: "Read", target: "package.json", file: true, at: t0 + 600 }] },
   ];
   if (state === "waiting") {
-    items.push({ kind: "edit", id: id(), file: "apps/web/lib/payments/webhook.ts", added: 9, removed: 2, tool: "mock-edit-1" });
+    items.push({ kind: "edit", id: id(), file: "apps/web/lib/payments/webhook.ts", added: 9, removed: 2, tool: "mock-edit-1", at: t0 + 2_400 });
     items.push({ kind: "edit", id: id(), file: "services/payments/retry.go", added: 14, removed: 3, tool: "mock-edit-go" });
     items.push({ kind: "edit", id: id(), file: "apps/web/lib/checkout/createOrder.ts", added: 3, removed: 2, tool: "mock-multi-1" });
     items.push({ kind: "edit", id: id(), file: "apps/web/lib/payments/webhook.test.ts", added: 45, removed: 0, tool: "mock-write-1" });
     items.push({ kind: "ask", id: id(), tool: "Bash", detail: "pnpm db:migrate --name add-idempotency-key", why: "Create the migration for the new idempotency_key column", structured: true, choices: PERMISSION });
   }
   if (state === "running") {
+    items.push({ kind: "tools", id: id(), verb: "Search", done: true, items: [{ verb: "Search", target: "idempotencyKey", at: t0 + 1900 }] });
+    items.push({ kind: "edit", id: id(), file: "apps/web/lib/payments/webhook.ts", added: 9, removed: 2, tool: "mock-edit-1", at: t0 + 4_300 });
+    items.push({ kind: "tools", id: id(), verb: "Run", done: true, items: [{ verb: "Run", target: "pnpm test payments", at: t0 + 9_600 }] });
     items.push({ kind: "crew", id: id(), names: ["Explore: failing tests", "Explore: fixtures"] });
-    items.push({ kind: "thinking", id: id(), since: Date.now() - 12_000 });
+    items.push({ kind: "thinking", id: id(), since: Date.now() - 12_000, ...(session.startsWith("judge") ? { step: { verb: "Run", target: "pnpm eval --suite judge" } } : {}) });
     const t = Date.now();
     useConversations.getState().setCrew(keyOf(box, session), [
       { id: "s1", name: "Explore: failing tests", kind: "subagent", agent: "claude", state: "running", doing: "Reading checkout.test.ts", since: t - 41_000 },

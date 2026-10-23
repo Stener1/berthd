@@ -1,0 +1,60 @@
+import { type App, expect, mockOnly, test } from "./fixtures";
+
+// The board's cards are live status cards: what the agent does now, its
+// model and task progress, the steps it took this turn with their times,
+// and the controls its state calls for (views/dashboard/agent-card.tsx).
+
+const open = async (app: App) => {
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  await app.page.getByTestId("nav-home").click();
+};
+const card = (app: App, title: string) => app.page.locator("article[role=button]", { hasText: title });
+
+test("a working agent's card says its step now, its model and task progress, and the steps it took", async ({ app }) => {
+  mockOnly("the judge agent's turn is a mock fixture");
+  await open(app);
+  const c = card(app, "Tune the judge prompt");
+  await expect(c).toContainText("Running pnpm eval --suite judge");
+  await expect(c).toContainText("Sonnet 4.5");
+  await expect(c).toContainText("Step 4 of 6");
+  const steps = c.getByRole("list", { name: "Steps" }).getByRole("listitem");
+  await expect(steps).toHaveCount(4);
+  // Finished steps in the past tense with how long they took; the live one
+  // in the present tense, timed.
+  await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toContainText(/\d+s$/);
+  await expect(steps.last()).toHaveAttribute("data-status", "active");
+  await expect(steps.last()).toContainText("Running pnpm eval --suite judge");
+  await expect(c.getByRole("button", { name: "Pause" })).toBeVisible();
+  await expect(c.getByRole("button", { name: /^Stop / })).toBeVisible();
+  await expect(c.getByTestId("card-timer")).toBeVisible();
+});
+
+test("an approval puts Approve and Deny where the card's controls were, and Approve answers", async ({ app }) => {
+  mockOnly("the approval is a mock fixture");
+  await open(app);
+  const c = card(app, "Fix checkout webhook retries");
+  await expect(c).toContainText("Needs your approval to run pnpm prisma migrate dev --name idempotency_key");
+  await expect(c.locator("[data-status=waiting]")).toBeVisible();
+  const approve = c.getByRole("button", { name: "Approve", exact: true });
+  await expect(approve).toBeVisible();
+  await expect(c.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  // The footer is as tall as a working card's: nothing moves when it swaps.
+  const working = await card(app, "Tune the judge prompt").locator("footer").boundingBox();
+  const asking = await c.locator("footer").boundingBox();
+  expect(Math.round(asking?.height ?? 0)).toBe(Math.round(working?.height ?? -1));
+  await approve.click();
+  await expect(app.page.getByText("Approved", { exact: true }).first()).toBeVisible();
+});
+
+test("a finished card says how long its turn took, with no clock and only Open run", async ({ app }) => {
+  mockOnly("the finished turn is a mock fixture");
+  await open(app);
+  const c = card(app, "Export orders as CSV from the admin");
+  await expect(c).toContainText(/Done in \d+s/);
+  await expect(c).toContainText("3 of 3 steps");
+  await expect(c.getByTestId("card-timer")).toHaveCount(0);
+  await expect(c.getByRole("button", { name: "Pause" })).toHaveCount(0);
+  await expect(c.getByRole("button", { name: /^Stop / })).toHaveCount(0);
+  await c.getByRole("button", { name: /Open run/ }).click();
+  await expect(app.page.getByRole("heading", { name: "Agent Dashboard" })).toHaveCount(0);
+});

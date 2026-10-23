@@ -268,7 +268,13 @@ the agent that called it.
 ### In the app
 
 - **Agent Dashboard** (⌘J): every agent on every box, by what it needs:
-  **Needs you**, **Working**, **Done**, **Ready**. A project whose work you
+  **Needs you**, **Working**, **Done**, **Ready**. Each card says what the
+  agent is doing now and for how long, its model, which step of its task
+  list it is on, and the steps it took this turn with how long each took.
+  A working agent has **Pause** (it presses Esc for it: the turn ends, and
+  a prompt picks it up again) and **Stop**. One that asks for a permission
+  has **Approve** and **Deny** in the same place. A finished one says how
+  long its turn took and how many files it changed. A project whose work you
   follow elsewhere, such as on a plugin's own board, can be kept off it in
   **Settings → Agents → Agent Dashboard**. Its agents then leave the board
   and its counts, but still show in the sidebar, on Home and in
