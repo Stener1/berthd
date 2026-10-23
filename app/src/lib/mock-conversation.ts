@@ -269,10 +269,10 @@ export function seedTranscript(box: string, session: string, state: string, work
     items.push({ kind: "ask", id: id(), tool: "Bash", detail: "pnpm db:migrate --name add-idempotency-key", why: "Create the migration for the new idempotency_key column", structured: true, choices: PERMISSION });
   }
   if (state === "running") {
+    items.push({ kind: "crew", id: id(), names: ["Explore: failing tests", "Explore: fixtures"] });
     items.push({ kind: "tools", id: id(), verb: "Search", done: true, items: [{ verb: "Search", target: "idempotencyKey", at: t0 + 1900 }] });
     items.push({ kind: "edit", id: id(), file: "apps/web/lib/payments/webhook.ts", added: 9, removed: 2, tool: "mock-edit-1", at: t0 + 4_300 });
     items.push({ kind: "tools", id: id(), verb: "Run", done: true, items: [{ verb: "Run", target: "pnpm test payments", at: t0 + 9_600 }] });
-    items.push({ kind: "crew", id: id(), names: ["Explore: failing tests", "Explore: fixtures"] });
     items.push({ kind: "thinking", id: id(), since: Date.now() - 12_000, ...(session.startsWith("judge") ? { step: { verb: "Run", target: "pnpm eval --suite judge" } } : {}) });
     const t = Date.now();
     useConversations.getState().setCrew(keyOf(box, session), [

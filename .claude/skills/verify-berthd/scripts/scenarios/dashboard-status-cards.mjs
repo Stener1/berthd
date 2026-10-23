@@ -1,5 +1,5 @@
 // The Agent Dashboard's cards as live status cards (views/dashboard/
-// agent-card.tsx, lib/agent-run.ts): a working agent's current step, model,
+// status-card.tsx, lib/agent-run.ts): a working agent's current step, model,
 // task progress and timed steps with Pause and Stop; an approval that swaps
 // the footer for Approve and Deny without moving it; a finished turn's
 // "Done in …" with no clock. Turned on in Settings first; they are off by

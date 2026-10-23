@@ -20,7 +20,7 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { focusSession } from "@/lib/workspaces";
 import { AgentCard } from "@/views/dashboard/agent-card";
-import { ClassicCard } from "@/views/dashboard/classic-card";
+import { StatusCard } from "@/views/dashboard/status-card";
 import { ColumnMenu, openStop, StopDialog } from "@/views/dashboard/stop";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { ViewHeader } from "@/views/view-header";
@@ -56,7 +56,7 @@ export function DashboardView() {
   // With no box at all, a new worktree has nowhere to go: the way on is a box.
   const noBoxes = useStore((s) => !!s.status && s.status.boxes.length === 0);
   // Live status cards, or the classic ones (Settings › Agents).
-  const Card = usePrefs((p) => p.dashboardCards) === "status" ? AgentCard : ClassicCard;
+  const Card = usePrefs((p) => p.dashboardCards) === "status" ? StatusCard : AgentCard;
   const boxNames = useMemo(() => [...new Set(all.map((e) => e.box))].sort(), [all]);
   const [hidden, setHidden] = useState<string[]>(() => load("berth.dashboard.hiddenBoxes", []));
   const [showRest, setShowRest] = useState(false);

@@ -3,7 +3,7 @@ import { type App, expect, mockOnly, test } from "./fixtures";
 // The board's live status cards (Settings › Agents › Agent Dashboard):
 // what the agent does now, its model and task progress, the steps it took
 // this turn with their times, and the controls its state calls for
-// (views/dashboard/agent-card.tsx).
+// (views/dashboard/status-card.tsx).
 
 const open = async (app: App) => {
   await app.open({ prefs: { labs: false, labsChosen: true, version: 3, dashboardCards: "status" } });

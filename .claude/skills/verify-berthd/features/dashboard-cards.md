@@ -1,6 +1,6 @@
 # The Agent Dashboard's cards
 
-With **Settings → Agents → Agent Dashboard → Live status cards** on (`prefs.dashboardCards: "status"`; off by default), each agent on the board is a live status card (`app/src/views/dashboard/agent-card.tsx`). Off, it is the classic card (`classic-card.tsx`), which `dashboard-stop.md` and `turn-check-indicator.md` describe. What it says comes from the agent's own record, read the way its chat reads it (`views/dashboard/use-card-run.ts` → `lib/transcript-feed`), and only while the card is on screen. `lib/agent-run.ts` turns the record into steps (unit tests next to it). An agent without a record (a shell, a box too old to send one) keeps the old body: the last lines of its screen.
+With **Settings → Agents → Agent Dashboard → Live status cards** on (`prefs.dashboardCards: "status"`; off by default), each agent on the board is a live status card (`app/src/views/dashboard/status-card.tsx`). Off, it is the classic card (`agent-card.tsx`), which `dashboard-stop.md` and `turn-check-indicator.md` describe. What it says comes from the agent's own record, read the way its chat reads it (`views/dashboard/use-card-run.ts` → `lib/transcript-feed`), and only while the card is on screen. `lib/agent-run.ts` turns the record into steps (unit tests next to it). An agent without a record (a shell, a box too old to send one) keeps the old body: the last lines of its screen.
 
 ## Sub-features
 
