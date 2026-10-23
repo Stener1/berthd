@@ -44,7 +44,7 @@ import { type Choice, useScreenTail } from "@/views/dashboard/use-screen-tail";
 // most, not once per card.
 const listeners = new Set<(n: number) => void>();
 let timer = 0;
-function useNow(): number {
+export function useNow(): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     listeners.add(setNow);

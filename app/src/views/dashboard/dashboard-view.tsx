@@ -14,11 +14,13 @@ import { agentOf, type SessionState, worktreeOf } from "@/lib/derive";
 import { ago } from "@/lib/format";
 import { useProjects } from "@/lib/project-groups";
 import { openBroadcast } from "@/lib/prompts";
+import { usePrefs } from "@/lib/prefs";
 import { load, save } from "@/lib/storage";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { focusSession } from "@/lib/workspaces";
 import { AgentCard } from "@/views/dashboard/agent-card";
+import { ClassicCard } from "@/views/dashboard/classic-card";
 import { ColumnMenu, openStop, StopDialog } from "@/views/dashboard/stop";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { ViewHeader } from "@/views/view-header";
@@ -53,6 +55,8 @@ export function DashboardView() {
   const offBoard = useProjects().projects.filter((p) => p.dashboardHidden).length;
   // With no box at all, a new worktree has nowhere to go: the way on is a box.
   const noBoxes = useStore((s) => !!s.status && s.status.boxes.length === 0);
+  // Live status cards, or the classic ones (Settings › Agents).
+  const Card = usePrefs((p) => p.dashboardCards) === "status" ? AgentCard : ClassicCard;
   const boxNames = useMemo(() => [...new Set(all.map((e) => e.box))].sort(), [all]);
   const [hidden, setHidden] = useState<string[]>(() => load("berth.dashboard.hiddenBoxes", []));
   const [showRest, setShowRest] = useState(false);
@@ -228,7 +232,7 @@ export function DashboardView() {
                       <p className="rounded-lg border border-dashed px-3 py-4 text-center text-meta text-muted-foreground">{c.empty}</p>
                     ) : (
                       items.map((e) => (
-                        <AgentCard
+                        <Card
                           key={`${e.box}/${e.session.name}:${e.state}`}
                           entry={e}
                           selecting={!!picked}

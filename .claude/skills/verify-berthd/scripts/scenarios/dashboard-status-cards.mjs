@@ -2,11 +2,21 @@
 // agent-card.tsx, lib/agent-run.ts): a working agent's current step, model,
 // task progress and timed steps with Pause and Stop; an approval that swaps
 // the footer for Approve and Deny without moving it; a finished turn's
-// "Done in …" with no clock. features/dashboard-cards.md.
+// "Done in …" with no clock. Turned on in Settings first; they are off by
+// default. features/dashboard-cards.md.
 
 const card = (page, title) => page.locator("article[role=button]", { hasText: title });
 
 export async function run({ page, shot, step, expect }) {
+  step("turn on Live status cards in Settings › Agents › Agent Dashboard");
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-nav-agents").click();
+  const live = page.getByTestId("settings-agents").getByRole("switch", { name: "Live status cards" });
+  await expect(live).not.toBeChecked();
+  await live.click();
+  await expect(live).toBeChecked();
+  await shot("0-setting");
+
   step("open the Agent Dashboard");
   await page.keyboard.press("Meta+j");
   await expect(page.getByRole("heading", { name: "Agent Dashboard" })).toBeVisible();

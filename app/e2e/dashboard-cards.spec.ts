@@ -1,14 +1,33 @@
 import { type App, expect, mockOnly, test } from "./fixtures";
 
-// The board's cards are live status cards: what the agent does now, its
-// model and task progress, the steps it took this turn with their times,
-// and the controls its state calls for (views/dashboard/agent-card.tsx).
+// The board's live status cards (Settings › Agents › Agent Dashboard):
+// what the agent does now, its model and task progress, the steps it took
+// this turn with their times, and the controls its state calls for
+// (views/dashboard/agent-card.tsx).
 
 const open = async (app: App) => {
-  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3, dashboardCards: "status" } });
   await app.page.getByTestId("nav-home").click();
 };
 const card = (app: App, title: string) => app.page.locator("article[role=button]", { hasText: title });
+
+test("Live status cards is a switch in Settings › Agents, off until turned on, and the board follows it", async ({ app }) => {
+  mockOnly("the judge agent's turn is a mock fixture");
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  await app.page.getByTestId("nav-home").click();
+  // The classic card: no task progress line.
+  await expect(card(app, "Tune the judge prompt")).toBeVisible();
+  await expect(card(app, "Tune the judge prompt")).not.toContainText("Step 4 of 6");
+  const agents = await app.openSettings("agents");
+  const live = agents.getByRole("switch", { name: "Live status cards" });
+  await expect(live).not.toBeChecked();
+  await live.click();
+  await expect(live).toBeChecked();
+  expect(((await app.stored("berth.prefs")) as { dashboardCards?: string }).dashboardCards).toBe("status");
+  await app.leaveSettings();
+  await app.page.getByTestId("nav-home").click();
+  await expect(card(app, "Tune the judge prompt")).toContainText("Step 4 of 6");
+});
 
 test("a working agent's card says its step now, its model and task progress, and the steps it took", async ({ app }) => {
   mockOnly("the judge agent's turn is a mock fixture");
