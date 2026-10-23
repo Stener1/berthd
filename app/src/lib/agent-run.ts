@@ -242,15 +242,17 @@ export const isApproval = (tool: string | undefined) => !!tool && tool !== "AskU
 
 // runOf is the turn so far. wrote is when the agent last wrote to its
 // record (ms): with no call under way, it has been thinking since.
-export function runOf(items: TranscriptItem[] | undefined, todos: ChatTodo[] | undefined, opts: { working: boolean; since: number; wrote?: number }): Run {
+export function runOf(items: TranscriptItem[] | undefined, todos: ChatTodo[] | undefined, opts: { working: boolean; waiting?: boolean; since: number; wrote?: number }): Run {
   const { turn, at } = turnOf(items ?? []);
-  const steps = stepsOf(turn);
+  // A question or permission left open by a turn that ended without it
+  // waits for no one: it isn't a step.
+  const steps = stepsOf(turn).filter((s) => s.status !== "waiting" || opts.waiting);
   const files = new Set(turn.flatMap((it) => (it.kind === "edit" ? [it.file] : []))).size;
   // From its prompt; a box that doesn't time prompts, from its first call.
   let began = at;
   if (!began) for (const it of turn) if (it.kind === "tools") for (const c of it.items ?? []) if (c.at && (!began || c.at < began)) began = c.at;
   const open = turn[turn.length - 1];
-  const ask = open?.kind === "ask" && !open.decided ? { tool: open.tool, detail: open.detail } : undefined;
+  const ask = opts.waiting && open?.kind === "ask" && !open.decided ? { tool: open.tool, detail: open.detail } : undefined;
   const last = steps[steps.length - 1];
   if (!opts.working) {
     // Nothing is under way once its turn ended, and its last step ran

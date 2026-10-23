@@ -17,8 +17,8 @@ export async function run({ page, shot, step, expect }) {
   await expect(working).toContainText("Sonnet 4.5");
   await expect(working).toContainText("Step 4 of 6");
   const steps = working.getByRole("list", { name: "Steps" }).getByRole("listitem");
-  await expect(steps).toHaveCount(4);
-  await expect(steps.last()).toHaveAttribute("data-status", "active");
+  await expect(steps).toHaveCount(3);
+  await expect(working.getByTestId("card-now")).toHaveAttribute("data-status", "active");
   await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toHaveCount(1);
   // A finished step says how long it took.
   await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toContainText(/\d+(\.\d)?s/);

@@ -41,7 +41,7 @@ export function useCardRun(entry: SessionEntry, card: RefObject<HTMLElement | nu
   // Its turn ended on work that runs without it (turn check): nothing of
   // its own is under way.
   const working = state === "running" && !session.unfinished;
-  const run = useMemo(() => (live && items?.length ? runOf(items, signals?.todos, { working, since, wrote }) : undefined), [live, items, signals?.todos, working, since, wrote]);
+  const run = useMemo(() => (live && items?.length ? runOf(items, signals?.todos, { working, waiting: state === "waiting", since, wrote }) : undefined), [live, items, signals?.todos, working, state, since, wrote]);
   return { run, model: signals?.model };
 }
 

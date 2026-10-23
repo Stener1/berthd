@@ -101,8 +101,13 @@ test("an open group the record left behind is not the step under way", () => {
 
 test("an approval waits in the log, in words", () => {
   const items: TranscriptItem[] = [...turn.slice(0, -1), { kind: "ask", id: "a1", tool: "Bash", detail: "git push origin fix" }];
-  const run = runOf(items, undefined, { working: false, since: T });
+  const run = runOf(items, undefined, { working: false, waiting: true, since: T });
   assert.deepEqual(run.steps.at(-1), { id: "a1", kind: "ask", label: "Needs your approval to run git push origin fix", status: "waiting" });
+  assert.equal(run.ask?.tool, "Bash");
+  // A turn that ended with it still open no longer waits on it.
+  const ended = runOf(items, undefined, { working: false, since: T });
+  assert.ok(ended.steps.every((s) => s.status === "done"));
+  assert.equal(ended.ask, undefined);
   assert.equal(approvalLabel("Edit", "apps/web/lib/webhook.ts"), "Needs your approval to edit webhook.ts");
   assert.equal(approvalLabel("mcp__linear__save_issue", "{}"), "Needs your approval to use save issue");
   assert.equal(approvalLabel("AskUserQuestion", undefined, "Three questions about the release"), "Three questions about the release");

@@ -18,12 +18,13 @@ test("a working agent's card says its step now, its model and task progress, and
   await expect(c).toContainText("Sonnet 4.5");
   await expect(c).toContainText("Step 4 of 6");
   const steps = c.getByRole("list", { name: "Steps" }).getByRole("listitem");
-  await expect(steps).toHaveCount(4);
-  // Finished steps in the past tense with how long they took; the live one
-  // in the present tense, timed.
+  await expect(steps).toHaveCount(3);
+  // Finished steps in the past tense with how long they took.
   await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toContainText(/\d+s$/);
-  await expect(steps.last()).toHaveAttribute("data-status", "active");
-  await expect(steps.last()).toContainText("Running pnpm eval --suite judge");
+  // The step under way is its own line under the title, timed.
+  const now = c.getByTestId("card-now");
+  await expect(now).toHaveAttribute("data-status", "active");
+  await expect(now).toContainText(/Running pnpm eval --suite judge\s*\d+s/);
   await expect(c.getByRole("button", { name: "Pause" })).toBeVisible();
   await expect(c.getByRole("button", { name: /^Stop / })).toBeVisible();
   await expect(c.getByTestId("card-timer")).toBeVisible();
@@ -44,6 +45,16 @@ test("an approval puts Approve and Deny where the card's controls were, and Appr
   expect(Math.round(asking?.height ?? 0)).toBe(Math.round(working?.height ?? -1));
   await approve.click();
   await expect(app.page.getByText("Approved", { exact: true }).first()).toBeVisible();
+});
+
+test("a form of questions is answered in the agent's own view, not by one number", async ({ app }) => {
+  mockOnly("the questions are a mock fixture");
+  await open(app);
+  const c = card(app, "Plan the checkout release");
+  await expect(c.getByTestId("card-now")).toContainText("Three questions about the release window");
+  await expect(c.getByRole("button", { name: /^1 / })).toHaveCount(0);
+  await c.getByRole("button", { name: "Answer", exact: true }).click();
+  await expect(app.page.getByRole("heading", { name: "Agent Dashboard" })).toHaveCount(0);
 });
 
 test("a finished card says how long its turn took, with no clock and only Open run", async ({ app }) => {
