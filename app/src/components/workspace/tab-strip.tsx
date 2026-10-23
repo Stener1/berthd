@@ -1,7 +1,7 @@
 import { CloudOffIcon, GaugeIcon, PencilIcon, RowsIcon, SquareSplitHorizontalIcon, SquareSplitVerticalIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { StateGlyph } from "@/components/agent-glyph";
+import { StateGlyph, withWork } from "@/components/agent-glyph";
 import { TabErrorBadge } from "@/components/devtools-badge";
 import { BoardButton } from "@/components/art/board-buttons";
 import { DockButton } from "@/components/files/tree-dock";
@@ -322,7 +322,7 @@ export function TabButton({ tab, wsKey, tone, active, onActivate, onClose, onDra
       {offline ? (
         <CloudOffIcon className="size-3 shrink-0 text-muted-foreground" aria-label={`${c.kind === "terminal" ? c.box : "The box"} is offline`} />
       ) : lead.state && lead.state !== "idle" ? (
-        <StateGlyph state={lead.state} className="size-3" />
+        <StateGlyph state={lead.state} session={lead.s} noTip className="size-3" />
       ) : null}
       {/* Near the box's per-session memory limit (its chat says more). */}
       {!offline && memoryNote(lead.s?.usage) && <GaugeIcon data-testid="tab-memory" className="size-3 shrink-0 text-warning-foreground dark:text-warning" aria-label={`This session is ${memoryNote(lead.s?.usage)}`} />}
@@ -372,7 +372,7 @@ export function TabButton({ tab, wsKey, tone, active, onActivate, onClose, onDra
         {editing ? (
           tab$
         ) : (
-          <Tip label={tab.compare ? `Compare ${title}` : c.kind === "terminal" ? [title, secondary, c.session].filter(Boolean).join(" · ") : c.kind === "helper" ? `${title} · a helper's conversation, read-only` : undefined} side="bottom" align="start">
+          <Tip label={tab.compare ? `Compare ${title}` : c.kind === "terminal" ? withWork([title, secondary, c.session].filter(Boolean).join(" · "), lead.state, lead.s) : c.kind === "helper" ? `${title} · a helper's conversation, read-only` : undefined} side="bottom" align="start">
             {tab$}
           </Tip>
         )}
