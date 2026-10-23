@@ -221,7 +221,8 @@ func TestAQuestionStaysOpenWhileItsHelpersWorkOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	open("followed live", append(asked.Items, more.Items...))
+	// The live read sends the open question again, still open and last.
+	open("followed live", more.Items)
 	for _, c := range more.Crew {
 		if c.State != "finished" {
 			t.Fatalf("a helper not back: %+v", more.Crew)
