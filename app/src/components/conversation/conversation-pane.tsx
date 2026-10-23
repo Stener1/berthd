@@ -104,13 +104,14 @@ export function ConversationPane({ box, session, agent: remembered, visible, onS
   const formAsk = state === "waiting" && !!openQ;
   // The form this wait showed, by its call: answered in the record, the
   // box drops the wait a moment later, and no card stands in for it
-  // meanwhile. A wait the chat never showed a form for keeps its card.
-  const [shownForm, setShownForm] = useState<{ at?: string; tool: string }>();
+  // meanwhile. A wait the chat never showed a form for keeps its card. The
+  // pane can change session, so the form is this session's.
+  const [shownForm, setShownForm] = useState<{ key: string; at?: string; tool: string }>();
   const openTool = formAsk ? openQ?.tool : undefined;
   useEffect(() => {
-    if (openTool) setShownForm({ at: s?.state_since, tool: openTool });
-  }, [openTool, s?.state_since]);
-  const formDone = !!lastQ?.done && !!shownForm && shownForm.at === s?.state_since && shownForm.tool === lastQ.tool;
+    if (openTool) setShownForm({ key, at: s?.state_since, tool: openTool });
+  }, [key, openTool, s?.state_since]);
+  const formDone = !!lastQ?.done && shownForm?.key === key && shownForm.at === s?.state_since && shownForm.tool === lastQ.tool;
   // Prompts sent from here that the transcript doesn't show yet.
   // Each remembers the prompts like it the transcript already held, by ID:
   // the transcript is a sliding window, so a position in it doesn't last.
