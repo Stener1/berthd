@@ -4,8 +4,12 @@
 # their own state, tmux server and ports. `up` builds bin/, starts berthd
 # on 127.0.0.1:7544 and the agent on 9377/9378 (never 1377-1379), pairs
 # them as box "devq", adds a synthetic repo "acme-shop" and starts Claude
-# Code in its terminal there, session "ask". `env` prints what drive.mjs
-# and tmux need; `down` stops it all and deletes the state.
+# Code in its terminal there, session "ask" (VERIFY_DRIVER=claude: Claude
+# structured instead, as the app starts agents). `env` prints what
+# drive.mjs and tmux need; `restart [berthd]` starts the box again, every
+# conversation then read afresh, with another build if given (a main
+# checkout's bin/berthd, for a before); `down` stops it all and deletes
+# the state.
 # VERIFY_BOX_ADDR=<ip>:7544 (say, `tailscale ip -4`) has the box listen and
 # pair there instead: a box not on 127.0.0.1 is one the app treats as on
 # another computer, so a laptop path goes up through the agent.
@@ -23,6 +27,11 @@ lap_env=(BERTH_HOME="$dir/lap-home" BERTH_USER_DIR="$dir/lap-user" BERTH_UI_ADDR
 box() { env "${box_env[@]}" "$root/bin/berthd" "$@"; }
 lap() { env "${lap_env[@]}" "$root/bin/berth" "$@"; }
 tm() { env TMUX_TMPDIR="$dir/tmux" tmux -L berth "$@"; }
+serve() {
+  env "${box_env[@]}" nohup "$1" serve --listen "$addr" >"$dir/berthd.log" 2>&1 &
+  echo $! >"$dir/berthd.pid"
+  until grep -q "berthd serving" "$dir/berthd.log"; do sleep 0.5; done
+}
 
 case ${1:-} in
 up)
@@ -31,9 +40,7 @@ up)
   done
   mkdir -p "$dir"/{box-home,box-user,lap-home,lap-user,tmux} && chmod 700 "$dir/tmux"
   make -C "$root" build >/dev/null
-  env "${box_env[@]}" nohup "$root/bin/berthd" serve --listen "$addr" >"$dir/berthd.log" 2>&1 &
-  echo $! >"$dir/berthd.pid"
-  until grep -q "berthd serving" "$dir/berthd.log"; do sleep 0.5; done
+  serve "$root/bin/berthd"
   if grep -q "updated berth's hooks" "$dir/berthd.log"; then
     echo "the dev box rewrote agent hooks in $HOME (berthd.log): put them back before going on" >&2
     exit 1
@@ -49,11 +56,25 @@ up)
     git -C "$repo" add . && git -C "$repo" -c user.email=dev@acme.test -c user.name=acme commit -qm init
   fi
   box location add acme-shop "$repo" >/dev/null
-  box session new acme-shop --name ask -- claude --dangerously-skip-permissions >/dev/null
-  # A new folder asks to be trusted first.
-  sleep 8
-  tm send-keys -t ask Up && sleep 0.5 && tm send-keys -t ask Enter
+  if [[ ${VERIFY_DRIVER:-} == claude ]]; then
+    # Its chat is its stream: no screen of its own, no folder to trust.
+    curl -sf -X POST -H "Authorization: Bearer $token" -H 'content-type: application/json' \
+      http://127.0.0.1:9378/v1/boxes/devq/api/sessions -d '{"name":"ask","location":"acme-shop","agent":"claude","driver":"claude","mode":"bypassPermissions"}' >/dev/null
+  else
+    box session new acme-shop --name ask -- claude --dangerously-skip-permissions >/dev/null
+    # A new folder asks to be trusted first.
+    sleep 8
+    tm send-keys -t ask Up && sleep 0.5 && tm send-keys -t ask Enter
+  fi
   echo "up: box devq ($addr), agent http://127.0.0.1:9378, worktree devq/acme-shop, session ask"
+  ;;
+restart)
+  # berthd only: tmux, and the agents in it, keep running.
+  kill "$(cat "$dir/berthd.pid")"
+  while ss -ltn | grep -q ":7544 "; do sleep 0.2; done
+  bin=${2:-$root/bin/berthd}
+  serve "$bin"
+  echo "restarted: $bin"
   ;;
 env)
   # VERIFY_BERTH_TOKEN is a secret: export it, don't print it anywhere else.
@@ -70,7 +91,7 @@ down)
   echo "down: $dir removed"
   ;;
 *)
-  echo "usage: dev-box.sh up|env|down" >&2
+  echo "usage: dev-box.sh up|env|restart [berthd]|down" >&2
   exit 2
   ;;
 esac
