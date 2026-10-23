@@ -1,0 +1,72 @@
+{
+  "request_sha256": "5b3ea3b07024ce04546e4e07dcdd9e5fbe4cdef87f5da466c6b5efd8825f27fe",
+  "answer": {
+    "answers": {
+      "status": {
+        "type": "choice",
+        "choice": "working",
+        "probabilities": {
+          "blocked": 0,
+          "done": 0,
+          "idle": 0.01,
+          "needs_input": 0,
+          "parked": 0.04,
+          "ready_to_ship": 0,
+          "working": 0.95
+        },
+        "confidence": 0.94
+      }
+    },
+    "model": "typesafe-ai/jev",
+    "providerMetadata": {
+      "typesafe": {
+        "confidence": {
+          "status": 0.94
+        }
+      },
+      "gateway": {
+        "routing": {
+          "originalModelId": "typesafe-ai/jev",
+          "resolvedProvider": "typesafe-ai",
+          "fallbacksAvailable": [
+            "digitalocean"
+          ],
+          "planningReasoning": "System credentials planned for: typesafe-ai, digitalocean. Disallow prompt training requested: all 2 attempts disallow prompt training",
+          "canonicalSlug": "typesafe-ai/jev",
+          "finalProvider": "typesafe-ai",
+          "modelAttemptCount": 1,
+          "modelAttempts": [
+            {
+              "canonicalSlug": "typesafe-ai/jev",
+              "success": true,
+              "providerAttemptCount": 1,
+              "providerAttempts": [
+                {
+                  "provider": "typesafe-ai",
+                  "credentialType": "system",
+                  "success": true,
+                  "startTime": 1792668574441,
+                  "endTime": 1792668574631,
+                  "statusCode": 200
+                }
+              ]
+            }
+          ],
+          "totalProviderAttemptCount": 1
+        },
+        "cost": "0.000057036",
+        "marketCost": "0.000057036",
+        "surchargeCost": "0",
+        "gatewayCost": "0.000057036",
+        "inferenceCost": "0.000057036",
+        "inputInferenceCost": "0.000057036",
+        "outputInferenceCost": "0",
+        "generationId": "gen_01M5HNZ8PFWPKA6MWH46291TFZ"
+      }
+    },
+    "usage": {
+      "inputTokens": 1358,
+      "outputTokens": 70
+    }
+  }
+}

@@ -22,6 +22,11 @@ var Claude = register(&Adapter{
 			// No hook fires when a permission is granted, but the tool it
 			// allowed then runs: the agent is working again.
 			d["signal"] = "tool"
+			// A helper's (subagent's) tool says whose it is: one left
+			// working in the background goes on after the turn ends.
+			if in.Str("agent_id") != "" {
+				d["helper"] = true
+			}
 			return Started, d, true
 		case "PermissionRequest":
 			d["reason"] = "permission"
