@@ -16,8 +16,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
 import type { SessionEntry } from "@/hooks/use-agent-counts";
 import { boxApi } from "@/lib/api";
+import { planArchive, type WorktreeTarget } from "@/lib/archive-after-stop";
 import { agentOf, type SessionState } from "@/lib/derive";
 import { plainError } from "@/lib/errors";
+import { errorMessage } from "@/lib/format";
+import { removeWorktreeOnBox } from "@/lib/remove-worktree";
+import { removalKey } from "@/lib/removing";
 import { load, save } from "@/lib/storage";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -28,6 +32,7 @@ import { type AgentNames, describeAgent, startedAt } from "@/views/dashboard/nam
 // column, or the ones that have sat idle. Stopping ends the agent's session
 // on its box; its worktree and files stay, so another agent can pick up
 // there. Nothing working or waiting on you is stopped unless you picked it.
+// The bulk dialog can also archive their worktrees after, where it's safe.
 
 export const entryKey = (e: SessionEntry) => `${e.box}/${e.session.name}`;
 const sinceOf = (e: SessionEntry) => new Date(e.session.state_since ?? e.session.created).getTime();
@@ -58,25 +63,86 @@ interface Progress {
   message?: string;
 }
 
-// stopAgents stops several, CONCURRENCY at a time, and reports each.
-async function stopAgents(entries: SessionEntry[], onEach: (key: string, p: Progress) => void): Promise<number> {
+// stopAgents stops several, CONCURRENCY at a time, reports each, and
+// answers with the keys that stopped.
+async function stopAgents(entries: SessionEntry[], onEach: (key: string, p: Progress) => void): Promise<Set<string>> {
   const queue = [...entries];
-  let failed = 0;
+  const stopped = new Set<string>();
   const worker = async () => {
     for (let e = queue.shift(); e; e = queue.shift()) {
       const key = entryKey(e);
       onEach(key, { state: "running" });
       try {
         await stopOne(e.box, e.session.name);
+        stopped.add(key);
         onEach(key, { state: "ok" });
       } catch (err) {
-        failed++;
         onEach(key, { state: "failed", message: plainError(err) });
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, worker));
-  return failed;
+  return stopped;
+}
+
+// What happened to a stopped agent's worktree when the dialog archived.
+interface WorktreeOutcome {
+  state: "running" | "archived" | "archiving" | "kept" | "failed";
+  message: string;
+}
+
+// keepsWork is git refusing, in its own words, to lose uncommitted work.
+const keepsWork = (err: unknown) => /modified|untracked|uncommitted|contains/i.test(errorMessage(err));
+
+const leftAsItWas = (o?: WorktreeOutcome) => o?.state === "kept" || o?.state === "failed";
+
+// archiveStopped archives the stopped rows' worktrees the way the sidebar's
+// Archive… does: the archive script runs, the branch is kept, and git
+// refuses to lose uncommitted work. One at a time on each box, as removals
+// go; the boxes side by side. It answers with each worktree's outcome.
+async function archiveStopped(rows: Row[], stopped: Set<string>, onEach: (wtKey: string, o: WorktreeOutcome) => void): Promise<Record<string, WorktreeOutcome>> {
+  const out: Record<string, WorktreeOutcome> = {};
+  const report = (key: string, o: WorktreeOutcome) => {
+    out[key] = o;
+    onEach(key, o);
+  };
+  const { client } = useStore.getState();
+  // The boxes' own listing, fresh, so an agent started a moment ago counts.
+  // A box that doesn't answer keeps its worktrees: nothing says they're free.
+  const candidates = [...new Set(rows.filter((r) => r.names.where && !r.names.where.worktree.main).map((r) => r.entry.box))];
+  const listed = await Promise.all(candidates.map(async (box) => ({ box, sessions: client ? await boxApi.sessions(client, box).catch(() => undefined) : undefined })));
+  const live = listed.flatMap(({ box, sessions }) => (sessions ?? []).filter((s) => !s.exited && agentOf(s)).map((s) => ({ box, dir: s.dir, name: s.name })));
+  const plan = planArchive(
+    rows.map((r) => ({ key: r.key, box: r.entry.box, where: r.names.where && { location: r.names.where.location.name, worktree: r.names.where.worktree } })),
+    stopped,
+    live,
+    new Set(listed.filter((l) => !l.sessions).map((l) => l.box)),
+  );
+  for (const k of plan.kept) report(k.key, { state: "kept", message: `Kept: ${k.why}` });
+  const archiveOne = async (w: WorktreeTarget) => {
+    report(w.key, { state: "running", message: "Archiving…" });
+    try {
+      if (!client) throw new Error("Not connected to the laptop agent");
+      const res = await removeWorktreeOnBox(client, w.box, w.location, w.wt, "archive");
+      report(w.key, res.archive ? { state: "archiving", message: "Archiving: its archive script runs, then it goes" } : { state: "archived", message: "Archived; its branch is kept" });
+    } catch (err) {
+      report(w.key, keepsWork(err) ? { state: "kept", message: "Kept: uncommitted changes" } : { state: "failed", message: `Couldn't archive: ${plainError(err)}` });
+    }
+  };
+  const boxesOf = [...new Set(plan.archive.map((w) => w.box))];
+  await Promise.all(
+    boxesOf.map(async (box) => {
+      for (const w of plan.archive.filter((x) => x.box === box)) await archiveOne(w);
+    }),
+  );
+  return out;
+}
+
+// archiveSummary is " · archived 2 worktrees" (or archiving, while a script
+// runs), for the toast and the done title alike.
+function archiveSummary(outcomes: WorktreeOutcome[]) {
+  const gone = outcomes.filter((o) => o.state === "archived" || o.state === "archiving");
+  return gone.length ? ` · ${gone.some((o) => o.state === "archiving") ? "archiving" : "archived"} ${plural(gone.length, "worktree")}` : "";
 }
 
 function namesOf(e: SessionEntry): AgentNames {
@@ -196,6 +262,8 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
   const overFor = (a: After) => new Set(rows.filter((r) => !r.entry.session.parked && r.idle > AFTER.find((x) => x.value === a)!.ms).map((r) => r.key));
   const [ticked, setTicked] = useState<Set<string>>(() => (cleanup ? overFor(after) : new Set(rows.map((r) => r.key))));
   const [progress, setProgress] = useState<Record<string, Progress>>({});
+  const [archive, setArchive] = useState(() => load("berth.dashboard.stopArchives", false));
+  const [outcomes, setOutcomes] = useState<Record<string, WorktreeOutcome>>({});
   const [phase, setPhase] = useState<"confirm" | "running" | "done">("confirm");
   const cancel = useRef<HTMLButtonElement>(null);
 
@@ -203,6 +271,10 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
   const busyCount = chosen.filter((r) => busy(r.entry.state)).length;
   const ok = rows.filter((r) => progress[r.key]?.state === "ok").length;
   const failed = rows.filter((r) => progress[r.key]?.state === "failed");
+  // The box shows only when there is a worktree to archive.
+  const canArchive = chosen.some((r) => r.names.where && !r.names.where.worktree.main);
+  const archiving = archive && canArchive;
+  const outcomeOf = (r: Row) => (r.names.where ? outcomes[removalKey(r.entry.box, r.names.where.worktree.path)] : undefined);
   const boxes = [...new Set(rows.map((r) => r.entry.box))].sort();
   const toggle = (key: string, on: boolean) =>
     setTicked((s) => {
@@ -216,20 +288,29 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
     const targets = chosen.map((r) => r.entry);
     setPhase("running");
     onRunning(true);
-    const failures = await stopAgents(targets, (key, p) => setProgress((s) => ({ ...s, [key]: p })));
+    const stopped = await stopAgents(targets, (key, p) => setProgress((s) => ({ ...s, [key]: p })));
+    const found = archiving ? Object.values(await archiveStopped(chosen, stopped, (key, o) => setOutcomes((s) => ({ ...s, [key]: o })))) : [];
     onRunning(false);
-    if (failures) {
+    if (stopped.size < targets.length || found.some(leftAsItWas)) {
       setPhase("done");
       return;
     }
     const perBox = [...new Set(targets.map((t) => t.box))].map((b) => `${targets.filter((t) => t.box === b).length} on ${b}`);
-    toastManager.add({ title: `Stopped ${plural(targets.length, "agent")}`, description: `${perBox.join(", ")}. Their worktrees are kept.`, type: "success" });
+    toastManager.add({
+      title: `Stopped ${plural(targets.length, "agent")}${archiveSummary(found)}`,
+      description: `${perBox.join(", ")}. ${found.length ? "Their branches are kept." : "Their worktrees are kept."}`,
+      type: "success",
+    });
     onClose();
   };
 
+  const summary = archiveSummary(Object.values(outcomes));
+
   const title =
     phase === "done"
-      ? `Stopped ${ok} of ${ok + failed.length}`
+      ? failed.length
+        ? `Stopped ${ok} of ${ok + failed.length}${summary}`
+        : `Stopped ${plural(ok, "agent")}${summary}`
       : cleanup
         ? "Clean up idle agents"
         : req.column
@@ -237,10 +318,10 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
           : `Stop ${plural(chosen.length, "agent")}?`;
   const description =
     phase === "done"
-      ? "The rest were left running. Each one says why below."
+      ? `${failed.length ? "The rest were left running. " : ""}${Object.values(outcomes).some(leftAsItWas) ? "Some worktrees were kept as they are. " : ""}Each one says why below.`
       : cleanup
-        ? "Stops agents in Done and Ready that have sat idle for a while. Working agents and ones waiting on you are left alone. Worktrees and their files are kept."
-        : `Each one's session ends on its box; its worktree and files are kept.${busyCount ? ` ${busyCount === 1 ? "One is" : `${busyCount} are`} still working or waiting on you, and ${busyCount === 1 ? "its turn ends" : "their turns end"} too.` : ""}`;
+        ? `Stops agents in Done and Ready that have sat idle for a while. Working agents and ones waiting on you are left alone. ${archiving ? "Their worktrees are archived where it's safe; branches are kept." : "Worktrees and their files are kept."}`
+        : `Each one's session ends on its box; ${archiving ? "then its worktree is archived where it's safe, and its branch is kept." : "its worktree and files are kept."}${busyCount ? ` ${busyCount === 1 ? "One is" : `${busyCount} are`} still working or waiting on you, and ${busyCount === 1 ? "its turn ends" : "their turns end"} too.` : ""}`;
 
   return (
     // The keyboard starts on Cancel: Enter right after ⌫ or a menu item must
@@ -281,7 +362,7 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
               </div>
               <ul className="divide-y divide-border/60">
                 {group.map((r) => (
-                  <StopRow key={r.key} row={r} ticked={ticked.has(r.key)} progress={progress[r.key]} locked={phase !== "confirm"} cleanup={cleanup} onToggle={(on) => toggle(r.key, on)} />
+                  <StopRow key={r.key} row={r} ticked={ticked.has(r.key)} progress={progress[r.key]} outcome={outcomeOf(r)} locked={phase !== "confirm"} cleanup={cleanup} onToggle={(on) => toggle(r.key, on)} />
                 ))}
               </ul>
             </div>
@@ -293,6 +374,23 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
         <p className="mx-6 mt-2 text-muted-foreground text-meta">
           {chosen.length ? `${plural(chosen.length, "agent")} of ${rows.length} picked.` : `None idle that long.`} Tick or untick any of them.
         </p>
+      )}
+
+      {phase === "confirm" && canArchive && (
+        <label className="mx-6 mt-3 flex cursor-pointer items-start gap-2.5 text-body">
+          <Checkbox
+            className="mt-0.5"
+            checked={archive}
+            onCheckedChange={(v) => {
+              setArchive(v === true);
+              save("berth.dashboard.stopArchives", v === true);
+            }}
+          />
+          <span>
+            Archive their worktrees where it's safe
+            <span className="block text-muted-foreground text-meta">The archive script runs and branches are kept. One with uncommitted changes, or another agent still in it, stays as it is.</span>
+          </span>
+        </label>
       )}
 
       <AlertDialogFooter>
@@ -314,16 +412,19 @@ function Body({ req, onRunning, onClose }: { req: StopRequest; onRunning(r: bool
   );
 }
 
-function StopRow({ row, ticked, progress, locked, cleanup, onToggle }: { row: Row; ticked: boolean; progress?: Progress; locked: boolean; cleanup: boolean; onToggle(on: boolean): void }) {
+function StopRow({ row, ticked, progress, outcome, locked, cleanup, onToggle }: { row: Row; ticked: boolean; progress?: Progress; outcome?: WorktreeOutcome; locked: boolean; cleanup: boolean; onToggle(on: boolean): void }) {
   const { entry, names } = row;
   const state = entry.state;
+  const stopped = progress?.state === "ok";
   return (
     <li>
       <label className={cn("flex items-center gap-2.5 px-3 py-1.5 text-body", !locked && "cursor-pointer hover:bg-accent/50", !ticked && "text-muted-foreground")}>
         <span className="flex w-4 shrink-0 justify-center">
-          {progress?.state === "running" ? (
+          {progress?.state === "running" || (stopped && outcome?.state === "running") ? (
             <Spinner className="size-3.5" />
-          ) : progress?.state === "ok" ? (
+          ) : stopped && leftAsItWas(outcome) ? (
+            <AlertTriangleIcon className="size-3.5 text-warning-foreground" />
+          ) : stopped ? (
             <CheckIcon className="size-3.5 text-success" />
           ) : progress?.state === "failed" ? (
             <XIcon className="size-3.5 text-destructive-foreground" />
@@ -339,6 +440,10 @@ function StopRow({ row, ticked, progress, locked, cleanup, onToggle }: { row: Ro
           </span>
           {progress?.state === "failed" ? (
             <span className="block whitespace-normal break-words text-destructive-foreground text-meta">{progress.message}</span>
+          ) : stopped && outcome ? (
+            <span className={cn("block whitespace-normal break-words text-meta", leftAsItWas(outcome) ? "text-warning-foreground" : "text-muted-foreground")}>Stopped · {outcome.message}</span>
+          ) : stopped ? (
+            <span className="block truncate text-meta text-muted-foreground">Stopped</span>
           ) : (
             <span className="block truncate text-meta text-muted-foreground">
               {[entry.session.parked && "parked", names.where?.location.name, names.crowded && `started ${startedAt(entry.session.created)}`, names.where?.worktree.branch].filter(Boolean).join(" · ")}
