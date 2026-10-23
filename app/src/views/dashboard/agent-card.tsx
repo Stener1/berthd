@@ -232,9 +232,14 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
         {plan && <Pills pills={plan.pills} live={state === "running"} />}
 
         {doing && (
-          <Tip label={doing.tip} wrapClassName="mt-2 flex">
-            <Now {...doing} now={now} />
-          </Tip>
+          // Its own box holds the spacing: a Tip without a label is just its child.
+          <div className="mt-2.5 flex min-w-0 pl-7">
+            <Tip label={doing.tip}>
+              <span className="flex min-w-0 flex-1">
+                <Now {...doing} now={now} />
+              </span>
+            </Tip>
+          </div>
         )}
 
         {prompt && !run && (!work || !prompt.startsWith(work.replace(/…$/, ""))) && (
@@ -245,7 +250,7 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
 
         <Springy>
           {steps.length > 0 && (
-            <ul aria-label="Steps" className="mt-1">
+            <ul aria-label="Steps" className="mt-1.5 pl-7">
               <AnimatePresence initial={false}>
                 {steps.map((s) => (
                   <StepRow key={s.id} step={s} />
@@ -330,34 +335,31 @@ function AgentMark({ agent, state }: { agent?: string; state: SessionEntry["stat
   );
 }
 
-// Now is what the agent does now, under its title: an icon and the words,
-// rolling in from below when they change, with the step's own clock. An
-// approval it waits on is tinted blue, a finished turn green.
+// Now is what the agent does now, in the column under its title: an icon
+// and the words, rolling in from below when they change, with the step's
+// own clock. An approval it waits on is tinted blue, a finished turn green.
 function Now({ text, icon: Icon, tone, since, now }: { text: string; icon: LucideIcon; tone?: "info" | "success"; since?: number; now: number }) {
   const reduce = useReducedMotion();
   return (
     <span
       data-testid="card-now"
       data-status={tone === "info" ? "waiting" : tone === "success" ? "done" : "active"}
-      className={cn("-mx-1.5 relative flex h-6 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-1.5 text-desc", tone === "info" ? "bg-info/10 text-info-foreground" : "text-foreground/85")}
+      className={cn("relative flex h-6 min-w-0 flex-1 items-center overflow-hidden rounded-md text-desc", tone === "info" ? "bg-info/10 px-2 text-info-foreground" : "text-foreground/85")}
     >
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={text}
-          className="flex min-w-0 flex-1 items-center gap-2"
+          className="flex min-w-0 flex-1 items-center gap-1.5"
           initial={reduce ? false : { y: "100%", opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={reduce ? undefined : { y: "-100%", opacity: 0 }}
           transition={SPRING}
         >
-          {/* In the mark's column, so the words line up with the title. */}
-          <span className="inline-flex w-5 shrink-0 justify-center">
-            <Icon className={cn("size-3.5", tone === "info" ? "text-info" : tone === "success" ? "text-success" : "text-muted-foreground")} aria-hidden />
-          </span>
+          <Icon className={cn("size-3.5 shrink-0", tone === "info" ? "text-info" : tone === "success" ? "text-success" : "text-muted-foreground")} aria-hidden />
           <span className={cn("min-w-0 truncate", !tone && "cv-shimmer")}>{text}</span>
         </motion.span>
       </AnimatePresence>
-      {since !== undefined && <span className="shrink-0 font-mono text-tag text-muted-foreground tabular-nums">{duration(now - since)}</span>}
+      {since !== undefined && <span className="ml-2 shrink-0 font-mono text-tag text-muted-foreground tabular-nums">{duration(now - since)}</span>}
     </span>
   );
 }
@@ -416,11 +418,9 @@ function StepRow({ step }: { step: RunStep }) {
       exit={reduce ? undefined : { opacity: 0 }}
       transition={SPRING}
       data-status={step.status}
-      className="flex h-5 items-center gap-2 text-muted-foreground text-tag"
+      className="flex h-5 items-center gap-1.5 text-muted-foreground text-tag"
     >
-      <span className="inline-flex w-5 shrink-0 justify-center" aria-hidden>
-        <CheckIcon className="size-2.5 opacity-70" strokeWidth={2.5} />
-      </span>
+      <CheckIcon className="size-2.5 shrink-0 opacity-70" strokeWidth={2.5} aria-hidden />
       <span className="min-w-0 flex-1 truncate">{step.label}</span>
       {step.ms !== undefined && <span className="shrink-0 font-mono tabular-nums opacity-80">{stepTime(step.ms)}</span>}
     </motion.li>
