@@ -47,11 +47,15 @@ function log() {
   if (all.length !== 1) throw new Error(`expected one conversation log under ${dir}, found ${all.length}`);
   return (path = all[0]);
 }
-// Its entries, each with the byte offset its line starts at.
+// Its entries, each with the byte offset its line starts at. The host
+// appends as it goes: the last line, unless the file ends with one, isn't
+// whole yet.
 function entries() {
   const out = [];
   let off = 0;
-  for (const l of readFileSync(log(), "utf8").split("\n")) {
+  const lines = readFileSync(log(), "utf8").split("\n");
+  lines.pop();
+  for (const l of lines) {
     if (l) out.push({ off, ...JSON.parse(l) });
     off += Buffer.byteLength(l) + 1;
   }
@@ -74,13 +78,14 @@ function seedFiles() {
 }
 
 // Where the last question's line starts, as bytes from the log's end, and
-// how many helpers are back since.
-function sinceAsked() {
+// how many helpers are back since the prompt (its byte offset, `from`): one
+// can be back before the question is.
+function sinceAsked(from) {
   let at = -1;
   let back = 0;
   for (const e of entries()) {
-    if (e.data?.type === "control_request" && e.data.request?.tool_name === "AskUserQuestion") [at, back] = [e.off, 0];
-    else if (at >= 0 && e.data?.type === "system" && e.data.subtype === "task_notification") back++;
+    if (e.data?.type === "control_request" && e.data.request?.tool_name === "AskUserQuestion") at = e.off;
+    else if (e.off >= from && e.data?.type === "system" && e.data.subtype === "task_notification") back++;
   }
   return { behind: at < 0 ? 0 : statSync(log()).size - at, back };
 }
@@ -113,6 +118,11 @@ export async function run({ page, shot, step, expect, call }) {
         `Right after launching them, without waiting for them, call the AskUserQuestion tool once with exactly this input JSON: ${JSON.stringify(QUESTIONS)}. ` +
         "After I answer, repeat my answers back in one line and stop. Do nothing else.",
     );
+    // A new session has no log until its first prompt.
+    let from = 0;
+    try {
+      from = statSync(log()).size;
+    } catch {}
     await reply.press("Enter");
     step("the question waits");
     await expect.poll(async () => (await call("/v1/boxes/devq/api/sessions")).find((s) => s.name === "ask")?.ask?.tool ?? "", { timeout: 240_000 }).toBe("AskUserQuestion");
@@ -122,7 +132,7 @@ export async function run({ page, shot, step, expect, call }) {
     await expect
       .poll(
         () => {
-          const now = sinceAsked();
+          const now = sinceAsked(from);
           behind = now.behind;
           return now.back;
         },

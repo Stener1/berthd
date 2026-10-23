@@ -35,9 +35,9 @@ node .claude/skills/verify-berthd/scripts/drive.mjs chat-ask-card --port $PORT -
 ```
 
   It drives `/rc`, a switch to bypass, a turn that ends asking which of two numbered items to fix (it waits for `soft_wait: true` on the session), then `/rc` and a switch to **Ask before edits** during that wait, asserting no "Needs your answer" and no Yes button each time. Then a `touch` that asks permission (the card, then Allow) and AskUserQuestion (the form, then Esc). Second view: the box's own API through the agent (`call`): `sessions` (`agent_state`, `soft_wait`, `ask.tool`), `sessions/ask/screen` and `/controls`.
-- `structured-form` and `structured-reply` on a real box: `scenarios/chat-structured-ask-live.mjs`, on a dev box whose agent runs structured. A phase asks (four helpers read ~6 MB in the background while the question waits, about two minutes), the box starts again so the chat reads the log afresh, and a phase looks, expecting `form`, `reply` or (for a before on an older build) `locked`:
+- `structured-form` and `structured-reply` on a real box: `scenarios/chat-structured-ask-live.mjs`, on a dev box whose agent runs structured. A phase asks (four helpers read ~6 MB in the background while the question waits, about two minutes), the box starts again so the chat reads the log afresh, and a phase looks, expecting `form`, `reply` or (for a before on an older build) `locked`. In bash, for its arrays:
 
-```sh
+```bash
 VERIFY_DRIVER=claude .claude/skills/verify-berthd/scripts/dev-box.sh up
 eval "$(.claude/skills/verify-berthd/scripts/dev-box.sh env)"
 S=chat-structured-ask-live; A=(--port $PORT --agent http://127.0.0.1:9378)

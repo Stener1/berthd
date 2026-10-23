@@ -25,8 +25,15 @@ lap() { env "${lap_env[@]}" "$root/bin/berth" "$@"; }
 tm() { env TMUX_TMPDIR="$dir/tmux" tmux -L berth "$@"; }
 serve() {
   env "${box_env[@]}" nohup "$1" serve --listen 127.0.0.1:7544 >"$dir/berthd.log" 2>&1 &
-  echo $! >"$dir/berthd.pid"
-  until grep -q "berthd serving" "$dir/berthd.log"; do sleep 0.5; done
+  local pid=$!
+  echo $pid >"$dir/berthd.pid"
+  for _ in $(seq 120); do
+    grep -q "berthd serving" "$dir/berthd.log" && return
+    kill -0 $pid 2>/dev/null || { echo "berthd exited before it served: $dir/berthd.log" >&2; exit 1; }
+    sleep 0.5
+  done
+  echo "berthd isn't serving after a minute: $dir/berthd.log" >&2
+  exit 1
 }
 
 case ${1:-} in
@@ -66,9 +73,14 @@ up)
   ;;
 restart)
   # berthd only: tmux, and the agents in it, keep running.
-  kill "$(cat "$dir/berthd.pid")"
-  while ss -ltn | grep -q ":7544 "; do sleep 0.2; done
   bin=${2:-$root/bin/berthd}
+  [[ -x $bin ]] || { echo "no berthd at $bin" >&2; exit 1; }
+  # Until it has exited, not just let go of the port: its cleanup on the
+  # way out would take the new one's socket.
+  pid=$(cat "$dir/berthd.pid")
+  kill "$pid"
+  for _ in $(seq 150); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+  if kill -0 "$pid" 2>/dev/null; then echo "berthd ($pid) is still running after 30 s" >&2; exit 1; fi
   serve "$bin"
   echo "restarted: $bin"
   ;;
