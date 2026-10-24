@@ -50,6 +50,11 @@ if (typeof window !== "undefined" && new URLSearchParams(window.location.search)
       }),
     clear: (box: string, session: string) => showDraft(keyOf(box, session), undefined),
   };
+  // A scripted turn played into an agent already at work, so its steps
+  // arrive one by one as a real turn's do (the dashboard's live cards).
+  (window as unknown as { __berthTurn: unknown }).__berthTurn = {
+    play: (box: string, session: string, prompt: string) => playTurn(box, session, prompt),
+  };
   // An agent's crew: helpers started `ago` seconds back, and back `back`
   // seconds ago once finished.
   type Hired = Omit<CrewMember, "since" | "until" | "kind" | "agent"> & { kind?: CrewMember["kind"]; ago: number; back?: number };

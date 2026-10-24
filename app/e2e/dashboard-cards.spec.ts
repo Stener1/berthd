@@ -49,6 +49,34 @@ test("a working agent's card says its step now, its model and task progress, and
   await expect(c.getByTestId("card-timer")).toBeVisible();
 });
 
+test("a working card keeps its height while its steps roll by", async ({ app }) => {
+  mockOnly("plays a scripted turn into a mock agent");
+  await open(app);
+  const c = card(app, "Tune the judge prompt");
+  await expect(c).toContainText("Step 4 of 6");
+  // A turn played into it: its log empties, fills, then rolls.
+  await app.page.evaluate(() => {
+    void (window as unknown as { __berthTurn: { play(b: string, s: string, p: string): Promise<void> } }).__berthTurn.play("gpu", "judge-v2-claude", "Rerun the hard set");
+  });
+  const samples = await c.evaluate(async (el) => {
+    const out: { h: number; rows: number }[] = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < 10_000) {
+      out.push({ h: el.getBoundingClientRect().height, rows: el.querySelectorAll("ul[aria-label=Steps] li").length });
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    return out;
+  });
+  const emptied = samples.findIndex((x) => x.rows < 3);
+  const full = samples.findIndex((x, i) => i > emptied && x.rows >= 3);
+  expect(emptied, "the played turn reached the card").toBeGreaterThanOrEqual(0);
+  expect(full, "its log filled again").toBeGreaterThan(emptied);
+  const after = samples.slice(full);
+  // Never an extra row on its way out, so never a bump in the card.
+  expect(Math.max(...after.map((x) => x.rows))).toBe(3);
+  expect(Math.max(...after.map((x) => x.h))).toBeLessThanOrEqual(after[after.length - 1].h + 1);
+});
+
 test("an approval puts Approve and Deny where the card's controls were, and Approve answers", async ({ app }) => {
   mockOnly("the approval is a mock fixture");
   await open(app);

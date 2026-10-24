@@ -379,7 +379,9 @@ function Springy({ children }: { children: ReactNode }) {
 }
 
 // StepRow is a step it took this turn, quiet beside what it does now: in
-// the past tense, with how long it took.
+// the past tense, with how long it took. A new one fades in; the one it
+// pushes off the top leaves at once, so a full log never holds an extra
+// row for a moment and the card keeps its height as steps roll by.
 function StepRow({ step }: { step: RunStep }) {
   const reduce = useReducedMotion();
   return (
@@ -387,7 +389,6 @@ function StepRow({ step }: { step: RunStep }) {
       layout={reduce ? false : "position"}
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={reduce ? undefined : { opacity: 0 }}
       transition={SPRING}
       data-status={step.status}
       className="flex h-5 items-center gap-1.5 text-muted-foreground text-tag"
