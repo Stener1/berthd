@@ -20,7 +20,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 | Questions in chat: an agent's form of questions as a card, answered on a real box; kept with Retry and Copy when it can't be | [chat-questions.md](chat-questions.md) | `chat-questions-live` (a real box, `--agent`); `app/e2e/chat.spec.ts` on the mock |
 | Chat and board: no question card or answers but the options the agent's screen shows; the mode menu while turn check waits | [chat-ask-card.md](chat-ask-card.md) | `chat-ask-card` (a real box, `--agent`); `app/e2e/ask-card.spec.ts` on a stand-in box |
 | Turn check's "working": an hourglass with why in the sidebar, the tab and the rail's card, not a live turn's spinner; a handoff reads as done | [turn-check-indicator.md](turn-check-indicator.md) | `turn-check-indicator`; `app/e2e/sidebar-turn-check.spec.ts` asserts it, `TestTurnCheckLive` asks the real provider |
-| The Agent Dashboard's live status cards (a switch in Settings › Agents, off by default): the step now and its clock, model, Step N of M with its pills, this turn's timed steps; Pause and Stop, Approve and Deny, Done in … | [dashboard-cards.md](dashboard-cards.md) | `dashboard-status-cards`; `app/e2e/dashboard-cards.spec.ts` asserts it |
+| The Agent Dashboard's live status cards (a switch in Settings › Agents, off by default): the step now and its clock, model, Step N of M with its pills, this turn's timed steps; Pause and Stop, Approve and Deny, Done in …; the same card for plugins | [dashboard-cards.md](dashboard-cards.md) | `dashboard-status-cards`, `plugin-status-card` (as a plugin's `AgentStatusCard`); `app/e2e/dashboard-cards.spec.ts`, `plugin-status-card.spec.ts` assert it |
 
 ## Proof and skip reporting
 

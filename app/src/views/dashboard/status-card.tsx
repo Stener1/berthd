@@ -67,7 +67,33 @@ const STEP_ICONS: Record<StepKind, LucideIcon> = {
 // it is, the steps it took this turn, and what you can do about it (pause
 // or stop it, approve what it asks, open it). While the board is selecting
 // (or with ⌘ or ⇧ held), a click picks it instead.
-export function StatusCard({ entry, selecting, selected, onSelect }: { entry: SessionEntry; selecting?: boolean; selected?: boolean; onSelect?(): void }) {
+// What a plugin can add to the card (AgentStatusCard in @berth/plugin/ui):
+// its own name for it, a mark before that, lines of its own under where it
+// works, buttons after the card's own, what opening it does, and a ring
+// when it stands out.
+export interface CardExtras {
+  title?: ReactNode;
+  mark?: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  onOpen?(): void;
+  highlighted?: boolean;
+  className?: string;
+}
+
+export function StatusCard({
+  entry,
+  selecting,
+  selected,
+  onSelect,
+  title: named,
+  mark,
+  children,
+  actions,
+  onOpen,
+  highlighted,
+  className,
+}: { entry: SessionEntry; selecting?: boolean; selected?: boolean; onSelect?(): void } & CardExtras) {
   const { box, session, state } = entry;
   const locations = useStore((s) => s.boxes[box]?.locations);
   const sessions = useStore((s) => s.boxes[box]?.sessions);
@@ -89,7 +115,7 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const open = () => void focusSession(box, session.name);
+  const open = onOpen ?? (() => void focusSession(box, session.name));
   const waiting = atQuestion(session, state);
   // A structured session offers its answers with its ask; a terminal's are
   // on its screen.
@@ -143,6 +169,8 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
         // Waiting is said by the whole outline, never a stripe down one side.
         state === "waiting" && "border-warning/45 hover:border-warning/70",
         selected && "border-primary/60 ring-1 ring-primary/30 hover:border-primary/60",
+        highlighted && "ring-2 ring-info/40",
+        className,
       )}
     >
       <div className="px-3 pt-2.5">
@@ -150,7 +178,8 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
           {selecting && <Checkbox checked={!!selected} tabIndex={-1} aria-hidden className="pointer-events-none" />}
           <AgentMark agent={agentOf(session)} state={onItsWork || parked ? "ready" : state} />
           <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-            <span className="min-w-0 truncate text-row">{title}</span>
+            {mark && <span className="shrink-0">{mark}</span>}
+            <span className="min-w-0 truncate text-row">{named ?? title}</span>
             {/* Several agents in one worktree: which one this is. */}
             {!work && crowded && (
               <Tip label={`Session ${session.name}`}>
@@ -200,6 +229,8 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
           </span>
           {progress && <span className="shrink-0 tabular-nums">{progress}</span>}
         </div>
+
+        {children && <div className="mt-1 pl-7 text-meta text-muted-foreground">{children}</div>}
 
         {plan && <Pills pills={plan.pills} live={state === "running"} />}
 
@@ -275,6 +306,7 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
               </PillButton>
             </>
           ) : null)}
+        {!selecting && actions}
         <button type="button" onClick={open} className="-mr-1 ml-auto inline-flex h-6 items-center gap-0.5 rounded-md px-1.5 text-muted-foreground text-tag outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           Open run
           <ArrowUpRightIcon className="size-3" aria-hidden />
