@@ -22,7 +22,9 @@ export function useCardRun(entry: SessionEntry, card: RefObject<HTMLElement | nu
   const key = keyOf(box, session.name);
   const shown = useOnScreen(card);
   const live = state === "running" || state === "waiting" || state === "finished";
-  useTranscriptFeed(box, session.name, session.dir, live && shown && !mock);
+  // A working agent's card follows it as its chat does; one that waits or
+  // is done reads on its events, and only every 30s besides.
+  useTranscriptFeed(box, session.name, session.dir, live && shown && !mock, 0, state === "running" ? undefined : 30_000);
   const locations = useStore((s) => s.boxes[box]?.locations);
 
   // The demo makes up the same conversation its chat would.

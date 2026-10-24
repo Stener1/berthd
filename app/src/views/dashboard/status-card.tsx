@@ -17,7 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
 import { openOrchestrate, SessionActions } from "@/components/orchestrate/session-actions";
@@ -220,7 +220,7 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
           </div>
         )}
 
-        <Springy>
+        <div>
           {steps.length > 0 && (
             <ul aria-label="Steps" className="mt-1.5 pl-7">
               <AnimatePresence initial={false}>
@@ -240,7 +240,7 @@ export function StatusCard({ entry, selecting, selected, onSelect }: { entry: Se
             </div>
           )}
           {asking && <Answers box={box} session={session.name} choices={choices} />}
-        </Springy>
+        </div>
       </div>
 
       <footer className="mt-2.5 flex h-9 items-center gap-1.5 border-t px-2.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
@@ -328,7 +328,9 @@ function Now({ text, icon: Icon, tone, since, now }: { text: string; icon: Lucid
           transition={SPRING}
         >
           <Icon className={cn("size-3.5 shrink-0", tone === "info" ? "text-info" : tone === "success" ? "text-success" : "text-muted-foreground")} aria-hidden />
-          <span className={cn("min-w-0 truncate", !tone && "cv-shimmer")}>{text}</span>
+          {/* No shimmer: it repaints the line every frame, on every working
+              card, and the turning ring already says it is at work. */}
+          <span className="min-w-0 truncate">{text}</span>
         </motion.span>
       </AnimatePresence>
       {since !== undefined && <span className="ml-2 shrink-0 font-mono text-tag text-muted-foreground tabular-nums">{duration(now - since)}</span>}
@@ -354,35 +356,13 @@ function Pills({ pills, live }: { pills: Pill[]; live: boolean }) {
   );
 }
 
-// Springy grows and shrinks with what it holds on a spring, so a step
-// arriving in the log eases the card taller instead of jumping it.
-function Springy({ children }: { children: ReactNode }) {
-  const inner = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState<number>();
-  const reduce = useReducedMotion();
-  useLayoutEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    setHeight(el.offsetHeight);
-    const ro = new ResizeObserver(() => setHeight(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  return (
-    <motion.div className="overflow-hidden" initial={false} animate={height === undefined ? undefined : { height }} transition={reduce ? { duration: 0 } : SPRING}>
-      {/* flow-root: its children's margins count in its height. */}
-      <div ref={inner} className="flow-root">
-        {children}
-      </div>
-    </motion.div>
-  );
-}
-
 // StepRow is a step it took this turn, quiet beside what it does now: in
 // the past tense, with how long it took. A new one fades in; the one it
 // pushes off the top leaves at once, so a full log never holds an extra
 // row for a moment and the card keeps its height as steps roll by.
-function StepRow({ step }: { step: RunStep }) {
+// Memo: the board's clock ticks every card once a second, and a finished
+// step has nothing to redraw (nor its layout animation to measure).
+const StepRow = memo(function StepRow({ step }: { step: RunStep }) {
   const reduce = useReducedMotion();
   return (
     <motion.li
@@ -398,7 +378,7 @@ function StepRow({ step }: { step: RunStep }) {
       {step.ms !== undefined && <span className="shrink-0 font-mono tabular-nums opacity-80">{stepTime(step.ms)}</span>}
     </motion.li>
   );
-}
+});
 
 function PillButton({ onClick, label, tip, className, disabled, children }: { onClick(): void; label?: string; tip?: string; className?: string; disabled?: boolean; children: ReactNode }) {
   const button = (
