@@ -1,0 +1,12 @@
+{"id":"r_01","template":"attempts","title":"refunds: 3 attempts","status":"waiting_gate","cursor":"2.t.0","steps":[
+  {"id":"attempts","kind":"map","path":"0","status":"succeeded","exit_code":0,"children":[
+    {"id":"a0","kind":"agent","path":"0.0","status":"succeeded","exit_code":0,"output":"Added refund route","duration":"4m2s"},
+    {"id":"a1","kind":"agent","path":"0.1","status":"skipped","exit_code":0}]},
+  {"id":"judge","kind":"judge","path":"1","status":"succeeded","exit_code":0,"output":"Winner: attempt 3."},
+  {"id":"pick","kind":"gate","path":"2","status":"waiting","exit_code":0}],
+ "created":"2026-10-24T09:00:00Z","updated":"2026-10-24T09:40:00Z",
+ "gate":{"path":"2.t.0","title":"Pick the best attempt at refunds","text":"Winner: attempt 3.","pick":true,"default":2},
+ "candidates":[
+  {"index":0,"agent":"claude","verify":{"passed":false,"exit_code":1},"diff":{"files":4,"added":140,"removed":22,"commits":1},"judge":{"rank":3}},
+  {"index":1,"agent":"codex","verify":{"passed":true,"exit_code":0},"diff":{"files":3,"added":96,"removed":18,"commits":1},"judge":{"rank":2}},
+  {"index":2,"agent":"claude","verify":{"passed":true,"exit_code":0},"diff":{"files":2,"added":61,"removed":9,"commits":1},"judge":{"rank":1}}]}
