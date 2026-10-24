@@ -77,6 +77,9 @@ export const FIRST_READ_TIMEOUT = 8_000;
 const READ_TIMEOUT = 30_000;
 
 // attempt, when it changes, reads again from where it was (a Retry).
+// every, when given, is the backstop's period instead (ms): a reader that
+// only needs to catch up on events, such as a dashboard card of an agent
+// that isn't working, reads that rarely between them.
 //
 // One loop reads a chat while it shows: on open, every 2s, and at once when
 // an event about the session arrives. An event never starts the loop over:
@@ -86,7 +89,7 @@ const READ_TIMEOUT = 30_000;
 // as long as the agent worked). An event during a read reads again once it
 // is in. Every read has a time limit, so one the box never answers can't
 // hold the chat either.
-export function useTranscriptFeed(box: string, session: string, dir: string | undefined, enabled: boolean, attempt = 0): FeedState {
+export function useTranscriptFeed(box: string, session: string, dir: string | undefined, enabled: boolean, attempt = 0, every?: number): FeedState {
   const client = useStore((s) => s.client);
   const supported = useStore((s) => !!s.boxes[box]?.info?.capabilities?.includes("transcript"));
   const pinged = useStore((s) => !!s.boxes[box]?.info?.capabilities?.includes("draft"));
@@ -211,7 +214,7 @@ export function useTranscriptFeed(box: string, session: string, dir: string | un
     // (transcript.changed, with "draft") is read at once on each, so the
     // look here is a backstop: every 4s, inside the 8s for which the box
     // keeps watching after a read (transcriptwatch.go). Others every 2s.
-    const t = window.setInterval(() => void read(), pinged ? 4000 : 2000);
+    const t = window.setInterval(() => void read(), every ?? (pinged ? 4000 : 2000));
     const onVisible = () => {
       if (!document.hidden) void read();
     };
@@ -225,7 +228,7 @@ export function useTranscriptFeed(box: string, session: string, dir: string | un
       document.removeEventListener("visibilitychange", onVisible);
     }
     return stop;
-  }, [client, box, session, key, supported, known, enabled, attempt, pinged]);
+  }, [client, box, session, key, supported, known, enabled, attempt, pinged, every]);
 
   // An event about the session, or a write to its transcript: read now, in
   // the loop that is running.
