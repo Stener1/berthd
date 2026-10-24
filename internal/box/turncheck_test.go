@@ -1,7 +1,10 @@
 package box
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -566,6 +569,130 @@ func TestTurnCheckDropsALateAnswer(t *testing.T) {
 	for len(ch) > 0 {
 		if e := <-ch; e.Type == adapters.Waiting {
 			t.Fatalf("published %v", e.Data)
+		}
+	}
+}
+
+var (
+	// Says how another session is getting on and offers to follow it up:
+	// that work is the other session's, so the turn is done.
+	otherSessionTurn = turnFixture{
+		title:  "Which session is fixing the archive tray?",
+		prompt: "I started a session to fix it. When we archive worktrees and bulk close sessions here, it should go into the background and show up in the tray. Can you find me which session that is, or if it has shipped, or whatever is going on? Right now, I can't see that it is working, even though I'm on the latest update.",
+		reply: "It hasn't shipped. The fix is still being built, so what you see in the screenshot is the old behaviour where the dialog stays open while it works.\n\n" +
+			"**The session:** `shop-acme-2279-background-jobs-tray`, worktree `~/work/shop-acme-2279-background-jobs-tray`. It's still running.\n\n" +
+			"**Where it's at:**\n- The feature is committed in that worktree at 10:47 today (`d44d2ff2`, \"feat(app): bulk Stop and Archive carry on in a background-jobs tray\"). It does what you asked for:\n" +
+			"  - Confirming \"Stop N agents?\" closes the dialog straight away.\n  - The stopping and archiving carry on in a tray at the bottom right, with a progress count (\"Stopping 17 agents · 9/17\") and one row per agent, grouped by box.\n" +
+			"  - A clean run shows a summary and fades. Anything that was kept or failed stays in the tray until you dismiss it.\n  - The sidebar's single Archive… goes through the tray too.\n" +
+			"- It isn't pushed and there's no PR yet. One verify-skill scenario file (`dashboard-stop-archive.mjs`) has uncommitted changes, so it looks like it's in the verify step now.\n\n" +
+			"**Why the update didn't help:**\n- The newest release is **v0.3.30** (21 Oct, 12:49). The bulk Stop + Archive dialog in your screenshot came later, in PR #179, merged today at 08:29. The tray is built on top of that.\n" +
+			"- The earlier single-worktree fix, **ACME-2199** (PR #175, \"archiving a worktree no longer holds its dialog open\"), has been open since yesterday and isn't merged. The 2279 branch includes a rebased copy of that commit, so its PR will probably bring 2199 along.\n\n" +
+			"So for you to see it, the 2279 session has to finish verifying and open its PR. Then it needs merging upstream and a release after v0.3.30. I didn't interrupt the session. I can nudge it to push and open the PR once verification passes, or tell you when its turn ends.",
+	}
+	// Waits on another session and says it acts when that one reports back:
+	// working.
+	waitsOnSessionTurn = turnFixture{
+		title:  "🚀 ACME-2279 merge and release",
+		prompt: "Get the tray fix merged and released once its session has opened the PR.",
+		reply:  "The ACME-2279 session is still verifying, so there's no PR yet. I'm watching its turn: as soon as it opens the PR I'll review it, merge it once CI is green and cut the release.",
+	}
+)
+
+// recordedTurnCheck is an answer AI Gateway's Jev gave to one request, and
+// that request's sha256: a test serves it only to the same request, so
+// changing the prompt asks for a new recording.
+type recordedTurnCheck struct {
+	Request string          `json:"request_sha256"`
+	Answer  json.RawMessage `json:"answer"`
+}
+
+// replayTurnCheck is Jev's recorded answer to the request a box makes for
+// turn, from testdata/turncheck/name.json. With
+// BERTH_TURNCHECK_RECORD_KEY_FILE set to an AI Gateway key's file, it asks
+// the gateway instead and records the answer; tests never do otherwise.
+func replayTurnCheck(t *testing.T, name string, turn turnFixture) (request []byte, answer http.HandlerFunc) {
+	t.Helper()
+	request, err := json.Marshal(jevRequest(TurnCheckConfig{Provider: ProviderGateway, Model: "typesafe-ai/jev"}, turn.title, turn.prompt, turn.reply))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(request)
+	file := filepath.Join("testdata", "turncheck", name+".json")
+	if keyFile := os.Getenv("BERTH_TURNCHECK_RECORD_KEY_FILE"); keyFile != "" {
+		key, err := os.ReadFile(keyFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, _ := http.NewRequest(http.MethodPost, jevGateway, bytes.NewReader(request))
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(key)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("AI Gateway answered %s", resp.Status)
+		}
+		rec, _ := json.MarshalIndent(recordedTurnCheck{Request: hex.EncodeToString(sum[:]), Answer: got}, "", "  ")
+		os.MkdirAll(filepath.Dir(file), 0o755)
+		if err := os.WriteFile(file, append(rec, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("no recording: %v", err)
+	}
+	var rec recordedTurnCheck
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Request != hex.EncodeToString(sum[:]) {
+		t.Fatalf("%s was recorded for another request (the prompt changed?): record it again with BERTH_TURNCHECK_RECORD_KEY_FILE=<AI Gateway key file> go test ./internal/box -run TestTurnCheckReplays", file)
+	}
+	return request, func(w http.ResponseWriter, r *http.Request) { w.Write(rec.Answer) }
+}
+
+// Real turns replayed through Jev's recorded answers, end to end: a status
+// report on another session with an offer stays done, waiting on another
+// session to act when it reports back is working, and the turns above read
+// as they did before.
+func TestTurnCheckReplays(t *testing.T) {
+	for name, tc := range map[string]struct {
+		turn             turnFixture
+		unfinished, park bool
+	}{
+		"other-session-offer":  {turn: otherSessionTurn},
+		"waits-on-session-act": {turn: waitsOnSessionTurn, unfinished: true},
+		"running-deploy":       {turn: runningTurn, unfinished: true},
+		"background-recheck":   {turn: backgroundTurn, unfinished: true},
+		"parked-reply":         {turn: parkedTurn, park: true},
+		"scheduled-check-in":   {turn: scheduledTurn, park: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request, answer := replayTurnCheck(t, name, tc.turn)
+			b, bus, sess, calls := checkedBox(t, true, tc.turn.prompt, tc.turn.reply, answer)
+			b.Sessions.SetTitle(context.Background(), sess.Name, tc.turn.title)
+			endTurn(bus, sess)
+			c := waitCall(t, calls)
+			if sent, _ := json.Marshal(c.body); !bytes.Equal(sent, request) {
+				t.Fatalf("the box asked\n%s\nnot the recorded request\n%s", sent, request)
+			}
+			// A verdict that marks nothing has nothing to wait for.
+			deadline := time.Now().Add(300 * time.Millisecond)
+			for st, _ := b.Turns.State(sess.Name); !st.Unfinished && !st.Parked && time.Now().Before(deadline); st, _ = b.Turns.State(sess.Name) {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if got := b.enrich(context.Background(), []Session{sess})[0]; got.AgentState != "finished" || got.Unfinished != tc.unfinished || got.Parked != tc.park {
+				t.Fatalf("the session reads %s, unfinished %v, parked %v", got.AgentState, got.Unfinished, got.Parked)
+			}
+		})
+	}
+	for _, want := range []string{"offers to follow it up", "an offer is not a promise", "working only when the agent says it will act when that session reports back"} {
+		if !strings.Contains(jevInstructions, want) {
+			t.Fatalf("instructions lack %q", want)
 		}
 	}
 }
