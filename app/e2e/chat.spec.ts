@@ -258,6 +258,25 @@ test("a reply sent while the agent works waits as pending", async ({ app }) => {
   await expect(pending.getByRole("button", { name: "Send now" })).toBeEnabled();
 });
 
+test("a turn that ended while its work runs on shows the hourglass and takes a new turn", async ({ app }) => {
+  mockOnly();
+  // Turn check read its finished turn as work still running (unfinished).
+  await app.openWorktree("devl/order-export");
+  await app.page.locator("[data-tab-strip] [data-tab]", { hasText: "Add tests for the export job" }).click();
+  const onWork = app.chat.locator("[data-kind=on-its-work]");
+  await expect(onWork).toHaveText("Waiting on its work");
+  await expect(app.chat.locator("[data-kind=thinking]")).toHaveCount(0);
+  await expect(app.composer.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+  await expect(app.panes.getByRole("button", { name: /^Stop / })).toHaveCount(0);
+  await onWork.getByText("Waiting on its work").hover();
+  await expect(app.page.locator("[data-slot=tooltip-popup]")).toContainText("Its turn ended while its work runs on");
+  // A live turn keeps its spinner, Stop and Queue.
+  await app.openWorktree("gpu/judge-v2");
+  await expect(app.chat.locator("[data-kind=thinking]")).toBeVisible();
+  await expect(app.panes.getByRole("button", { name: "Stop Claude" })).toBeVisible();
+  await expect(app.composer.getByRole("button", { name: "Queue", exact: true })).toBeVisible();
+});
+
 // selectWords selects an element's words, as a triple click does.
 async function selectWords(el: import("@playwright/test").Locator) {
   await el.scrollIntoViewIfNeeded();
