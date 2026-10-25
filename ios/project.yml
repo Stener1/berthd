@@ -33,16 +33,13 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Shipyard
             CFBundleURLSchemes: [shipyard]
-        # Plain HTTP to boxes on the tailnet. NSAllowsLocalNetworking lifts ATS
-        # for IP-address hosts (a tailnet 100.x address) and unqualified or
-        # .local names; the ts.net exception lifts it for MagicDNS names
-        # only. Every other host keeps ATS, so nothing else goes over HTTP.
+        # Plain HTTP to boxes on the tailnet (WireGuard encrypts it). iOS has no
+        # exception for an address range: NSAllowsLocalNetworking only covers
+        # private ranges, and a tailnet 100.x address is not one (verified on
+        # the simulator: -1022), and an exception domain needs the exact host.
+        # So ATS is off, and the app only ever opens the box addresses you paired.
         NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
-          NSExceptionDomains:
-            ts.net:
-              NSIncludesSubdomains: true
-              NSExceptionAllowsInsecureHTTPLoads: true
+          NSAllowsArbitraryLoads: true
   ShipyardTests:
     type: bundle.unit-test
     platform: iOS

@@ -46,17 +46,17 @@ automatic.
 
 ## Network access (App Transport Security)
 
-Boxes answer plain HTTP inside the tailnet (WireGuard encrypts it). The app keeps
-ATS on and loosens it as narrowly as iOS allows, in `project.yml`:
+Boxes answer plain HTTP inside the tailnet (WireGuard encrypts it). iOS offers no
+ATS exception for an address range, and the narrower ones do not reach a tailnet
+address: `NSAllowsLocalNetworking` covers private and `.local` hosts only, and a
+tailnet `100.x` address is neither (the simulator fails with error -1022). An
+exception domain needs the exact host, which differs for every user and cannot be
+committed. So `project.yml` sets `NSAllowsArbitraryLoads`.
 
-- `NSAllowsLocalNetworking`: lifts ATS for IP-address hosts (a tailnet `100.x`
-  address) and unqualified or `.local` names. It does not lift it for any named
-  internet host.
-- `NSExceptionDomains` for `ts.net` (with subdomains): plain HTTP for MagicDNS
-  names only.
-
-Every other host stays on HTTPS. iOS has no exception for a CIDR range, so
-`100.64.0.0/10` cannot be named on its own.
+What bounds it: the app builds requests only from the box addresses you paired
+(`BoxStore`), and opens links in screen text in Safari, not in the app. If you
+want it tighter for your own phone, replace it with an `NSExceptionDomains`
+entry per box address in your copy of `project.yml`.
 
 ## Deep links
 

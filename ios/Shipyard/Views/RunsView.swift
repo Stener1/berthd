@@ -124,6 +124,7 @@ struct RunDetailView: View {
         .background(Theme.background)
         .navigationTitle(run?.displayTitle ?? "Run")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .confirmationDialog("Cancel this run?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Cancel run", role: .destructive) { Task { await cancel() } }
             Button("Keep running", role: .cancel) {}
@@ -189,7 +190,7 @@ struct GateSection: View {
                                     .font(.footnote).foregroundStyle(Theme.muted)
                             }
                             Spacer()
-                            if c.index == gate.default { Image(systemName: "star.fill").foregroundStyle(Theme.waiting) }
+                            if c.index == (gate.default ?? 0) { Image(systemName: "star.fill").foregroundStyle(Theme.waiting) }
                         }
                     }
                     .disabled(working)

@@ -14,6 +14,7 @@ struct SessionView: View {
     @State private var offline = false
     @State private var sending = false
     @FocusState private var focused: Bool
+    @Environment(\.colorScheme) private var scheme
 
     private var title: String {
         session.map { BoardItem(box: box.name, session: $0).title } ?? name
@@ -62,6 +63,10 @@ struct SessionView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(scheme, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if let s = session {
                 ToolbarItem(placement: .principal) {

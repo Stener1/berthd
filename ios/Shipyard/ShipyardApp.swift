@@ -18,11 +18,22 @@ struct ShipyardApp: App {
                 .environment(boxes)
                 .environment(board)
                 .environment(route)
-                .onOpenURL { url in
-                    if let t = DeepLink.parse(url) { route.open(t, boxes: boxes.boxes) }
-                    else if let paired = try? PairingLink.parse(url.absoluteString) { boxes.pair(paired) }
+                .onOpenURL { handle($0) }
+                .task {
+                    #if DEBUG
+                    // Simulator drive scripts: `simctl launch ... -ShipyardOpenURL <url>`
+                    // (the system's "Open in Shipyard?" prompt can't be tapped by a script).
+                    if let s = UserDefaults.standard.string(forKey: "ShipyardOpenURL"), let url = URL(string: s) { handle(url) }
+                    #endif
                 }
         }
+    }
+}
+
+extension ShipyardApp {
+    func handle(_ url: URL) {
+        if let t = DeepLink.parse(url) { route.open(t, boxes: boxes.boxes) }
+        else if let paired = try? PairingLink.parse(url.absoluteString) { boxes.pair(paired) }
     }
 }
 
