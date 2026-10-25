@@ -26,7 +26,7 @@ export async function run({ page, shot, step, expect }) {
   await expect(working).toContainText("Running pnpm eval --suite judge");
   await expect(working).toContainText("Sonnet 4.5");
   await expect(working).toContainText("Step 4 of 6");
-  const steps = working.getByRole("list", { name: "Steps" }).getByRole("listitem");
+  const steps = working.getByRole("list", { name: "Steps" }).locator("li[data-status=done]");
   await expect(steps).toHaveCount(3);
   await expect(working.getByTestId("card-now")).toHaveAttribute("data-status", "active");
   await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toHaveCount(1);
@@ -41,10 +41,11 @@ export async function run({ page, shot, step, expect }) {
 
   step("an approval: the headline asks, the log row is tinted, Approve and Deny take the footer's place");
   const asking = card(page, "Fix checkout webhook retries");
-  await expect(asking).toContainText("Needs your approval to run pnpm prisma migrate dev --name idempotency_key");
-  const approve = asking.getByRole("button", { name: "Approve", exact: true });
+  await expect(asking.getByTestId("card-now")).toContainText("Claude Code wants to run a command");
+  await expect(asking.getByTestId("card-now")).toContainText("pnpm prisma migrate dev --name idempotency_key");
+  const approve = asking.getByRole("button", { name: /^Approve/ });
   await expect(approve).toBeVisible();
-  await expect(asking.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  await expect(asking.getByRole("button", { name: /^Deny/ })).toBeVisible();
   const footer = asking.locator("footer");
   const before = await footer.boundingBox();
   const workingFooter = await working.locator("footer").boundingBox();

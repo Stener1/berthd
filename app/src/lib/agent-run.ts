@@ -236,6 +236,34 @@ export function approvalLabel(tool: string | undefined, input: string | undefine
   return `Needs your approval to use ${tool}`;
 }
 
+// askOf is a permission in the words the card uses under the agent's name,
+// "<agent> wants to run a command", with what it would run or touch
+// (detail) to show as it is.
+export function askOf(tool: string | undefined, input: string | undefined): { action: string; detail?: string } {
+  const detail = input?.trim() || undefined;
+  const mcp = tool ? /^mcp__(.+?)__(.+)$/.exec(tool) : null;
+  if (mcp) return { action: `use ${mcp[2].replaceAll("_", " ")} (${mcp[1]})`, detail };
+  switch (tool) {
+    case "Bash":
+      return { action: "run a command", detail };
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return { action: "edit a file", detail };
+    case "Write":
+      return { action: "write a file", detail };
+    case "Read":
+      return { action: "read a file", detail };
+    case "WebFetch":
+      return { action: "fetch a page", detail };
+    case "WebSearch":
+      return { action: "search the web", detail };
+    case "ExitPlanMode":
+      return { action: "start on its plan" };
+  }
+  return { action: `use ${tool ?? "a tool"}`, detail };
+}
+
 // isApproval says an ask is a permission to approve or deny, not a
 // question to answer in words or by picking.
 export const isApproval = (tool: string | undefined) => !!tool && tool !== "AskUserQuestion";

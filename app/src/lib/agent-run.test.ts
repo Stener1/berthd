@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { approvalLabel, doneLine, MAX_PILLS, planOf, runOf, stepTime } from "./agent-run.ts";
+import { approvalLabel, askOf, doneLine, MAX_PILLS, planOf, runOf, stepTime } from "./agent-run.ts";
 import type { ChatTodo } from "./chat-controls.ts";
 import type { TranscriptItem } from "./transcript.ts";
 
@@ -138,4 +138,12 @@ test("step lengths read as people say them", () => {
   assert.equal(stepTime(72_000), "1m 12s");
   assert.equal(stepTime(3_725_000), "1h 2m");
   assert.equal(stepTime(-5), "0.0s");
+});
+
+test("a permission reads as what the agent wants to do, with what it would run or touch as it is", () => {
+  assert.deepEqual(askOf("Bash", "  git push origin fix\n"), { action: "run a command", detail: "git push origin fix" });
+  assert.deepEqual(askOf("Edit", "apps/web/lib/webhook.ts"), { action: "edit a file", detail: "apps/web/lib/webhook.ts" });
+  assert.deepEqual(askOf("mcp__linear__save_issue", undefined), { action: "use save issue (linear)", detail: undefined });
+  assert.deepEqual(askOf("ExitPlanMode", "the plan"), { action: "start on its plan" });
+  assert.deepEqual(askOf("Frobnicate", ""), { action: "use Frobnicate", detail: undefined });
 });
