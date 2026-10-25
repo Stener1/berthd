@@ -53,6 +53,17 @@ export function allOnItsWork(sessions: Session[], stats?: Stats): boolean {
   return running.length > 0 && running.every(onItsWork);
 }
 
+// chatState is the state a chat draws a session in: one on its work is
+// between turns, so its chat is a finished turn's (Send; no spinner, timer
+// or Stop), with the hourglass at its foot. Everywhere else it is running.
+export function chatState(s: Session, stats?: Stats): SessionState {
+  return onItsWork(s) ? "finished" : sessionState(s, stats);
+}
+
+// replyMode is what a chat's reply box does at a state: queue a message
+// for when a live turn ends, answer the agent's question, or send it.
+export const replyMode = (state: string | undefined): "send" | "queue" | "answer" => (state === "running" ? "queue" : state === "waiting" ? "answer" : "send");
+
 export function worktreeSessions(sessions: Session[] | undefined, wt: Worktree): Session[] {
   // A service's terminal is the service, not work in the worktree.
   return (sessions ?? []).filter((s) => s.dir === wt.path && !s.service);
