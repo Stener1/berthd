@@ -151,6 +151,29 @@ export function withAttachments(text: string, paths: string[]): string {
   return [text.trim(), paths.join("\n")].filter(Boolean).join("\n\n");
 }
 
+// An answer to a form of questions (lib/questions) takes them on the same
+// line, after the person's own words, as the box types an answer as one
+// line: "this step was off [attached: /…/shot.png]". Claude reads them as
+// it reads a prompt's, through the agent's form or its SDK alike.
+const ATTACHED = /^(.*?)\s*\[attached: ([^\]]+)\]$/;
+
+// attachedTo is words with the paths of the files attached to them.
+export function attachedTo(words: string, paths: string[]): string {
+  const w = words.replace(/\s+/g, " ").trim();
+  if (!paths.length) return w;
+  return [w, `[attached: ${paths.join(" ")}]`].filter(Boolean).join(" ");
+}
+
+// splitAttached is an answer's words and the paths attached to them.
+export function splitAttached(answer: string): { words: string; paths: string[] } {
+  const m = ATTACHED.exec(answer);
+  return m ? { words: m[1], paths: m[2].split(" ").filter(Boolean) } : { words: answer, paths: [] };
+}
+
+// shownName is an attachment's name as it was given, without the time the
+// box puts before it: 20261025-152924-shot.png is shot.png.
+export const shownName = (path: string) => (path.split("/").pop() ?? path).replace(/^\d{8}-\d{6}-/, "");
+
 
 // A path pasted as text that names a file on this computer: a screenshot's
 // /var/folders/…/Screenshot.png, "Copy as Pathname" in Finder, a file:// URL.
