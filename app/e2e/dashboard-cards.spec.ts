@@ -23,7 +23,7 @@ test("Live status cards is a switch in Settings › Agents, off until turned on,
   await expect(live).not.toBeChecked();
   await live.click();
   await expect(live).toBeChecked();
-  expect(((await app.stored("berth.prefs")) as { dashboardCards?: string }).dashboardCards).toBe("status");
+  await expect.poll(async () => ((await app.stored("berth.prefs")) as { dashboardCards?: string }).dashboardCards).toBe("status");
   await app.leaveSettings();
   await app.page.getByTestId("nav-home").click();
   await expect(card(app, "Tune the judge prompt")).toContainText("Step 4 of 6");
