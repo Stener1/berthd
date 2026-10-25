@@ -18,6 +18,10 @@
 # Claude's hooks in ~ only when they are out of date; `up` stops if it
 # did, so a dev box never changes the real one's hooks unnoticed.
 set -euo pipefail
+# Run from an agent's own terminal, the caller's BERTH_* (its session, and
+# BERTH_DRIVER=structured, which turns `berthd hook` off) would reach the
+# dev box's agents: none of them go in.
+for v in $(compgen -e | grep '^BERTH_' || true); do unset "$v"; done
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 # Short: a unix socket's path can't be longer than 108 bytes.
 dir=${VERIFY_BOX_DIR:-/tmp/verify-berthd-box}
@@ -69,9 +73,12 @@ up)
       http://127.0.0.1:9378/v1/boxes/devq/api/sessions -d '{"name":"ask","location":"acme-shop","agent":"claude","driver":"claude","mode":"bypassPermissions"}' >/dev/null
   else
     box session new acme-shop --name ask -- claude --dangerously-skip-permissions >/dev/null
-    # A new folder asks to be trusted first.
+    # A new folder asks to be trusted first. One trusted already doesn't, and
+    # there Up and Enter would send the last prompt again from its history.
     sleep 8
-    tm send-keys -t ask Up && sleep 0.5 && tm send-keys -t ask Enter
+    if tm capture-pane -p -t ask | grep -qi 'trust'; then
+      tm send-keys -t ask Up && sleep 0.5 && tm send-keys -t ask Enter
+    fi
   fi
   echo "up: box devq ($addr), agent http://127.0.0.1:9378, worktree devq/acme-shop, session ask"
   ;;
