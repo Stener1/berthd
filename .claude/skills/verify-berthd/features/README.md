@@ -12,6 +12,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 
 | Feature | File | Scenario |
 | --- | --- | --- |
+| The iPhone app (`ios/`): pairing, agent board, session, runs and gates, boxes | [ios-app.md](ios-app.md) | `scripts/ios-drive.sh` (simulator, live boxes) |
 | Sidebar places: Pinned, More, Hidden, counts on rows (Home's waiting, Review's, a plugin's) | [sidebar-nav.md](sidebar-nav.md) | `plugin-nav-badges` |
 | Back and forward: the window strip's arrows, ⌘[ and ⌘], the mouse's buttons; archiving or removing the worktree in front goes back, not Home; the dashboard keeps its scroll | [navigation-history.md](navigation-history.md) | `navigation-history`; `app/e2e/back-forward.spec.ts` asserts it |
 | Stopping agents from the Agent Dashboard: one, the picked ones, a column, Clean up; archiving their worktrees where it's safe | [dashboard-stop.md](dashboard-stop.md) | `dashboard-stop-archive`; `app/e2e/dashboard-stop-archive.spec.ts` asserts it |
