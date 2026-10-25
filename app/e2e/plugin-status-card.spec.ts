@@ -61,7 +61,7 @@ test("a plugin's board shows an agent as the live status card, with the plugin's
   // The live card itself: what it does now, its task progress, its steps.
   await expect(card.getByTestId("card-now")).toContainText("Running pnpm eval --suite judge");
   await expect(card).toContainText("Step 4 of 6");
-  await expect(card.getByRole("list", { name: "Steps" }).getByRole("listitem")).toHaveCount(3);
+  await expect(card.getByRole("list", { name: "Steps" }).locator("li[data-status=done]")).toHaveCount(3);
   await expect(card.getByRole("button", { name: "Pause" })).toBeVisible();
 
   // The plugin's button, after the card's own; it doesn't open the card.

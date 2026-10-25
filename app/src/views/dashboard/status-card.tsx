@@ -1,32 +1,17 @@
-import {
-  ArrowUpRightIcon,
-  BotIcon,
-  BrainIcon,
-  CheckIcon,
-  FilePenIcon,
-  FileSearchIcon,
-  GlobeIcon,
-  HourglassIcon,
-  PauseIcon,
-  SearchIcon,
-  ShieldAlertIcon,
-  SparklesIcon,
-  SquareIcon,
-  TerminalIcon,
-  UploadIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, CircleAlertIcon, CircleCheckIcon, CircleIcon, HourglassIcon, PauseIcon, SquareIcon } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
 import { openOrchestrate, SessionActions } from "@/components/orchestrate/session-actions";
 import { Tip } from "@/components/tip";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Kbd } from "@/components/ui/kbd";
 import { toastManager } from "@/components/ui/toast";
 import type { SessionEntry } from "@/hooks/use-agent-counts";
 import { isMock } from "@/hooks/use-berth-connection";
-import { approvalLabel, doneLine, isApproval, type Pill, type RunStep, type StepKind, stepTime } from "@/lib/agent-run";
+import { approvalLabel, askOf, doneLine, isApproval, type Pill, type RunStep, stepTime } from "@/lib/agent-run";
 import { boxApi } from "@/lib/api";
 import { interrupt, modelLabel } from "@/lib/chat-controls";
 import { agentOf, atQuestion, ON_ITS_WORK } from "@/lib/derive";
@@ -35,38 +20,31 @@ import { permissionChoices } from "@/lib/screen";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { focusSession } from "@/lib/workspaces";
+import { duration, useNow } from "@/views/dashboard/agent-card";
 import { describeAgent, startedAt } from "@/views/dashboard/names";
 import { confirmStop, StopMenuItems } from "@/views/dashboard/stop";
 import { useCardRun } from "@/views/dashboard/use-card-run";
-import { duration, useNow } from "@/views/dashboard/agent-card";
 import { type Choice, useScreenTail } from "@/views/dashboard/use-screen-tail";
+
+// The card follows devl's agent components (devl.dev, on coss ui like the
+// app): Run List's status icon and clock at the head, Working Out Loud's
+// rail of steps, and Go / No-go's approval with the exact command and the
+// Y and N keys. The data is the app's own (lib/agent-run).
 
 // The most finished steps a card lists: the latest ones.
 const LOG_ROWS = 3;
 
-// How the card moves: its height follows its log on a spring, and a new
-// headline rolls in from below.
+// A new step's words roll in from below.
 const SPRING = { type: "spring", stiffness: 420, damping: 36, mass: 0.8 } as const;
 
-const STEP_ICONS: Record<StepKind, LucideIcon> = {
-  read: FileSearchIcon,
-  search: SearchIcon,
-  run: TerminalIcon,
-  edit: FilePenIcon,
-  fetch: GlobeIcon,
-  skill: SparklesIcon,
-  agent: BotIcon,
-  publish: UploadIcon,
-  think: BrainIcon,
-  ask: ShieldAlertIcon,
-};
+// clock is a running time as devl's Run List shows it, "1:05" and "14:05",
+// and past an hour the board's own "1h 15m".
+function clock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s >= 3600) return duration(ms);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
-// StatusCard is one agent on the board as a live status card (Settings ›
-// Agents › Agent Dashboard › Live status cards): what it is
-// doing now and for how long, its model and how far through its task list
-// it is, the steps it took this turn, and what you can do about it (pause
-// or stop it, approve what it asks, open it). While the board is selecting
-// (or with ⌘ or ⇧ held), a click picks it instead.
 // What a plugin can add to the card (AgentStatusCard in @berth/plugin/ui):
 // its own name for it, a mark before that, lines of its own under where it
 // works, buttons after the card's own, what opening it does, and a ring
@@ -81,6 +59,14 @@ export interface CardExtras {
   className?: string;
 }
 
+type Tone = "work" | "wait" | "done" | "rest";
+
+// StatusCard is one agent on the board as a live status card (Settings ›
+// Agents › Agent Dashboard › Live status cards): its title and where it
+// works, how far through its task list it is, the steps it took this turn
+// on a rail ending in the one it is on, and what you can do about it (pause
+// or stop it, approve what it asks, open it). While the board is selecting
+// (or with ⌘ or ⇧ held), a click picks it instead.
 export function StatusCard({
   entry,
   selecting,
@@ -121,38 +107,52 @@ export function StatusCard({
   // on its screen.
   const choices: Choice[] = session.ask?.choices?.length ? session.ask.choices : onScreen;
   const pending = run?.steps[run.steps.length - 1]?.status === "waiting" ? run.steps[run.steps.length - 1] : undefined;
-  const approval = waiting && isApproval(session.ask?.tool ?? run?.ask?.tool) ? permissionChoices(choices) : undefined;
+  const asked = session.ask?.tool ?? run?.ask?.tool;
+  const approval = waiting && isApproval(asked) ? permissionChoices(choices) : undefined;
   const allow = approval?.find((c) => c.label === "Allow");
   const deny = approval?.find((c) => c.label === "Deny");
   const approving = !!allow && !!deny;
+  const answer = useAnswer(box, session.name);
   // A form of questions (AskUserQuestion, or one its record shows) isn't
   // answered by one number: it is answered in the agent's own view.
   const form = waiting && (session.ask?.tool === "AskUserQuestion" || (pending?.kind === "ask" && !run?.ask));
   const asking = waiting && !approving && !form && choices.length > 0;
   const onItsWork = state === "running" && !!session.unfinished;
   const parked = state === "ready" && !!session.parked;
+  const tone: Tone = onItsWork || parked || state === "ready" ? "rest" : state === "running" ? "work" : state === "waiting" ? "wait" : "done";
 
-  // What it does now, what it asks, or how its turn went: one line under
-  // its title, so the title stays what the board is scanned by. A plain
-  // ready agent has nothing to say there.
-  const doing: { text: string; icon: LucideIcon; tip?: string; tone?: "info" | "success"; since?: number } | undefined = onItsWork
-    ? { text: "Waiting on its work", icon: HourglassIcon, tip: ON_ITS_WORK }
-    : parked
-      ? { text: "Parked: waiting on a reply or a later time", icon: HourglassIcon, tip: "Its work is paused until someone else replies or a later time. Nothing runs and nothing needs you; it picks up by itself." }
-      : state === "running"
-        ? { text: run?.active?.label ?? "Working", icon: STEP_ICONS[run?.active?.kind ?? "think"], since: run?.active?.since }
-        : state === "waiting"
-          ? { text: session.ask ? approvalLabel(session.ask.tool, session.ask.input, session.ask.message) : (pending?.label ?? (session.soft_wait ? "Waiting on your reply" : "Needs you")), icon: ShieldAlertIcon, tone: "info" }
-          : state === "finished"
-            ? { text: run ? doneLine(run, since) : "Done", icon: CheckIcon, tip: `Finished ${new Date(since).toLocaleString()}`, tone: "success" }
-            : undefined;
+  // What it does now, what it asks, or how its turn went: the rail's last
+  // row. An approval has its own block instead; a plain ready agent has
+  // nothing to say.
+  const doing: { text: string; tip?: string; since?: number } | undefined = approving
+    ? undefined
+    : onItsWork
+      ? { text: "Waiting on its work", tip: ON_ITS_WORK }
+      : parked
+        ? { text: "Parked: waiting on a reply or a later time", tip: "Its work is paused until someone else replies or a later time. Nothing runs and nothing needs you; it picks up by itself." }
+        : state === "running"
+          ? { text: run?.active?.label ?? "Working", since: run?.active?.since }
+          : state === "waiting"
+            ? { text: session.ask ? approvalLabel(session.ask.tool, session.ask.input, session.ask.message) : (pending?.label ?? (session.soft_wait ? "Waiting on your reply" : "Needs you")) }
+            : state === "finished"
+              ? { text: run ? doneLine(run, since) : "Done", tip: `Finished ${new Date(since).toLocaleString()}` }
+              : undefined;
+  const ask = approving ? askOf(asked, session.ask?.input ?? run?.ask?.detail) : undefined;
 
-  // The log: the steps it took before the one it is on, or the screen's
-  // last lines.
   const steps = run?.steps.filter((s) => s.status === "done").slice(-LOG_ROWS) ?? [];
   const lines = !run && state !== "ready" ? (asking ? (tail ?? []).filter((l) => !/^\s*(?:[❯›>]\s*)?\d[.)]\s/.test(l)) : tail) : undefined;
   const plan = run?.plan;
   const progress = plan ? (state === "finished" ? `${plan.done} of ${plan.total} steps` : `Step ${plan.current} of ${plan.total}`) : undefined;
+
+  // Go / No-go: Y approves and N denies while the card has focus.
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter") selecting && onSelect ? onSelect() : open();
+    else if (approving && !answer.sent && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === "y" || e.key === "n")) {
+      e.preventDefault();
+      void (e.key === "y" ? answer.answer(allow, "Approved") : answer.answer(deny, "Denied"));
+    }
+  };
 
   return (
     <article
@@ -162,7 +162,7 @@ export function StatusCard({
       aria-pressed={selecting ? !!selected : undefined}
       data-state={state}
       onClick={(e) => (onSelect && (selecting || e.metaKey || e.shiftKey) ? onSelect() : open())}
-      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && (selecting && onSelect ? onSelect() : open())}
+      onKeyDown={onKeyDown}
       className={cn(
         "group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-card text-left shadow-xs/5 outline-none transition-[opacity,translate,border-color] duration-200 hover:border-ring/40 focus-visible:ring-2 focus-visible:ring-ring",
         shown ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
@@ -176,7 +176,7 @@ export function StatusCard({
       <div className="px-3 pt-2.5">
         <div className="flex items-center gap-2">
           {selecting && <Checkbox checked={!!selected} tabIndex={-1} aria-hidden className="pointer-events-none" />}
-          <AgentMark agent={agentOf(session)} state={onItsWork || parked ? "ready" : state} />
+          <StatusIcon tone={tone} hourglass={onItsWork || parked} />
           <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
             {mark && <span className="shrink-0">{mark}</span>}
             <span className="min-w-0 truncate text-row">{named ?? title}</span>
@@ -189,7 +189,7 @@ export function StatusCard({
           </span>
           {/* The clock, and in its place on hover or focus the card's ⋯
               menu, so neither moves anything. Done: its turn's length is
-              on the line below, and the corner holds only the menu. */}
+              on the rail, and the corner holds only the menu. */}
           <span className="relative flex min-w-6 shrink-0 items-center justify-end" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             {state !== "finished" && (
               <Tip label={`Since ${new Date(since).toLocaleString()}`}>
@@ -200,7 +200,7 @@ export function StatusCard({
                     state === "waiting" ? "text-warning-foreground" : "text-muted-foreground",
                   )}
                 >
-                  {duration(now - since)}
+                  {clock(now - since)}
                 </span>
               </Tip>
             )}
@@ -217,15 +217,17 @@ export function StatusCard({
         </div>
 
         <div className="mt-0.5 flex items-center gap-2 pl-7 text-meta text-muted-foreground">
-          {/* Where first, as the board is scanned by it; the model last,
-              the first to go in a narrow column. */}
+          {/* Where first, as the board is scanned by it; the agent and its
+              model last, the first to go in a narrow column. */}
           <span className="min-w-0 flex-1 truncate">
             {work && `${place} · `}
             {box}
             {where && !(work && where.worktree.main) && ` · ${where.location.name}`}
             {crowded && ` · started ${startedAt(session.created)}`}
             {where?.worktree.branch && where.worktree.branch !== place && <span className="opacity-70"> · {where.worktree.branch}</span>}
-            {` · ${model ? modelLabel(model) : agent}`}
+            {" · "}
+            <AgentIcon agent={agentOf(session)} className="mr-1 inline size-3 align-[-2px]" />
+            {model ? modelLabel(model) : agent}
           </span>
           {progress && <span className="shrink-0 tabular-nums">{progress}</span>}
         </div>
@@ -234,14 +236,29 @@ export function StatusCard({
 
         {plan && <Pills pills={plan.pills} live={state === "running"} />}
 
-        {doing && (
-          // Its own box holds the spacing: a Tip without a label is just its child.
-          <div className="mt-2.5 flex min-w-0 pl-7">
-            <Tip label={doing.tip}>
-              <span className="flex min-w-0 flex-1">
-                <Now {...doing} now={now} />
-              </span>
-            </Tip>
+        {(steps.length > 0 || doing) && (
+          <ol aria-label="Steps" className="mt-2.5">
+            {steps.map((s, i) => (
+              <StepRow key={s.id} step={s} line={i < steps.length - 1 || !!doing} />
+            ))}
+            {doing && (
+              <Tip label={doing.tip}>
+                <li className="flex">
+                  <Now text={doing.text} tone={tone} since={doing.since} now={now} hourglass={onItsWork || parked} />
+                </li>
+              </Tip>
+            )}
+          </ol>
+        )}
+
+        {ask && (
+          <div data-testid="card-now" data-status="waiting" className="mt-2.5 pl-7">
+            <p className="text-desc">
+              <span className="font-medium">{agent}</span>
+              <span className="text-muted-foreground"> wants to </span>
+              {ask.action}
+            </p>
+            {ask.detail && <div className="mt-1.5 line-clamp-3 wrap-anywhere rounded-lg bg-muted px-2.5 py-1.5 font-mono text-tag">{ask.detail}</div>}
           </div>
         )}
 
@@ -251,121 +268,169 @@ export function StatusCard({
           </div>
         )}
 
-        <div>
-          {steps.length > 0 && (
-            <ul aria-label="Steps" className="mt-1.5 pl-7">
-              <AnimatePresence initial={false}>
-                {steps.map((s) => (
-                  <StepRow key={s.id} step={s} />
-                ))}
-              </AnimatePresence>
-            </ul>
-          )}
-          {lines && lines.length > 0 && (
-            <div className={cn("mt-2 space-y-px rounded-lg bg-muted/50 px-2 py-1.5 font-mono text-tag", state === "waiting" ? "text-foreground/85" : "text-muted-foreground")}>
-              {lines.map((l, i) => (
-                <div key={i} className="truncate whitespace-pre" title={l}>
-                  {l}
-                </div>
-              ))}
-            </div>
-          )}
-          {asking && <Answers box={box} session={session.name} choices={choices} />}
-        </div>
+        {lines && lines.length > 0 && (
+          <div className={cn("mt-2 space-y-px rounded-lg bg-muted/50 px-2 py-1.5 font-mono text-tag", state === "waiting" ? "text-foreground/85" : "text-muted-foreground")}>
+            {lines.map((l, i) => (
+              <div key={i} className="truncate whitespace-pre" title={l}>
+                {l}
+              </div>
+            ))}
+          </div>
+        )}
+        {asking && <Answers box={box} session={session.name} choices={choices} />}
       </div>
 
       <footer className="mt-2.5 flex h-9 items-center gap-1.5 border-t px-2.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         {!selecting &&
           (approving ? (
-            <Approval box={box} session={session.name} allow={allow} deny={deny} />
+            <>
+              <Tip label={deny?.title}>
+                <Button size="xs" variant="outline" disabled={!!answer.sent} onClick={() => deny && void answer.answer(deny, "Denied")}>
+                  Deny
+                  <Kbd>N</Kbd>
+                </Button>
+              </Tip>
+              <Tip label={allow?.title}>
+                <Button size="xs" disabled={!!answer.sent} onClick={() => allow && void answer.answer(allow, "Approved")}>
+                  Approve
+                  <Kbd className="bg-current/20 text-current">Y</Kbd>
+                </Button>
+              </Tip>
+            </>
           ) : state === "running" ? (
             <>
               {canPause && !onItsWork && <PauseButton box={box} session={session.name} who={agent} />}
-              <PillButton onClick={() => confirmStop(entry)} label={`Stop ${name} in ${place}`} tip="Stop agent…">
-                <SquareIcon className="size-2.5" />
-                Stop
-              </PillButton>
+              <StopButton onClick={() => confirmStop(entry)} label={`Stop ${name} in ${place}`} />
             </>
           ) : state === "waiting" || state === "ready" ? (
             <>
               {form ? (
-                <button
-                  type="button"
-                  onClick={open}
-                  className="inline-flex h-6 items-center gap-0.5 rounded-full bg-blue-600 px-3 font-medium text-tag text-white outline-none transition-colors hover:bg-blue-600/90 focus-visible:ring-2 focus-visible:ring-ring"
-                >
+                <Button size="xs" onClick={open}>
                   Answer
-                  <ArrowUpRightIcon className="size-3" aria-hidden />
-                </button>
+                  <ArrowUpRightIcon />
+                </Button>
               ) : (
-                <PillButton onClick={() => openOrchestrate("send", box, session.name)}>{state === "ready" ? "Prompt…" : "Reply…"}</PillButton>
+                <Button size="xs" variant="outline" onClick={() => openOrchestrate("send", box, session.name)}>
+                  {state === "ready" ? "Prompt…" : "Reply…"}
+                </Button>
               )}
-              <PillButton onClick={() => confirmStop(entry)} label={`Stop ${name} in ${place}`} tip="Stop agent…">
-                <SquareIcon className="size-2.5" />
-                Stop
-              </PillButton>
+              <StopButton onClick={() => confirmStop(entry)} label={`Stop ${name} in ${place}`} />
             </>
           ) : null)}
         {!selecting && actions}
-        <button type="button" onClick={open} className="-mr-1 ml-auto inline-flex h-6 items-center gap-0.5 rounded-md px-1.5 text-muted-foreground text-tag outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <Button size="xs" variant="ghost" className="-mr-1 ml-auto text-muted-foreground" onClick={open}>
           Open run
-          <ArrowUpRightIcon className="size-3" aria-hidden />
-        </button>
+          <ArrowUpRightIcon />
+        </Button>
       </footer>
     </article>
   );
 }
 
-// AgentMark is the agent's mark in a ring that says its state: a turning
-// arc while it works, a pulse while it waits, and a check once it is done.
-function AgentMark({ agent, state }: { agent?: string; state: SessionEntry["state"] }) {
-  const reduce = useReducedMotion();
-  const done = state === "finished";
+// StatusIcon is the card's state at its head, as devl's Run List draws it:
+// a turning arc while it works, an alert while it waits on you, a check
+// once done; an hourglass while its work runs on without it, or it is
+// parked; an empty ring at rest.
+function StatusIcon({ tone, hourglass }: { tone: Tone; hourglass: boolean }) {
   return (
-    <span className="relative inline-flex size-5 shrink-0 items-center justify-center" aria-hidden>
-      <span
-        className={cn(
-          "absolute inset-0 rounded-full border-[1.5px]",
-          state === "running" ? "animate-spin border-info/25 border-t-info [animation-duration:1.4s] motion-reduce:animate-none" : state === "waiting" ? "border-warning/60" : done ? "border-success/50" : "border-border",
-        )}
-      />
-      {state === "waiting" && <span className="absolute inset-0 animate-ping rounded-full border border-warning/40 [animation-duration:2s] motion-reduce:hidden" />}
-      <AnimatePresence initial={false} mode="popLayout">
-        <motion.span key={done ? "done" : "mark"} className="inline-flex" initial={reduce ? false : { scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={reduce ? undefined : { scale: 0.4, opacity: 0 }} transition={SPRING}>
-          {done ? <CheckIcon className="size-3 text-success" strokeWidth={3} /> : <AgentIcon agent={agent} className="size-3" />}
-        </motion.span>
-      </AnimatePresence>
+    <span className="inline-flex size-5 shrink-0 items-center justify-center" role="img" aria-label={hourglass ? "Waiting on its work" : { work: "Working", wait: "Needs you", done: "Done", rest: "Ready" }[tone]}>
+      {hourglass ? (
+        <HourglassIcon className="size-3.5 text-muted-foreground" aria-hidden />
+      ) : tone === "work" ? (
+        <svg aria-hidden className="size-4 animate-spin text-info motion-reduce:animate-none" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" fill="none" opacity="0.2" r="6" stroke="currentColor" strokeWidth="2" />
+          <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+        </svg>
+      ) : tone === "wait" ? (
+        <CircleAlertIcon className="size-4 text-warning" aria-hidden />
+      ) : tone === "done" ? (
+        <CircleCheckIcon className="size-4 text-success" aria-hidden />
+      ) : (
+        <CircleIcon className="size-4 text-muted-foreground/60" aria-hidden />
+      )}
     </span>
   );
 }
 
-// Now is what the agent does now, in the column under its title: an icon
-// and the words, rolling in from below when they change, with the step's
-// own clock. An approval it waits on is tinted blue, a finished turn green.
-function Now({ text, icon: Icon, tone, since, now }: { text: string; icon: LucideIcon; tone?: "info" | "success"; since?: number; now: number }) {
+// Mark is a step's place on the rail, as devl's Working Out Loud draws it:
+// filled with a check once done, a turning edge for the one under way.
+function Mark({ state, tone }: { state: "done" | "now"; tone?: Tone }) {
+  return (
+    <span className="relative z-10 inline-flex size-3.5 shrink-0 items-center justify-center" aria-hidden>
+      {state === "done" ? (
+        // Softer than devl's solid green: a board holds many of these.
+        <span className="flex size-3.5 items-center justify-center rounded-full bg-success/45">
+          <svg className="size-2.5 text-white" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth={3.2} viewBox="0 0 24 24">
+            <path d="M5 12.5 10 17.5 19 7" />
+          </svg>
+        </span>
+      ) : tone === "work" ? (
+        <>
+          <span className="absolute inset-0 rounded-full border-[1.5px] border-border" />
+          <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent border-t-foreground [animation-duration:0.8s] motion-reduce:animate-none" />
+        </>
+      ) : tone === "wait" ? (
+        <span className="size-2 rounded-full bg-warning" />
+      ) : tone === "done" ? (
+        <span className="size-2 rounded-full bg-success" />
+      ) : (
+        <span className="size-2 rounded-full bg-muted-foreground/50" />
+      )}
+    </span>
+  );
+}
+
+// StepRow is a step it took this turn, quiet on the rail above what it does
+// now: in the past tense, with how long it took, and the rail running on to
+// the next. A new one fades in; the one it pushes off the top leaves at
+// once, so a full log never holds an extra row and the card keeps its
+// height as steps roll by. Memo: the board's clock ticks every card once a
+// second, and a finished step has nothing to redraw.
+const StepRow = memo(function StepRow({ step, line }: { step: RunStep; line: boolean }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.li
+      initial={reduce ? false : { opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRING}
+      data-status={step.status}
+      className="relative flex h-5 items-center gap-2 text-muted-foreground text-tag"
+    >
+      {line && <span aria-hidden className="absolute top-[13px] -bottom-[3px] left-[9.5px] w-px bg-success/30" />}
+      <span className="inline-flex w-5 shrink-0 justify-center">
+        <Mark state="done" />
+      </span>
+      <span className="min-w-0 flex-1 truncate">{step.label}</span>
+      {step.ms !== undefined && <span className="shrink-0 font-mono tabular-nums opacity-80">{stepTime(step.ms)}</span>}
+    </motion.li>
+  );
+});
+
+// Now is the rail's last row: what the agent does now, rolling in from
+// below when it changes, with the step's own clock; what it waits on; or
+// how its turn went.
+function Now({ text, tone, since, now, hourglass }: { text: string; tone: Tone; since?: number; now: number; hourglass: boolean }) {
   const reduce = useReducedMotion();
   return (
     <span
       data-testid="card-now"
-      data-status={tone === "info" ? "waiting" : tone === "success" ? "done" : "active"}
-      className={cn("relative flex h-6 min-w-0 flex-1 items-center overflow-hidden rounded-md text-desc", tone === "info" ? "bg-info/10 px-2 text-info-foreground" : "text-foreground/85")}
+      data-status={tone === "wait" ? "waiting" : tone === "done" ? "done" : "active"}
+      className="relative flex h-6 min-w-0 flex-1 items-center gap-2 overflow-hidden text-desc text-foreground/90"
     >
+      <span className="inline-flex w-5 shrink-0 justify-center">{hourglass ? <HourglassIcon className="size-3.5 text-muted-foreground" aria-hidden /> : <Mark state="now" tone={tone} />}</span>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={text}
-          className="flex min-w-0 flex-1 items-center gap-1.5"
+          className="min-w-0 flex-1 truncate"
           initial={reduce ? false : { y: "100%", opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={reduce ? undefined : { y: "-100%", opacity: 0 }}
           transition={SPRING}
         >
-          <Icon className={cn("size-3.5 shrink-0", tone === "info" ? "text-info" : tone === "success" ? "text-success" : "text-muted-foreground")} aria-hidden />
-          {/* No shimmer: it repaints the line every frame, on every working
-              card, and the turning ring already says it is at work. */}
-          <span className="min-w-0 truncate">{text}</span>
+          {text}
         </motion.span>
       </AnimatePresence>
-      {since !== undefined && <span className="ml-2 shrink-0 font-mono text-tag text-muted-foreground tabular-nums">{duration(now - since)}</span>}
+      {since !== undefined && <span className="shrink-0 font-mono text-tag text-muted-foreground tabular-nums">{clock(now - since)}</span>}
     </span>
   );
 }
@@ -388,46 +453,15 @@ function Pills({ pills, live }: { pills: Pill[]; live: boolean }) {
   );
 }
 
-// StepRow is a step it took this turn, quiet beside what it does now: in
-// the past tense, with how long it took. A new one fades in; the one it
-// pushes off the top leaves at once, so a full log never holds an extra
-// row for a moment and the card keeps its height as steps roll by.
-// Memo: the board's clock ticks every card once a second, and a finished
-// step has nothing to redraw (nor its layout animation to measure).
-const StepRow = memo(function StepRow({ step }: { step: RunStep }) {
-  const reduce = useReducedMotion();
+function StopButton({ onClick, label }: { onClick(): void; label: string }) {
   return (
-    <motion.li
-      layout={reduce ? false : "position"}
-      initial={reduce ? false : { opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={SPRING}
-      data-status={step.status}
-      className="flex h-5 items-center gap-1.5 text-muted-foreground text-tag"
-    >
-      <CheckIcon className="size-2.5 shrink-0 opacity-70" strokeWidth={2.5} aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{step.label}</span>
-      {step.ms !== undefined && <span className="shrink-0 font-mono tabular-nums opacity-80">{stepTime(step.ms)}</span>}
-    </motion.li>
+    <Tip label="Stop agent…">
+      <Button size="xs" variant="outline" aria-label={label} onClick={onClick}>
+        <SquareIcon />
+        Stop
+      </Button>
+    </Tip>
   );
-});
-
-function PillButton({ onClick, label, tip, className, disabled, children }: { onClick(): void; label?: string; tip?: string; className?: string; disabled?: boolean; children: ReactNode }) {
-  const button = (
-    <button
-      type="button"
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-6 items-center gap-1 rounded-full border bg-background px-2.5 font-medium text-tag outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-        className,
-      )}
-    >
-      {children}
-    </button>
-  );
-  return tip ? <Tip label={tip}>{button}</Tip> : button;
 }
 
 // PauseButton presses Esc for the agent: its turn ends where it is, and
@@ -446,41 +480,12 @@ function PauseButton({ box, session, who }: { box: string; session: string; who:
     }
   };
   return (
-    <PillButton onClick={() => void pause()} disabled={busy} tip="Ends its turn where it is (Esc). Prompt it to carry on.">
-      <PauseIcon className="size-2.5" />
-      Pause
-    </PillButton>
-  );
-}
-
-// Approval is Approve and Deny in the footer's place while the agent asks
-// for a permission; the footer keeps its height, so nothing moves.
-function Approval({ box, session, allow, deny }: { box: string; session: string; allow?: Choice; deny?: Choice }) {
-  const send = useAnswer(box, session);
-  if (!allow || !deny) return null;
-  return (
-    <>
-      <Tip label={allow.title}>
-        <button
-          type="button"
-          disabled={!!send.sent}
-          onClick={() => void send.answer(allow, "Approved")}
-          className="inline-flex h-6 items-center rounded-full bg-blue-600 px-3 font-medium text-tag text-white outline-none transition-colors hover:bg-blue-600/90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-        >
-          Approve
-        </button>
-      </Tip>
-      <Tip label={deny.title}>
-        <button
-          type="button"
-          disabled={!!send.sent}
-          onClick={() => void send.answer(deny, "Denied")}
-          className="inline-flex h-6 items-center rounded-full bg-secondary px-3 font-medium text-secondary-foreground text-tag outline-none transition-colors hover:bg-secondary/80 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-        >
-          Deny
-        </button>
-      </Tip>
-    </>
+    <Tip label="Ends its turn where it is (Esc). Prompt it to carry on.">
+      <Button size="xs" variant="outline" disabled={busy} onClick={() => void pause()}>
+        <PauseIcon />
+        Pause
+      </Button>
+    </Tip>
   );
 }
 

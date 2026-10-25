@@ -36,14 +36,14 @@ test("a working agent's card says its step now, its model and task progress, and
   await expect(c).toContainText("Running pnpm eval --suite judge");
   await expect(c).toContainText("Sonnet 4.5");
   await expect(c).toContainText("Step 4 of 6");
-  const steps = c.getByRole("list", { name: "Steps" }).getByRole("listitem");
+  const steps = c.getByRole("list", { name: "Steps" }).locator("li[data-status=done]");
   await expect(steps).toHaveCount(3);
   // Finished steps in the past tense with how long they took.
   await expect(steps.filter({ hasText: "Ran pnpm test payments" })).toContainText(/\d+s$/);
   // The step under way is its own line under the title, timed.
   const now = c.getByTestId("card-now");
   await expect(now).toHaveAttribute("data-status", "active");
-  await expect(now).toContainText(/Running pnpm eval --suite judge\s*\d+s/);
+  await expect(now).toContainText(/Running pnpm eval --suite judge\s*\d+:\d\d/);
   await expect(c.getByRole("button", { name: "Pause" })).toBeVisible();
   await expect(c.getByRole("button", { name: /^Stop / })).toBeVisible();
   await expect(c.getByTestId("card-timer")).toBeVisible();
@@ -62,7 +62,7 @@ test("a working card keeps its height while its steps roll by", async ({ app }) 
     const out: { h: number; rows: number }[] = [];
     const t0 = performance.now();
     while (performance.now() - t0 < 10_000) {
-      out.push({ h: el.getBoundingClientRect().height, rows: el.querySelectorAll("ul[aria-label=Steps] li").length });
+      out.push({ h: el.getBoundingClientRect().height, rows: el.querySelectorAll("ol[aria-label=Steps] li[data-status=done]").length });
       await new Promise((r) => setTimeout(r, 40));
     }
     return out;
@@ -81,11 +81,14 @@ test("an approval puts Approve and Deny where the card's controls were, and Appr
   mockOnly("the approval is a mock fixture");
   await open(app);
   const c = card(app, "Fix checkout webhook retries");
-  await expect(c).toContainText("Needs your approval to run pnpm prisma migrate dev --name idempotency_key");
-  await expect(c.locator("[data-status=waiting]")).toBeVisible();
-  const approve = c.getByRole("button", { name: "Approve", exact: true });
+  // Go / No-go: who wants to do what, and exactly what it would run.
+  const ask = c.getByTestId("card-now");
+  await expect(ask).toHaveAttribute("data-status", "waiting");
+  await expect(ask).toContainText("Claude Code wants to run a command");
+  await expect(ask).toContainText("pnpm prisma migrate dev --name idempotency_key");
+  const approve = c.getByRole("button", { name: /^Approve/ });
   await expect(approve).toBeVisible();
-  await expect(c.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  await expect(c.getByRole("button", { name: /^Deny/ })).toBeVisible();
   // The footer is as tall as a working card's: nothing moves when it swaps.
   const working = await card(app, "Tune the judge prompt").locator("footer").boundingBox();
   const asking = await c.locator("footer").boundingBox();
@@ -102,6 +105,16 @@ test("a form of questions is answered in the agent's own view, not by one number
   await expect(c.getByRole("button", { name: /^1 / })).toHaveCount(0);
   await c.getByRole("button", { name: "Answer", exact: true }).click();
   await expect(app.page.getByRole("heading", { name: "Agent Dashboard" })).toHaveCount(0);
+});
+
+test("Y approves from the keyboard while the card has focus, as devl's Go / No-go does", async ({ app }) => {
+  mockOnly("the approval is a mock fixture");
+  await open(app);
+  const c = card(app, "Fix checkout webhook retries");
+  await expect(c.getByRole("button", { name: /^Approve/ })).toBeVisible();
+  await c.focus();
+  await app.page.keyboard.press("y");
+  await expect(app.page.getByText("Approved", { exact: true }).first()).toBeVisible();
 });
 
 test("a finished card says how long its turn took, with no clock and only Open run", async ({ app }) => {
