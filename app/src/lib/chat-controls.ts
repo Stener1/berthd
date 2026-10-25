@@ -214,7 +214,16 @@ function mockSignals(session: string): ChatSignals {
     model: st.models[session] ?? (codex ? "gpt-5-codex" : "claude-sonnet-4-5"),
     effort: st.efforts[session] ?? (codex ? "medium" : "high"),
     context: { tokens: st.compacted[session] ? 18_400 : codex ? 96_000 : session.includes("checkout") ? 168_000 : 124_000, window: codex ? 272_000 : undefined },
-    todos: codex
+    todos: session.includes("judge")
+      ? [
+          { id: "1", text: "Read the judge prompt and its failures", status: "completed" },
+          { id: "2", text: "Collect the misjudged cases", status: "completed" },
+          { id: "3", text: "Rewrite the rubric", status: "completed" },
+          { id: "4", text: "Run the eval suite", active: "Running the eval suite", status: "in_progress" },
+          { id: "5", text: "Compare against the baseline", status: "pending" },
+          { id: "6", text: "Write up the change", status: "pending" },
+        ]
+      : codex
       ? [
           { text: "Outline the deck", status: "completed" },
           { text: "Draft the release notes slide", active: "Drafting the release notes slide", status: "in_progress" },
