@@ -6,6 +6,25 @@ import Foundation
 struct BoxInfo: Codable, Equatable {
     var box: String
     var version: Int
+    /// What the box serves beyond v1: `transcript` (a session's chat) and
+    /// `answer` (a form of questions). Missing on an older box.
+    var capabilities: [String]? = nil
+
+    func can(_ capability: String) -> Bool { capabilities?.contains(capability) ?? false }
+}
+
+struct AskChoice: Codable, Equatable {
+    var key: String
+    var label: String
+}
+
+/// What a waiting session asks for, from the agent's hooks.
+struct SessionAsk: Codable, Equatable {
+    var tool: String?
+    var input: String?
+    var why: String?
+    var message: String?
+    var choices: [AskChoice]?
 }
 
 enum AgentState: String, Codable {
@@ -24,13 +43,14 @@ struct Session: Codable, Equatable, Identifiable {
     var title: String?
     var worktreeTitle: String?
     var softWait: Bool?
+    var ask: SessionAsk?
 
     var id: String { name }
     var isAgent: Bool { !(agent ?? "").isEmpty }
     var isExited: Bool { exited ?? false }
 
     enum CodingKeys: String, CodingKey {
-        case name, location, dir, created, exited, agent, title
+        case name, location, dir, created, exited, agent, title, ask
         case agentState = "agent_state"
         case stateSince = "state_since"
         case worktreeTitle = "worktree_title"

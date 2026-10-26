@@ -20,13 +20,25 @@ final class FakePhoneClient: PhoneAPIClient, @unchecked Sendable {
     var sentKeys: [String] = []
     var decisions: [GateDecision] = []
     var sendError: PhoneAPIError?
+    var sent: [(text: String, enter: Bool)] = []
+    var answered: [(tool: String, answers: [QuestionAnswer])] = []
+    var transcriptResult: Result<TranscriptResult, PhoneAPIError> = .success(TranscriptResult(source: "none", items: [], next: 0))
+    var transcriptAsks: [(since: Int, gen: String?)] = []
 
-    func info() async throws -> BoxInfo { BoxInfo(box: "fake", version: 1) }
+    func info() async throws -> BoxInfo { BoxInfo(box: "fake", version: 1, capabilities: ["transcript", "answer"]) }
     func sessions() async throws -> [Session] { try sessionsResult.get() }
     func screen(session: String, history: Int) async throws -> String { "screen" }
     func send(session: String, text: String, enter: Bool) async throws {
         if let sendError { throw sendError }
         sentTexts.append(text)
+        sent.append((text, enter))
+    }
+    func transcript(session: String, since: Int, gen: String?) async throws -> TranscriptResult {
+        transcriptAsks.append((since, gen))
+        return try transcriptResult.get()
+    }
+    func answer(session: String, tool: String, answers: [QuestionAnswer]) async throws {
+        answered.append((tool, answers))
     }
     func key(session: String, key: String) async throws { sentKeys.append(key) }
     func runs() async throws -> [RunSummary] { try runsResult.get() }

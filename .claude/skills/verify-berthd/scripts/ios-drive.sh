@@ -2,6 +2,7 @@
 # Drive the iPhone app in a simulator against live boxes. See features/ios-app.md.
 #   ios-drive.sh pair                      pair from $PAIR_FILE (default /tmp/shipyard-pair.txt)
 #   ios-drive.sh session BOX NAME [TEXT]   open a session, send TEXT, press Esc
+#   ios-drive.sh chat BOX NAME OPTION      open a session's chat, tap the ask card's OPTION, send a prompt, show the screen
 #   ios-drive.sh gate                      open Runs, then the first run
 # SIM is the simulator's UDID (xcrun simctl list devices); it is required.
 set -euo pipefail

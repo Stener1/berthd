@@ -2,10 +2,12 @@
 
 A native SwiftUI client of the box's [phone API](../docs/guides/phone.mdx)
 (`/phone/v1/*`, port 1379, on the tailnet). It does what the phone web app does,
-as a real app: every agent from every box on one board, a session's screen with a
-message box and quick keys, and runs with their gates.
+as a real app: every agent from every box on one board, a session as a chat (or
+its screen, with a message box and quick keys), and runs with their gates.
 
-It talks only to the existing phone API. Nothing on a box changes.
+It talks only to the phone API. The chat needs a box that lists `transcript` in
+`GET /phone/v1/info` (and `answer` for forms of questions); without them a
+session shows its screen.
 
 ## Build
 
