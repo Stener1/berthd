@@ -1,0 +1,2 @@
+{"name":"acme-agent","agent":"claude","agent_state":"waiting","state_since":"2026-10-26T10:00:00Z",
+ "ask":{"tool":"Bash","input":"pnpm test","why":"Run the tests","choices":[{"key":"1","label":"Allow"},{"key":"2","label":"Always allow"},{"key":"3","label":"Deny"}]}}

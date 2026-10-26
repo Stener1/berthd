@@ -5,8 +5,14 @@ struct SessionView: View {
     var box: Box
     var name: String
 
+    enum Mode: String { case chat = "Chat", screen = "Screen" }
+
     @State private var screen = ""
     @State private var session: Session?
+    @State private var info: BoxInfo?
+    @State private var chat = ChatState()
+    @State private var chosen: Mode?
+    @State private var acting = false
     @State private var message = ""
     @State private var notice: String?
     @State private var noticeIsWaiting = false
@@ -20,6 +26,11 @@ struct SessionView: View {
         session.map { BoardItem(box: box.name, session: $0).title } ?? name
     }
 
+    /// The chat needs a box that serves it and a conversation it can read;
+    /// otherwise (a terminal-only agent, an older box) it is the screen alone.
+    private var chatAvailable: Bool { (info?.can("transcript") ?? false) && chat.hasChat != false }
+    private var mode: Mode { chatAvailable ? (chosen ?? .chat) : .screen }
+
     var body: some View {
         VStack(spacing: 0) {
             if repair {
@@ -27,6 +38,10 @@ struct SessionView: View {
             } else if offline {
                 Banner(text: "Can't reach \(box.name). Showing the last screen.", tint: Theme.bad)
             }
+            if mode == .chat {
+                ChatView(chat: chat, session: session, canAnswer: info?.can("answer") ?? false, busy: acting,
+                         act: { await perform($0) }, openScreen: { chosen = .screen })
+            } else {
             ScrollViewReader { proxy in
                 ScrollView {
                     Text(ScreenText.linked(screen.isEmpty ? "Loading…" : screen))
@@ -41,10 +56,13 @@ struct SessionView: View {
                 .background(Theme.terminal)
                 .onChange(of: screen) { proxy.scrollTo("end", anchor: .bottom) }
             }
+            }
             if let notice {
                 Banner(text: notice, tint: noticeIsWaiting ? Theme.waiting : Theme.bad)
             }
-            KeyBar(disabled: repair) { key in await press(key) }
+            if mode == .screen {
+                KeyBar(disabled: repair) { key in await press(key) }
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Send a prompt", text: $message, axis: .vertical)
                     .lineLimit(1...5)
@@ -68,17 +86,26 @@ struct SessionView: View {
         .toolbarColorScheme(scheme, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            if chatAvailable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Picker("View", selection: Binding(get: { mode }, set: { chosen = $0 })) {
+                        Text(Mode.chat.rawValue).tag(Mode.chat)
+                        Text(Mode.screen.rawValue).tag(Mode.screen)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 140)
+                    .accessibilityIdentifier("view-toggle")
+                }
+            }
             if let s = session {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
                         Text(title).font(.headline).lineLimit(1)
-                        Text([box.name, agentNames[s.agent ?? ""] ?? "Terminal"].joined(separator: " · "))
-                            .font(.caption).foregroundStyle(Theme.muted)
+                        let state = BoardState(s)
+                        (Text([box.name, agentNames[s.agent ?? ""] ?? "Terminal"].joined(separator: " · ") + " · ").foregroundStyle(Theme.muted)
+                            + Text(state.label).foregroundStyle(Theme.color(state)))
+                            .font(.caption)
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    let state = BoardState(s)
-                    StateBadge(text: state.label, color: Theme.color(state))
                 }
             }
         }
@@ -95,9 +122,10 @@ struct SessionView: View {
     private func load() async {
         guard let client = boxes.client(for: box) else { repair = true; return }
         do {
-            async let text = client.screen(session: name, history: 200)
             async let all = client.sessions()
-            screen = try await text
+            if info == nil { info = try? await client.info() }
+            if mode == .screen { screen = try await client.screen(session: name, history: 200) }
+            if info?.can("transcript") ?? false { try await readChat(client) }
             session = try await all.first { $0.name == name }
             offline = false
             repair = false
@@ -105,6 +133,29 @@ struct SessionView: View {
             offline = e == .offline
             repair = e.needsRepair
             if case .api(_, "not_found", _) = e { notice = e.message; noticeIsWaiting = false }
+        } catch {}
+    }
+
+    /// Reads what is new in the chat; a conversation that changed under us
+    /// is read again from its top.
+    private func readChat(_ client: any PhoneAPIClient) async throws {
+        for _ in 0..<2 {
+            let before = chat.file
+            chat.apply(try await client.transcript(session: name, since: chat.next, gen: chat.gen))
+            if before == nil || chat.file == before || chat.hasChat != true { return }
+        }
+    }
+
+    private func perform(_ action: AskAction) async {
+        guard let client = boxes.client(for: box) else { return }
+        acting = true
+        defer { acting = false }
+        do {
+            try await action.perform(with: client, session: name)
+            notice = nil
+            await load()
+        } catch let e as PhoneAPIError {
+            show(e)
         } catch {}
     }
 

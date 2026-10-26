@@ -50,6 +50,8 @@ protocol PhoneAPIClient: Sendable {
     func sessions() async throws -> [Session]
     func screen(session: String, history: Int) async throws -> String
     func send(session: String, text: String, enter: Bool) async throws
+    func transcript(session: String, since: Int, gen: String?) async throws -> TranscriptResult
+    func answer(session: String, tool: String, answers: [QuestionAnswer]) async throws
     func key(session: String, key: String) async throws
     func runs() async throws -> [RunSummary]
     func run(id: String) async throws -> Run
@@ -139,6 +141,17 @@ struct URLSessionPhoneClient: PhoneAPIClient {
     func send(session name: String, text: String, enter: Bool) async throws {
         struct Body: Encodable { var text: String; var enter: Bool }
         _ = try await data(request("POST", "sessions/\(Self.segment(name))/send", body: Body(text: text, enter: enter)))
+    }
+
+    func transcript(session name: String, since: Int, gen: String?) async throws -> TranscriptResult {
+        var q = [URLQueryItem(name: "since", value: String(max(since, 0)))]
+        if let gen, !gen.isEmpty { q.append(URLQueryItem(name: "gen", value: gen)) }
+        return try await decode(TranscriptResult.self, request("GET", "sessions/\(Self.segment(name))/transcript", query: q))
+    }
+
+    func answer(session name: String, tool: String, answers: [QuestionAnswer]) async throws {
+        struct Body: Encodable { var tool: String; var answers: [QuestionAnswer] }
+        _ = try await data(request("POST", "sessions/\(Self.segment(name))/answer", body: Body(tool: tool, answers: answers)))
     }
 
     func key(session name: String, key: String) async throws {
