@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import type { Session } from "@berth/plugin";
 
-import { allOnItsWork, firstPrompt, offBoard, onItsWork, restartCommand, sessionState } from "./derive.ts";
+import { allOnItsWork, chatState, firstPrompt, offBoard, onItsWork, replyMode, restartCommand, sessionState } from "./derive.ts";
 
 test("a finished turn turn check read as working is on its work, a live turn is not", () => {
   const s = { name: "a", dir: "/w", created: "2026-10-12T10:00:00Z", attached: 0, exited: false, agent: "claude", agent_state: "finished", unfinished: true } as Session;
@@ -65,6 +65,27 @@ test("a finished turn whose work goes on without the agent shows as working, not
   assert.equal(sessionState({ ...s, unfinished: true }), "running");
   // Only a finished turn: a question still needs you.
   assert.equal(sessionState({ ...s, agent_state: "waiting", unfinished: true }), "waiting");
+});
+
+test("a chat whose turn ended while its work runs on takes a new turn, with the hourglass and Send", () => {
+  const s = { name: "a", dir: "/w", created: "2026-10-12T10:00:00Z", attached: 0, exited: false, agent: "claude", agent_state: "finished", unfinished: true } as Session;
+  // Running on the board, between turns in its chat.
+  assert.equal(sessionState(s), "running");
+  assert.equal(onItsWork(s), true);
+  assert.equal(chatState(s), "finished");
+  assert.equal(replyMode(chatState(s)), "send");
+  // A live turn: the spinner, Stop and a queued message.
+  const live: Session = { ...s, agent_state: "running", unfinished: false };
+  assert.equal(onItsWork(live), false);
+  assert.equal(chatState(live), "running");
+  assert.equal(replyMode(chatState(live)), "queue");
+  // Its next turn starts afresh, and a question still needs you.
+  assert.equal(chatState({ ...s, agent_state: "running" }), "running");
+  assert.equal(replyMode(chatState({ ...s, agent_state: "waiting" })), "answer");
+  // Ended, or a service's terminal: never on its work.
+  assert.equal(onItsWork({ ...s, exited: true }), false);
+  assert.equal(onItsWork({ ...s, service: "web" } as Session), false);
+  assert.equal(onItsWork(undefined), false);
 });
 
 test("a finished turn parked until a reply or a later time shows as idle, not done or working", () => {

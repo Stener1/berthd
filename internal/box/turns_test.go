@@ -111,6 +111,83 @@ func TestApprovalClosesTheWaitSpan(t *testing.T) {
 	}
 }
 
+// A helper (subagent) the agent left working in the background goes on
+// using tools after the agent's Stop: the session stays finished, and the
+// box does not publish them. The agent's own tool use with no turn open (a
+// prompt Claude Code took from its own queue, which fires no prompt hook)
+// is the agent working again, and so is a helper's inside a turn.
+func TestAHelpersToolAfterStopLeavesTheTurnFinished(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "s", Dir: "/w", Agent: "claude"})
+	helperTool := func() {
+		bus.Publish(events.Event{Type: "agent.started", Origin: "claude", Data: map[string]any{"session": "s", "path": "/w", "agent": "claude", "signal": "tool", "helper": true}})
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "prompt")
+	if tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) != true {
+		t.Fatal("a helper's tool use while running was not redundant")
+	}
+	hook(bus, "agent.waiting", "s", "/w", "claude", "reason", "permission")
+	if tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) {
+		t.Fatal("a helper's tool use that ends a wait in the turn was redundant")
+	}
+	helperTool() // the helper's approved tool ran
+	if st, _ := tr.State("s"); st.State != "running" {
+		t.Fatalf("a helper's approved tool left %+v", st)
+	}
+	hook(bus, "agent.finished", "s", "/w", "claude")
+	if !tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) {
+		t.Fatal("a helper's tool use after the turn ended would be published")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "finished" {
+		t.Fatalf("a helper's tool after Stop made the session %s", st.State)
+	}
+	if got, _ := tr.Get("s#1"); got.State != "finished" || len(tr.List("s", 10)) != 1 {
+		t.Fatalf("turn %+v, %d turns", got, len(tr.List("s", 10)))
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "tool")
+	if st, _ := tr.State("s"); st.State != "running" {
+		t.Fatalf("the agent's own tool use after Stop left %s", st.State)
+	}
+}
+
+// A helper left running after the agent's Stop asks for a permission: the
+// session waits. Its tool running once that is granted ends the wait, and
+// the session is done again and takes a held prompt. Turn check's wait
+// (the agent's own question) stays.
+func TestAHelpersPermissionAfterStopEndsWithItsTool(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "s", Dir: "/w", Agent: "claude"})
+	helper := map[string]any{"session": "s", "signal": "tool", "helper": true}
+	helperTool := func() {
+		bus.Publish(events.Event{Type: "agent.started", Origin: "claude", Data: map[string]any{"session": "s", "path": "/w", "agent": "claude", "signal": "tool", "helper": true}})
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "prompt")
+	hook(bus, "agent.finished", "s", "/w", "claude")
+	hook(bus, "agent.waiting", "s", "/w", "claude", "reason", "permission")
+	if st, _ := tr.State("s"); st.State != "waiting" || tr.Ready("s") {
+		t.Fatalf("a helper's permission after Stop: %+v, ready %v", st, tr.Ready("s"))
+	}
+	if tr.Redundant("agent.started", helper) {
+		t.Fatal("the tool that ends the helper's wait would not be published")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "finished" || !tr.Ready("s") {
+		t.Fatalf("after the helper's tool: %+v, ready %v", st, tr.Ready("s"))
+	}
+	if len(tr.List("s", 10)) != 1 {
+		t.Fatalf("the helper made a turn: %+v", tr.List("s", 10))
+	}
+
+	end := hook(bus, "agent.finished", "s", "/w", "claude")
+	bus.Publish(events.Event{Type: "agent.waiting", Data: map[string]any{"session": "s", "path": "/w", "source": "turncheck", "seq": end.Seq}})
+	if !tr.Redundant("agent.started", helper) {
+		t.Fatal("a helper's tool use would be published at turn check's wait")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "waiting" || !st.SoftWait {
+		t.Fatalf("a helper's tool ended turn check's wait: %+v", st)
+	}
+}
+
 // E6: two agents in one worktree. Each one's hooks name its session, and
 // old hooks that only give a folder end no wait unless one agent fits.
 func TestAgentsSharingAWorktreeKeepTheirOwnTurns(t *testing.T) {

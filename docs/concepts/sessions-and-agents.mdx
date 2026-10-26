@@ -146,7 +146,8 @@ Code's "trust this folder" question at startup and reports it as `waiting`.
 Claude Code's reminder a minute after a finished turn (`idle_prompt`) and its
 login notice are not questions, so they never read as `waiting`; after you
 approve a permission, the tool it allowed running says the agent is working
-again.
+again. A Claude Code helper (subagent) left running in the background goes
+on using tools after the agent's turn ends; those don't start a turn.
 
 An agent's hooks say its turn finished whether it is done or asks you
 something ("go ahead?"). **Turn check**, off by default and turned on per
@@ -175,6 +176,10 @@ nothing from you is one of two kinds, and neither notifies. **Working**:
 something it started is still running and it acts when that ends (a
 delegated task, a build, a deploy, a test run, or a watcher or background
 task it started); the session stays `finished` with `unfinished: true`.
+Its chat ends on an hourglass, **Waiting on its work**, with no spinner
+or Stop, and what you type there starts a new turn. A reply that only says
+how another session is getting on and offers to follow it up is done; it
+is working when the agent says it will act once that session reports back.
 **Parked**: nothing runs for it, and it waits on someone else (a reply, a
 review, another team, a vendor) or a later time, such as a check-in it
 scheduled for itself ("tomorrow morning I'll check the numbers", "check

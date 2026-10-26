@@ -37,3 +37,13 @@ func TestClaudePromptCarriesOnlyItsTitle(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code gives a subagent's tool hooks its agent_id; the agent's own
+// have none.
+func TestClaudeHelpersToolSaysItIsAHelpers(t *testing.T) {
+	_, own, _ := Claude.Translate("PostToolUse", Payload{"cwd": "/w", "session_id": "s", "tool_name": "Bash"})
+	_, helper, _ := Claude.Translate("PostToolUse", Payload{"cwd": "/w", "session_id": "s", "tool_name": "Bash", "agent_id": "a61361a194d223429", "agent_type": "general-purpose"})
+	if _, has := own["helper"]; has || helper["helper"] != true || helper["signal"] != "tool" {
+		t.Fatalf("own %+v, helper %+v", own, helper)
+	}
+}
