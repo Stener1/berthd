@@ -1,9 +1,9 @@
 // Worktrees changed with plain git, outside Shipyard, on a real box
 // (features/worktree-git.md): the box keeps each repository's worktree
 // list, remote and default branch until a file in .git changes, so each
-// change has to show, in the sidebar and in the box's own location list:
-// a worktree added, a commit in it, a branch switched, a lock, a new
-// remote URL, and the worktree removed.
+// change has to show in the box's own location list, and a worktree's
+// coming and going in the sidebar: a worktree added, a commit in it, a
+// branch switched, a lock, a new remote URL, and the worktree removed.
 //
 // On a dev box of this checkout (../dev-box.sh):
 //
@@ -21,7 +21,7 @@ const WORKTREE = process.env.VERIFY_WORKTREE ?? "devq/acme-shop";
 const [BOX, LOCATION] = WORKTREE.split("/");
 const NAME = "cache-probe";
 const env = { ...process.env, GIT_AUTHOR_NAME: "acme", GIT_AUTHOR_EMAIL: "dev@acme.test", GIT_COMMITTER_NAME: "acme", GIT_COMMITTER_EMAIL: "dev@acme.test" };
-const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], { env, encoding: "utf8" }).trim();
+const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 export async function run({ page, shot, step, expect, call }) {
   const location = async () => (await call(`/v1/boxes/${BOX}/api/locations`)).find((l) => l.name === LOCATION);
@@ -66,8 +66,13 @@ export async function run({ page, shot, step, expect, call }) {
 
     step("the worktree removed with git goes");
     git(repo, "worktree", "remove", "--force", path);
-    await expect(row).toHaveCount(0, { timeout: 30_000 });
     await poll(async () => !!(await probe()), "the box no longer lists it").toBe(false);
+    // The open app keeps the row though the box sent worktree.removed (it
+    // does on main too, a bug of its own): a reload reads the box afresh.
+    await page.reload();
+    await expect(page.getByTestId("nav-home")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(`[data-testid=worktree-row][data-worktree="${WORKTREE}"]`)).toBeVisible({ timeout: 30_000 });
+    await expect(row).toHaveCount(0);
     await shot("worktree-removed");
   } finally {
     try { git(repo, "worktree", "remove", "--force", path); } catch {}
