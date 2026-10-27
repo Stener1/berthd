@@ -56,7 +56,8 @@ export interface StopRunParams {
 export interface StopRuns {
   // Whether the box does it itself: it has runs and is online.
   onBox(box: string): boolean;
-  start(box: string, req: { title: string; group: string; params: StopRunParams }): Promise<{ id: string }>;
+  // idemKey makes asking again after an answer that never came safe.
+  start(box: string, req: { title: string; group: string; params: StopRunParams; idemKey: string }): Promise<{ id: string }>;
   get(box: string, id: string): Promise<StopRun>;
   cancel(box: string, id: string): Promise<void>;
 }
@@ -111,20 +112,24 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
   for (const r of rows) byBox.set(r.box, [...(byBox.get(r.box) ?? []), r]);
   // Each box with runs takes its share as one run; the rest is the app's.
   const started: { box: string; id: string; params: StopRunParams }[] = [];
+  const unanswered = new Set<string>();
   const asks: Promise<void>[] = [];
   for (const [box, mine] of byBox) {
     const params = stopParams(mine, archive);
     if (!deps.runs?.onBox(box) || params.sessions.length > MAX_ITEMS || params.worktrees.length > MAX_ITEMS) continue;
     asks.push(
-      deps.runs.start(box, { title, group: ref, params }).then(
-        ({ id }) => void started.push({ box, id, params }),
-        // Not taken (a box from before stop runs): nothing was sent there.
-        () => {},
+      startStopRun(deps.runs, box, { title, group: ref, params }, deps.every).then(
+        (id) => void (id && started.push({ box, id, params })),
+        // It may have the run: the app doesn't do it as well.
+        (err) => {
+          unanswered.add(box);
+          for (const r of mine) setItem(job, r.key, { state: "failed", message: `Failed: ${deps.errorText(err)}` });
+        },
       ),
     );
   }
   if (asks.length) await Promise.all(asks);
-  const local = rows.filter((r) => !started.some((s) => s.box === r.box));
+  const local = rows.filter((r) => !unanswered.has(r.box) && !started.some((s) => s.box === r.box));
   if (started.length) {
     const onBox = new Set(started.map((s) => s.box));
     remember({ ref, title, started: Date.now(), runs: started.map(({ box, id }) => ({ box, id })), items: items.filter((i) => onBox.has(i.group)) });
@@ -141,6 +146,24 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
   finishJob(job, stopSummary(rows.length, sum("stopped"), sum("unsent"), Object.values(worktrees)));
   const done = jobOf(job);
   return { job, worktrees, clean: !!done && outcomeOf(done) === "clean" };
+}
+
+// startStopRun asks box to take its share as one stop run, and answers
+// with the run's id, or undefined when the box refuses it (4xx: a box from
+// before stop runs), so nothing was sent and the app does it. A box that
+// doesn't answer is asked again, under the same idempotency key, so a run
+// whose answer was lost isn't started twice; still no answer, it throws.
+export async function startStopRun(runs: StopRuns, box: string, req: { title: string; group: string; params: StopRunParams }, every = 1500): Promise<string | undefined> {
+  for (let tries = 1; ; tries++) {
+    try {
+      return (await runs.start(box, { ...req, idemKey: `${req.group}/${box}` })).id;
+    } catch (err) {
+      const status = (err as { status?: number }).status ?? 0;
+      if (status >= 400 && status < 500) return undefined;
+      if (tries >= 3) throw err;
+      await sleep(every * 2);
+    }
+  }
 }
 
 // stopParams is one box's share as the stop template takes it: its

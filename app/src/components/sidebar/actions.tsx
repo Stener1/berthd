@@ -402,8 +402,18 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
           run: async () => {
             // A box with runs stops them itself (lib/stop-on-box.ts), so the
             // laptop sleeping halfway leaves none running.
-            if (await stopOnBox(box, `Stop everything in ${name}`, { sessions: sessions.map((s) => s.name), worktrees: [] })) return scheduleRefresh(box, ["sessions"]);
-            for (const s of sessions) await stopSession(box, s.name, true);
+            const read = await stopOnBox(box, `Stop everything in ${name}`, { sessions: sessions.map((s) => s.name), worktrees: [] }).catch((err: unknown) => {
+              toastManager.add({ title: "Could not stop the sessions", description: plainError(err), type: "error" });
+              return null;
+            });
+            if (read === null) return;
+            if (!read) {
+              for (const s of sessions) await stopSession(box, s.name, true);
+              return;
+            }
+            scheduleRefresh(box, ["sessions"]);
+            const failed = Object.values(read.rows).filter((r) => r.state === "failed");
+            if (failed.length) toastManager.add({ title: `Could not stop ${failed.length === 1 ? "a session" : `${failed.length} sessions`}`, description: failed[0].message?.replace(/^Failed: /, ""), type: "error" });
           },
         }),
         { destructive: true },

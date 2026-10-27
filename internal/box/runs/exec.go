@@ -847,7 +847,7 @@ func (x *execution) leaf(ctx context.Context, sc *scope, s Step, id, path string
 		}
 		return res, nil
 	}
-	sctx := &StepCtx{Run: x.summary(), Step: s, Path: path, Attempt: 1, Vars: copyVars(sc.vars)}
+	sctx := &StepCtx{Run: x.summary(), Step: s, Path: path, Attempt: 1, Vars: copyVars(sc.vars), Stopping: x.stopping}
 	x.mu.Lock()
 	sctx.Candidates = append([]Candidate(nil), x.run.Candidates...)
 	x.mu.Unlock()
