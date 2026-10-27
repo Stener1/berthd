@@ -11,6 +11,11 @@ import { scheduleRefresh, useStore } from "@/lib/store";
 import { forgetWorktree } from "@/lib/workspaces";
 import { worktreesApi } from "@/lib/worktrees";
 
+// How the removals sent with an archive script ended, by removalKey, from
+// before they're sent: worktreeGone and archiveFailed say, as they drop the
+// mark, for archiveEnded to read.
+const waiting = new Map<string, "gone" | "failed" | undefined>();
+
 // removeWorktreeOnBox asks the box to remove (or archive) a worktree and
 // follows it through. A plain removal is done when the answer comes; with an
 // archive script the box answers at once and runs it in the background, so
@@ -27,15 +32,21 @@ export async function removeWorktreeOnBox(
   opts: { force?: boolean; branch?: boolean } = {},
 ): Promise<{ archive?: string }> {
   markRemoving(box, wt.path, kind, wt.name);
+  // Noted before it's sent: a script that fails fast can be reported
+  // before the answer comes (archiveEnded).
+  const key = removalKey(box, wt.path);
+  waiting.set(key, undefined);
   let res: { archive?: string };
   try {
     res = removeResult(await worktreesApi.remove(client, box, location, wt.name, opts));
   } catch (err) {
+    waiting.delete(key);
     clearRemoving(box, wt.path);
     throw err;
   }
   if (res.archive) markScript(box, wt.path);
   else {
+    waiting.delete(key);
     clearRemoving(box, wt.path);
     forgetWorktree(box, wt.path);
     unpinWorktree(box, wt.path);
@@ -82,16 +93,12 @@ function archiveJob(box: string, wt: Leaving) {
 
 type Leaving = { name: string; path: string; branch?: string };
 
-// How the archives the app waits on ended, by removalKey: worktreeGone and
-// archiveFailed say, as they drop the mark.
-const waiting = new Map<string, "gone" | "failed" | undefined>();
-
 // archiveEnded resolves once the box says how an archive whose script runs
-// ended: gone, failed, or undefined when its mark went some other way (the
-// box stopped listing it, or it went stale).
+// (removeWorktreeOnBox answered 202) ended: gone, failed, or undefined when
+// its mark went some other way (the box stopped listing it, or it went
+// stale).
 export async function archiveEnded(box: string, path: string): Promise<"gone" | "failed" | undefined> {
   const key = removalKey(box, path);
-  waiting.set(key, undefined);
   await unmarked(box, path);
   const how = waiting.get(key);
   waiting.delete(key);

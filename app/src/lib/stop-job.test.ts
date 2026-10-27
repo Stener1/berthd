@@ -184,7 +184,8 @@ test("Stop the rest pressed while an archive looks for agents still holds it bac
 // it on its first three stops until it's cancelled or let go.
 // startsLost: answers lost after the box took the run; startsDropped:
 // asks that never reached it. forgets: the box no longer has the run.
-function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; startsLost?: number; startsDropped?: number; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number; forgets?: boolean } = {}) {
+// findFails: asking for a run by its group goes unanswered too.
+function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; startsLost?: number; startsDropped?: number; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number; forgets?: boolean; findFails?: boolean } = {}) {
   const started: { box: string; title: string; group: string; params: StopRunParams; idemKey: string }[] = [];
   const asked: string[] = [];
   let lost = 0;
@@ -204,6 +205,7 @@ function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; star
       return { id: `r${started.findIndex((s) => s.idemKey === req.idemKey) + 1}` };
     },
     find: async (box, group) => {
+      if (o.findFails) throw Object.assign(new Error(`${box} is offline`), { status: 503 });
       const k = started.findIndex((s) => s.box === box && s.group === group);
       return k < 0 ? undefined : { id: `r${k + 1}` };
     },
@@ -225,7 +227,7 @@ function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; star
       cancelled.add(id);
     },
   };
-  return { runs, started, asked, cancelled, release: () => (o.held = false) };
+  return { runs, started, asked, cancelled, release: () => (o.held = false), reachable: () => Object.assign(o, { startsLost: 0, startsDropped: 0, findFails: false }) };
 }
 
 test("a box with runs does its share as one run; a box without gets the app's loop", async () => {
@@ -464,6 +466,46 @@ test("a job is kept before its start is sent, so one the app quit on before the 
     assert.equal(job.summary, "1 stopped, 1 archived");
     assert.equal(JSON.parse(kept.get("berth.jobs.stopRuns")!)[0].runs[0].id, "r1");
     dismissJob(job.id);
+  } finally {
+    Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("Stop the rest while the box is out of reach is kept: after a relaunch its run is only looked up and cancelled, never started", async () => {
+  const kept = new Map<string, string>();
+  Object.assign(globalThis, { localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) } });
+  try {
+    for (const tookIt of [true, false]) {
+      kept.clear();
+      useJobs.setState({ jobs: [] });
+      // The box took the first ask (its answer lost), or never got one; and
+      // it answers nothing, a lookup included, until the relaunch.
+      const box = runsBox(tookIt ? { startsLost: 1000, findFails: true, held: true } : { startsDropped: 1000, findFails: true });
+      const { deps, calls } = fakeBoxes({ runs: box.runs, every: 1 });
+      const first = runStopJob([row("a", "fix")], true, deps);
+      for (let i = 0; i < 100 && box.asked.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+      cancelJob(useJobs.getState().jobs[0].id);
+      const r1 = await first;
+      assert.equal(itemsOf(r1.job)["devl/a"], "failed: Failed: devl didn't answer, so it may still stop it");
+      assert.equal(JSON.parse(kept.get("berth.jobs.stopRuns")!)[0].cancelled, true, "the cancel is kept");
+      const sent = box.asked.length;
+
+      // Relaunched, the box back.
+      useJobs.setState({ jobs: [] });
+      box.reachable();
+      await reattachStopJobs({ runs: box.runs, every: 1 });
+      assert.equal(box.asked.length, sent, "no start is sent again");
+      assert.deepEqual(calls, []);
+      const [job] = useJobs.getState().jobs;
+      if (tookIt) {
+        assert.deepEqual([...box.cancelled], ["r1"], "the run it took is cancelled");
+        assert.equal(itemsOf(job.id)["devl/a"], "cancelled: Stopped · Not archived");
+      } else {
+        assert.equal(box.started.length, 0);
+        assert.equal(itemsOf(job.id)["devl/a"], "cancelled: Not stopped");
+      }
+      dismissJob(job.id);
+    }
   } finally {
     Reflect.deleteProperty(globalThis, "localStorage");
   }
