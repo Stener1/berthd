@@ -560,23 +560,27 @@ func dirtyWorktree(dir string) bool {
 }
 
 // unsavedWork says what removing a worktree with submodules would lose, or
-// "" for nothing: changes in it or its submodules, or submodule commits no
-// remote has, since a worktree's submodules keep their history inside it.
-// When git can't tell, that counts as something to lose.
+// "" for nothing: changes in it or its submodules, or submodule commits or
+// stashes no remote has, since a worktree's submodules keep their history
+// inside it. Untracked files count whatever status.showUntrackedFiles says,
+// and when git can't tell, that counts as something to lose.
 func unsavedWork(ctx context.Context, dir string) string {
-	out, err := git(ctx, "-C", dir, "status", "--porcelain", "--ignore-submodules=none")
+	out, err := git(ctx, "-C", dir, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none")
 	if err != nil {
 		return "could not be checked for changes"
 	}
 	if strings.TrimSpace(string(out)) != "" {
 		return "contains modified or untracked files"
 	}
-	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive", "git rev-list -1 HEAD --branches --not --remotes")
+	// Each submodule is asked itself too, so its own config can't hide a
+	// change from the status above.
+	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive",
+		"git status --porcelain --untracked-files=normal --ignore-submodules=all && git rev-list -1 HEAD --branches --not --remotes && { git rev-parse -q --verify refs/stash || :; }")
 	if err != nil {
-		return "has submodules that could not be checked for unpushed commits"
+		return "has submodules that could not be checked for unpushed work"
 	}
 	if strings.TrimSpace(string(out)) != "" {
-		return "contains submodule commits that no remote has"
+		return "contains submodule changes, commits or stashes that no remote has"
 	}
 	return ""
 }

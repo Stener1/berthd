@@ -257,13 +257,26 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(sub, "notes"), []byte("wip"), 0o644)
 	kept("a file in the submodule", "modified or untracked")
+	// Config that hides untracked files from status doesn't hide them here.
+	run(wt.Path, "config", "status.showUntrackedFiles", "no")
+	run(sub, "config", "status.showUntrackedFiles", "no")
+	kept("a file in the submodule, hidden from status", "submodule changes")
+	os.WriteFile(filepath.Join(wt.Path, "todo"), []byte("wip"), 0o644)
 	os.Remove(filepath.Join(sub, "notes"))
+	kept("a file in the worktree, hidden from status", "modified or untracked")
+	os.Remove(filepath.Join(wt.Path, "todo"))
+
+	os.WriteFile(filepath.Join(sub, "notes"), []byte("wip"), 0o644)
+	run(sub, "stash", "push", "-q", "-u")
+	kept("a stash in the submodule", "stashes that no remote has")
+	run(sub, "stash", "drop", "-q")
+
 	run(sub, "commit", "-q", "--allow-empty", "-m", "local only")
 	kept("a submodule commit, uncommitted in the worktree", "modified or untracked")
 	// Committed in the worktree, git status is clean, but the submodule's
 	// commit is only in the worktree's own copy of its history.
 	run(wt.Path, "commit", "-q", "-am", "bump lib")
-	kept("a submodule commit no remote has", "submodule commits that no remote has")
+	kept("a submodule commit no remote has", "commits or stashes that no remote has")
 	run(sub, "push", "-q", "origin", "HEAD:refs/heads/shared")
 
 	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
