@@ -242,10 +242,25 @@ const summary = (r: Run): RunSummary => ({ ...r, steps: r.steps.length, candidat
 // Act calls the mock box's own routes, as a run's steps do on a real one.
 type Act = (method: string, path: string) => Promise<unknown>;
 
+// Each box archives one worktree at a time across its stop runs, as a box
+// does (archiveTurn in internal/box/api.go): archiveTurn answers with the
+// release once it's this one's turn.
+const archiveLines = new Map<string, Promise<void>>();
+function archiveTurn(box: string): Promise<() => void> {
+  const before = archiveLines.get(box) ?? Promise.resolve();
+  let release = () => {};
+  const mine = new Promise<void>((done) => (release = done));
+  archiveLines.set(
+    box,
+    before.then(() => mine),
+  );
+  return before.then(() => release);
+}
+
 // playStop plays a stop run out as the box does (internal/box/runstop.go):
 // the sessions stopped three at a time, then each worktree archived where
-// it's safe, one at a time, through the mock's own routes. Cancelled, it
-// finishes the step in flight and starts no more.
+// it's safe, one at a time and in the box's line, through the mock's own
+// routes. Cancelled, it finishes the step in flight and starts no more.
 async function playStop(r: Run, box: string, act: Act, emit: Emit) {
   const p = r.params as { sessions: string[]; worktrees: { location: string; name: string; path: string; sessions: string[] }[] };
   const stops: RunStep[] = [];
@@ -279,16 +294,28 @@ async function playStop(r: Run, box: string, act: Act, emit: Emit) {
     if (over()) break;
     const at = `1.i${j}.0`;
     put(archives, j, at, "archive_worktree", "running");
+    const release = await archiveTurn(box);
+    try {
+      if (over()) {
+        put(archives, j, at, "archive_worktree", "cancelled");
+        break;
+      }
+      await archiveOne(j, at, w);
+    } finally {
+      release();
+    }
+  }
+  async function archiveOne(j: number, at: string, w: (typeof p.worktrees)[number]) {
     let live: Session[];
     try {
       live = ((await act("GET", "sessions")) as Session[]).filter((s) => !s.exited && agentOf(s) && (s.dir === w.path || s.dir.startsWith(`${w.path}/`)));
     } catch (err) {
       put(archives, j, at, "archive_worktree", "failed", { error: (err as Error).message, exit_code: 1 });
-      continue;
+      return;
     }
     if (live.length) {
       put(archives, j, at, "archive_worktree", "skipped", { output: live.some((s) => p.sessions.includes(s.name)) ? "Kept: an agent there didn't stop" : "Kept: another agent is still running there" });
-      continue;
+      return;
     }
     try {
       const res = (await act("DELETE", `locations/${encodeURIComponent(w.location)}/worktrees/${encodeURIComponent(w.name)}`)) as { archive?: string };
