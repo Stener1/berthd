@@ -37,4 +37,6 @@ sudo timeout -s INT 40 bpftrace -e 'tracepoint:syscalls:sys_enter_execve /curtas
 
 ## Not covered here
 
+- An app that is already open keeps the row of a worktree removed with git, though the box drops it from its list at once and its watcher sends `worktree.removed` (on main before the cache too). The scenario reads the removal from the box, then reloads the app to see the row gone.
+
 - A global `url.*.insteadOf` or an included git config changing a remote's URL shows within a minute, not at once: the box doesn't watch files outside `.git` other than `~/.gitconfig` and `~/.config/git/config`.
