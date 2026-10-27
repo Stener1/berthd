@@ -215,6 +215,201 @@ func TestAWorktreeSomeoneLockedIsLeftAlone(t *testing.T) {
 	}
 }
 
+// submoduleGit runs git in dir for a test, local submodule clones allowed.
+func submoduleGit(t *testing.T) func(dir string, args ...string) {
+	return func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "protocol.file.allow=always"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+}
+
+func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
+	repo := gitRepo(t)
+	ctx := context.Background()
+	run := submoduleGit(t)
+	lib := filepath.Join(filepath.Dir(repo), "lib")
+	os.MkdirAll(lib, 0o755)
+	run(lib, "init", "-q", "-b", "main")
+	run(lib, "commit", "-q", "--allow-empty", "-m", "lib")
+	run(repo, "submodule", "add", "-q", lib, "lib")
+	run(repo, "commit", "-q", "-m", "add lib")
+
+	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
+	if _, err := l.Add(ctx, "cal", repo); err != nil {
+		t.Fatal(err)
+	}
+	wt, err := l.CreateWorktree(ctx, "cal", "vendor", "vendor", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "submodule", "update", "-q", "--init")
+	sub := filepath.Join(wt.Path, "lib")
+
+	kept := func(what, want string) {
+		t.Helper()
+		err := l.RemoveWorktree(ctx, "cal", "vendor", false)
+		if err == nil || !strings.Contains(err.Error(), want) || statusFor(err) != 409 {
+			t.Fatalf("%s: err = %v (status %d), want a 409 saying %q", what, err, statusFor(err), want)
+		}
+		if _, err := os.Stat(wt.Path); err != nil {
+			t.Fatalf("%s: the worktree went: %v", what, err)
+		}
+	}
+	os.WriteFile(filepath.Join(sub, "notes"), []byte("wip"), 0o644)
+	kept("a file in the submodule", "modified or untracked")
+	// Config that hides untracked files from status doesn't hide them here.
+	run(wt.Path, "config", "status.showUntrackedFiles", "no")
+	run(sub, "config", "status.showUntrackedFiles", "no")
+	kept("a file in the submodule, hidden from status", "untracked files in a submodule")
+	os.WriteFile(filepath.Join(wt.Path, "todo"), []byte("wip"), 0o644)
+	os.Remove(filepath.Join(sub, "notes"))
+	kept("a file in the worktree, hidden from status", "modified or untracked")
+	os.Remove(filepath.Join(wt.Path, "todo"))
+
+	os.WriteFile(filepath.Join(sub, "notes"), []byte("wip"), 0o644)
+	run(sub, "stash", "push", "-q", "-u")
+	kept("a stash in the submodule", "stashes that no remote has")
+	run(sub, "stash", "drop", "-q")
+
+	run(sub, "commit", "-q", "--allow-empty", "-m", "local only")
+	kept("a submodule commit, uncommitted in the worktree", "modified or untracked")
+	// Committed in the worktree, git status is clean, but the submodule's
+	// commit is only in the worktree's own copy of its history.
+	run(wt.Path, "commit", "-q", "-am", "bump lib")
+	kept("a submodule commit no remote has", "submodule commits or stashes that no remote has")
+	run(sub, "push", "-q", "origin", "HEAD:refs/heads/shared")
+
+	// A commit only a local tag holds, with the submodule back where the
+	// worktree has it: clean, but the tag's commit would go.
+	run(sub, "commit", "-q", "--allow-empty", "-m", "tagged")
+	run(sub, "-c", "tag.gpgSign=false", "tag", "keep")
+	run(sub, "checkout", "-q", "HEAD~1")
+	kept("a commit only a submodule tag holds", "submodule commits or stashes")
+	run(sub, "tag", "-d", "keep")
+
+	// A deinit takes the submodule's checkout, not its repository: its
+	// branches stay in the worktree's git folder, and so go with it.
+	run(sub, "commit", "-q", "--allow-empty", "-m", "branched")
+	run(sub, "branch", "keep")
+	run(sub, "checkout", "-q", "HEAD~1")
+	run(wt.Path, "submodule", "deinit", "-q", "-f", "lib")
+	kept("a branch in a deinitialized submodule", "submodule commits or stashes")
+	out, err := exec.Command("git", "-C", wt.Path, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "--git-dir="+filepath.Join(strings.TrimSpace(string(out)), "modules", "lib"), "branch", "-D", "-q", "keep")
+
+	// A submodule cloned by hand keeps its repository in its own .git,
+	// inside the worktree's folder, and so goes with it too.
+	run(wt.Path, "clone", "-q", lib, "lib")
+	run(sub, "checkout", "-q", "origin/shared")
+	run(sub, "commit", "-q", "--allow-empty", "-m", "embedded")
+	run(wt.Path, "commit", "-q", "-am", "bump lib again")
+	kept("a commit in an embedded submodule repository", "submodule commits or stashes")
+	run(sub, "push", "-q", "origin", "HEAD:refs/heads/embedded")
+
+	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
+		t.Fatalf("a clean worktree with a submodule: %v", err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree folder still there: %v", err)
+	}
+}
+
+func TestADeinitializedSubmoduleInsideAClonedOneIsChecked(t *testing.T) {
+	repo := gitRepo(t)
+	ctx := context.Background()
+	run := submoduleGit(t)
+	// cal has lib, and lib has deep.
+	deep := filepath.Join(filepath.Dir(repo), "deep")
+	lib := filepath.Join(filepath.Dir(repo), "lib")
+	os.MkdirAll(deep, 0o755)
+	os.MkdirAll(lib, 0o755)
+	run(deep, "init", "-q", "-b", "main")
+	run(deep, "commit", "-q", "--allow-empty", "-m", "deep")
+	run(lib, "init", "-q", "-b", "main")
+	run(lib, "submodule", "add", "-q", deep, "deep")
+	run(lib, "commit", "-q", "-m", "add deep")
+	run(repo, "submodule", "add", "-q", lib, "lib")
+	run(repo, "commit", "-q", "-m", "add lib")
+
+	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
+	if _, err := l.Add(ctx, "cal", repo); err != nil {
+		t.Fatal(err)
+	}
+	wt, err := l.CreateWorktree(ctx, "cal", "vendor", "vendor", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// lib cloned by hand: deep's repository lives in lib's own .git. A
+	// branch only deep has, then deep deinitialized.
+	sub := filepath.Join(wt.Path, "lib")
+	run(wt.Path, "clone", "-q", lib, "lib")
+	run(sub, "submodule", "update", "-q", "--init")
+	run(filepath.Join(sub, "deep"), "commit", "-q", "--allow-empty", "-m", "only here")
+	run(filepath.Join(sub, "deep"), "branch", "keep")
+	run(filepath.Join(sub, "deep"), "checkout", "-q", "HEAD~1")
+	run(sub, "submodule", "deinit", "-q", "-f", "deep")
+
+	err = l.RemoveWorktree(ctx, "cal", "vendor", false)
+	if err == nil || !strings.Contains(err.Error(), "submodule commits or stashes") || statusFor(err) != 409 {
+		t.Fatalf("err = %v (status %d), want a 409 about submodule commits", err, statusFor(err))
+	}
+	run(sub, "--git-dir="+filepath.Join(sub, ".git", "modules", "deep"), "branch", "-D", "-q", "keep")
+	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
+		t.Fatalf("with nothing left to lose: %v", err)
+	}
+}
+
+func TestANestedSubmoduleMovedBehindAnIgnoreIsChecked(t *testing.T) {
+	repo := gitRepo(t)
+	ctx := context.Background()
+	run := submoduleGit(t)
+	// cal has lib, and lib has deep at deep's second commit.
+	deep := filepath.Join(filepath.Dir(repo), "deep")
+	lib := filepath.Join(filepath.Dir(repo), "lib")
+	os.MkdirAll(deep, 0o755)
+	os.MkdirAll(lib, 0o755)
+	run(deep, "init", "-q", "-b", "main")
+	run(deep, "commit", "-q", "--allow-empty", "-m", "deep")
+	run(deep, "commit", "-q", "--allow-empty", "-m", "deep 2")
+	run(lib, "init", "-q", "-b", "main")
+	run(lib, "submodule", "add", "-q", deep, "deep")
+	run(lib, "commit", "-q", "-m", "add deep")
+	run(repo, "submodule", "add", "-q", lib, "lib")
+	run(repo, "commit", "-q", "-m", "add lib")
+
+	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
+	if _, err := l.Add(ctx, "cal", repo); err != nil {
+		t.Fatal(err)
+	}
+	wt, err := l.CreateWorktree(ctx, "cal", "vendor", "vendor", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "submodule", "update", "-q", "--init", "--recursive")
+	sub := filepath.Join(wt.Path, "lib")
+	// lib ignores deep, and deep moves to a commit its remote has: only
+	// asking lib itself, ignores overridden, shows the move.
+	run(sub, "config", "submodule.deep.ignore", "all")
+	run(filepath.Join(sub, "deep"), "checkout", "-q", "HEAD~1")
+
+	err = l.RemoveWorktree(ctx, "cal", "vendor", false)
+	if err == nil || !strings.Contains(err.Error(), "files in a submodule") || statusFor(err) != 409 {
+		t.Fatalf("err = %v (status %d), want a 409 about changes in a submodule", err, statusFor(err))
+	}
+	run(filepath.Join(sub, "deep"), "checkout", "-q", "main")
+	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
+		t.Fatalf("with deep back where lib has it: %v", err)
+	}
+}
+
 func TestAFailedAddLeavesNothingBehind(t *testing.T) {
 	repo := gitRepo(t)
 	ctx := context.Background()
