@@ -119,6 +119,37 @@ test("a draft taller than the screen keeps its start; one first seen cut off say
   await expect(draft.locator(".cv-clipped")).toContainText("Its start is above the agent's screen");
 });
 
+const scroller = (page: Page) => page.locator("[data-testid=pane]:visible [data-testid=chat] .overflow-y-auto").first();
+
+// A step in the demo's record, beside its replies (lib/mock-conversation).
+const recordHook = (page: Page, item: Record<string, unknown>) =>
+  page.evaluate(([b, s, it]) => (window as unknown as { __berthDraft: { record(b: string, s: string, it: unknown): void } }).__berthDraft.record(b, s, it), [BOX, AGENT, item] as const);
+
+test("when a long reply folds away and the chat fits again, every row draws, in WebKit too", async ({ app }) => {
+  mockOnly("drives the demo's screen");
+  await app.open({ params: { view: "conversation" } });
+  await app.openWorktree("gpu/judge-v2");
+  const rows = app.chat.locator("[data-chat-row]");
+  const prompt = rows.filter({ hasText: "Pick up judge-v2" });
+  await expect(app.chat.locator("[data-kind=thinking]")).toHaveCount(1);
+  // More rows than the list draws beyond the view (edits always show), then
+  // a reply taller than the screen: the chat keeps to its foot.
+  for (let i = 0; i < 5; i++) await recordHook(app.page, { kind: "edit", file: `src/judge/rubric${i}.ts`, added: 23, removed: 1 });
+  await draftHook(app.page, "land", Array.from({ length: 40 }, (_, i) => `Note ${i}`).join("\n\n"));
+  await expect(prompt).toHaveCount(0);
+  // WebKit (the Mac app) moves a view the chat shrank under without a
+  // scroll event: as there.
+  await app.page.evaluate(() => window.addEventListener("scroll", (e) => e.isTrusted && e.stopImmediatePropagation(), true));
+  // It runs a command and says something short: the long reply folds into
+  // the turn's steps, and the chat fits on the screen.
+  await recordHook(app.page, { kind: "tools", verb: "Run", done: true, items: [{ verb: "Run", target: "pnpm test judge" }] });
+  await draftHook(app.page, "land", "Passing. Changelog entry, then the full checks.");
+  await expect(app.chat.getByText("Passing. Changelog entry")).toBeVisible();
+  await expect(scroller(app.page)).toHaveJSProperty("scrollTop", 0);
+  await expect(prompt).toBeVisible();
+  await expect(rows.filter({ hasText: "rubric0.ts" })).toBeVisible();
+});
+
 // The real reading, on a stand-in agent: the box offers drafts.
 test.describe("on a box with drafts", () => {
   let agent: FakeAgent;
