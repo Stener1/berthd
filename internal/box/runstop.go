@@ -54,7 +54,8 @@ func (h *runHost) stopSession(ctx context.Context, x *runs.StepCtx) runs.Result 
 // would end (one of the run's whose stop failed, or anyone else's). Plain
 // shells close with it, as when archiving by hand. One already gone is
 // done; one already on its way out is waited for, not archived twice
-// (dropWorktree).
+// (dropWorktree). A review worktree's review/ branch is Shipyard's own and
+// goes with it, as with every Archive (dropWorktree).
 func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Result {
 	b := h.b
 	location, name, path := x.Vars["item.location"], x.Vars["item.name"], x.Vars["item.path"]
@@ -77,21 +78,10 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 	if wt.Main {
 		return fail(errors.New("the main checkout is never archived"))
 	}
-	all, err := b.Sessions.List(ctx)
+	batch := stopBatch(x.Vars["params.sessions"])
+	why, err := h.agentsIn(ctx, wt.Path, batch)
 	if err != nil {
 		return fail(err)
-	}
-	batch := stopBatch(x.Vars["params.sessions"])
-	why := ""
-	for _, s := range all {
-		if s.Exited || agentFor(s) == "" || (s.Dir != wt.Path && !strings.HasPrefix(s.Dir, wt.Path+string(filepath.Separator))) {
-			continue
-		}
-		if batch[s.Name] {
-			why = keptStopFailed
-			break
-		}
-		why = keptOtherAgent
 	}
 	if why != "" {
 		return kept(why)
@@ -103,8 +93,19 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 		return fail(err)
 	}
 	b.own(wt.Path)
+	// An agent started there while the archive script ran keeps it too:
+	// the folder going would end it.
+	keep := func() error {
+		if why, err := h.agentsIn(context.Background(), wt.Path, batch); err != nil || why != "" {
+			return errAgentArrived
+		}
+		return nil
+	}
 	done := make(chan error, 1)
-	if _, err := b.dropWorktree(origOf(x), loc, wt.Name, wt.Path, "", false, "archived", func(err error) { done <- err }); err != nil {
+	if _, err := b.dropWorktreeIf(origOf(x), loc, wt.Name, wt.Path, "", false, "archived", func(err error) { done <- err }, keep); err != nil {
+		if errors.Is(err, errAgentArrived) {
+			return kept(keptOtherAgent)
+		}
 		if strings.Contains(err.Error(), "modified or untracked") {
 			return kept(keptDirty)
 		}
@@ -112,15 +113,45 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 	}
 	select {
 	case err := <-done:
+		if errors.Is(err, errAgentArrived) {
+			return kept(keptOtherAgent)
+		}
 		if err != nil {
 			return fail(err)
 		}
 		return runs.Result{Status: runs.Succeeded, Out: stopArchived}
 	case <-ctx.Done():
-		// Cancelled, or berthd is stopping: the archive goes on without the
-		// run, and a resumed run's next ask joins it (dropWorktree).
+		if x.Stopping != nil && x.Stopping() {
+			// berthd is stopping: the step stays unfinished, and the
+			// resumed run asks again, joining this archive if it still
+			// runs (dropWorktree) or finding the worktree gone.
+			return runs.Result{Status: runs.Cancelled}
+		}
+		// Cancelled: the archive goes on without the run.
 		return runs.Result{Status: runs.Succeeded, Out: stopArchiving}
 	}
+}
+
+var errAgentArrived = errors.New("an agent started in the worktree while it was being archived, so it was kept")
+
+// agentsIn says why an agent session live in dir, or in a folder under it,
+// keeps it: one of the run's whose stop didn't take, or another.
+func (h *runHost) agentsIn(ctx context.Context, dir string, batch map[string]bool) (string, error) {
+	all, err := h.b.Sessions.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	why := ""
+	for _, s := range all {
+		if s.Exited || agentFor(s) == "" || (s.Dir != dir && !strings.HasPrefix(s.Dir, dir+string(filepath.Separator))) {
+			continue
+		}
+		if batch[s.Name] {
+			return keptStopFailed, nil
+		}
+		why = keptOtherAgent
+	}
+	return why, nil
 }
 
 // stopBatch is the run's sessions, by name: given as names or as

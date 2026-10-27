@@ -43,6 +43,10 @@ type StepCtx struct {
 	IdemKey    string
 	Vars       map[string]string
 	Candidates []Candidate
+	// Stopping says berthd is stopping, rather than the run being
+	// cancelled: a step that can't finish now answers Cancelled, and the
+	// resumed run does it again.
+	Stopping func() bool
 }
 
 // Result is what a leaf step did.

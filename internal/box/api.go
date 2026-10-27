@@ -590,6 +590,13 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 // its way out isn't torn down twice: a second ask (a stop run resumed, a
 // request sent again) is async, and its done hears how the first ends.
 func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error)) (async bool, err error) {
+	return b.dropWorktreeIf(from, loc, name, dir, branch, force, reason, done, nil)
+}
+
+// dropWorktreeIf is dropWorktree with a last word: keep, when set, is
+// asked right before the folder goes (after the archive script), and an
+// error from it leaves the worktree as it is, done hearing why.
+func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error), keep func() error) (async bool, err error) {
 	if !b.dropBegin(dir, done) {
 		return true, nil
 	}
@@ -644,6 +651,11 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 			var removeErr error
 			b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
 				ran = true
+				if keep != nil {
+					if removeErr = keep(); removeErr != nil {
+						return removeErr
+					}
+				}
 				if removeErr = b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); removeErr != nil {
 					return removeErr
 				}
@@ -656,6 +668,11 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 			finish(removeErr)
 		}()
 		return true, nil
+	}
+	if keep != nil {
+		if err := keep(); err != nil {
+			return false, err
+		}
 	}
 	if err := b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); err != nil {
 		return false, err
