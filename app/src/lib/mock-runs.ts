@@ -279,7 +279,13 @@ async function playStop(r: Run, box: string, act: Act, emit: Emit) {
     if (over()) break;
     const at = `1.i${j}.0`;
     put(archives, j, at, "archive_worktree", "running");
-    const live = ((await act("GET", "sessions")) as Session[]).filter((s) => !s.exited && agentOf(s) && (s.dir === w.path || s.dir.startsWith(`${w.path}/`)));
+    let live: Session[];
+    try {
+      live = ((await act("GET", "sessions")) as Session[]).filter((s) => !s.exited && agentOf(s) && (s.dir === w.path || s.dir.startsWith(`${w.path}/`)));
+    } catch (err) {
+      put(archives, j, at, "archive_worktree", "failed", { error: (err as Error).message, exit_code: 1 });
+      continue;
+    }
     if (live.length) {
       put(archives, j, at, "archive_worktree", "skipped", { output: live.some((s) => p.sessions.includes(s.name)) ? "Kept: an agent there didn't stop" : "Kept: another agent is still running there" });
       continue;
@@ -298,12 +304,23 @@ async function playStop(r: Run, box: string, act: Act, emit: Emit) {
   }
   const failed = stops.some((s) => s.status === "failed") || archives.some((s) => s.status === "failed");
   const status = over() ? "cancelled" : failed ? "failed" : "succeeded";
-  Object.assign(r, { status, error: status === "succeeded" ? undefined : status === "cancelled" ? "cancelled" : "a step failed", finished: new Date().toISOString(), updated: new Date().toISOString() });
+  // Its maps end too, as the box's do, so the run's timeline shows none
+  // still running.
+  const mapStatus = (items: RunStep[]) => (over() ? "cancelled" : items.some((c) => c.status === "failed") ? "failed" : "succeeded");
+  Object.assign(r, {
+    status,
+    error: status === "succeeded" ? undefined : status === "cancelled" ? "cancelled" : "a step failed",
+    finished: new Date().toISOString(),
+    updated: new Date().toISOString(),
+    steps: r.steps.map((s) => ({ ...s, status: mapStatus(s.path === "0" ? stops : archives) })),
+  });
   emit({ type: "run.finished", box, data: { run: r.id, status } });
 }
 
 // The stop runs asked to stop: they end once the step in flight has.
 const stopping = new Set<string>();
+// The Idempotency-Key each run was started under, by run.
+const idemKeys = new Map<string, string>();
 
 export function runsCall(box: string, method: string, path: string, body: unknown, emit: Emit, delay: <T>(v: T) => Promise<T>, act?: Act): Promise<unknown> | undefined {
   if (box !== "devl" && box !== "gpu") {
@@ -316,7 +333,8 @@ export function runsCall(box: string, method: string, path: string, body: unknow
   if (method === "GET" && path.startsWith("runs?")) {
     const q = new URLSearchParams(path.split("?")[1]);
     const t = q.get("template");
-    return delay(all.filter((r) => !t || r.template === t).map(summary));
+    const g = q.get("group");
+    return delay(all.filter((r) => (!t || r.template === t) && (!g || r.group === g)).map(summary));
   }
   if (method === "GET" && path === "runs/templates") return delay([]);
   let m = /^runs\/([^/?]+)$/.exec(path);
@@ -369,8 +387,12 @@ export function runsCall(box: string, method: string, path: string, body: unknow
     return delay({ decided: r.id, approve: d.approve });
   }
   if (method === "POST" && path === "runs") {
-    const req = body as { template?: string; title?: string; params?: Record<string, unknown> };
-    const r: Run = { id: `r_mdemo${Math.random().toString(36).slice(2, 7)}`, template: req.template ?? "flow", title: req.title ?? `${req.template} run`, status: "running", created: new Date().toISOString(), updated: new Date().toISOString(), params: req.params, steps: [] };
+    const req = body as { template?: string; title?: string; group?: string; params?: Record<string, unknown>; idem_key?: string };
+    // Asked again under the same key, the box answers with the run it has.
+    const had = req.idem_key ? all.find((x) => idemKeys.get(x.id) === req.idem_key) : undefined;
+    if (had) return delay(summary(had));
+    const r: Run = { id: `r_mdemo${Math.random().toString(36).slice(2, 7)}`, template: req.template ?? "flow", title: req.title ?? `${req.template} run`, status: "running", created: new Date().toISOString(), updated: new Date().toISOString(), group: req.group, params: req.params, steps: [] };
+    if (req.idem_key) idemKeys.set(r.id, req.idem_key);
     all.unshift(r);
     emit({ type: "run.created", box, data: { run: r.id, template: r.template, status: "running" } });
     // A broadcast plays out: each prompt typed in, then, if asked, each

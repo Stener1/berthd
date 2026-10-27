@@ -3,8 +3,10 @@
 // stop.json): it stops the agents a few at a time, then archives their
 // worktrees where it's safe, one at a time, and keeps going while the
 // laptop sleeps. The job only follows the run: a row fails when the box
-// says so, never because the laptop lost touch, and the job comes back
-// after a relaunch (reattachStopJobs). A box without runs, or offline when
+// says so, never because the laptop lost touch. It is kept before the
+// start is sent, so it comes back after a relaunch (reattachStopJobs), and
+// a start whose answer never came is asked again or looked up by its group
+// (startStopRun). A box without runs, or offline when
 // it starts, gets the app's own loop for its rows: the agents stopped a few
 // at a time, then their worktrees archived where it's safe
 // (lib/archive-after-stop.ts), one at a time on each box in the same line
@@ -58,6 +60,8 @@ export interface StopRuns {
   onBox(box: string): boolean;
   // idemKey makes asking again after an answer that never came safe.
   start(box: string, req: { title: string; group: string; params: StopRunParams; idemKey: string }): Promise<{ id: string }>;
+  // The run started under group, when the box has one.
+  find(box: string, group: string): Promise<{ id: string } | undefined>;
   get(box: string, id: string): Promise<StopRun>;
   cancel(box: string, id: string): Promise<void>;
 }
@@ -68,6 +72,10 @@ export interface StopDeps {
   // doesn't answer.
   liveAgents(box: string): Promise<{ dir: string; name: string }[] | undefined>;
   archive(box: string, location: string, wt: { name: string; path: string }): Promise<{ archive?: string }>;
+  // How an archive whose script runs on the box ended, once it says:
+  // gone, failed, or undefined when it can't tell. The box's line waits for
+  // it, so its archive scripts never run side by side.
+  settled?(box: string, path: string): Promise<"gone" | "failed" | undefined>;
   errorText(err: unknown): string;
   // The boxes that do it themselves; without it the app does it all.
   runs?: StopRuns;
@@ -102,6 +110,8 @@ const ARCHIVING = archivedMessage({ archive: "yes" });
 
 const willArchive = (archive: boolean) => (r: StopItem) => archive && !!r.where && !r.where.worktree.main;
 
+export const fitsRun = (p: StopRunParams) => p.sessions.length <= MAX_ITEMS && p.worktrees.length <= MAX_ITEMS;
+
 export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopDeps): Promise<StopResult> {
   const title = `Stopping ${plural(rows.length, "agent")}`;
   const ref = `stop-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -111,36 +121,21 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
   const byBox = new Map<string, StopItem[]>();
   for (const r of rows) byBox.set(r.box, [...(byBox.get(r.box) ?? []), r]);
   // Each box with runs takes its share as one run; the rest is the app's.
-  const started: { box: string; id: string; params: StopRunParams }[] = [];
-  const unanswered = new Set<string>();
-  const asks: Promise<void>[] = [];
-  for (const [box, mine] of byBox) {
-    const params = stopParams(mine, archive);
-    if (!deps.runs?.onBox(box) || params.sessions.length > MAX_ITEMS || params.worktrees.length > MAX_ITEMS) continue;
-    asks.push(
-      startStopRun(deps.runs, box, { title, group: ref, params }, deps.every).then(
-        (id) => {
-          if (!id) return;
-          started.push({ box, id, params });
-          // Kept at once, so a relaunch while another box is still asked
-          // brings this one's run back.
-          const onBox = new Set(started.map((s) => s.box));
-          remember({ ref, title, started: Date.now(), runs: started.map(({ box: b, id: r }) => ({ box: b, id: r })), items: items.filter((i) => onBox.has(i.group)) });
-        },
-        // It may have the run: the app doesn't do it as well.
-        (err) => {
-          unanswered.add(box);
-          for (const r of mine) setItem(job, r.key, { state: "failed", message: `Failed: ${deps.errorText(err)}` });
-        },
-      ),
-    );
+  const shares = [...byBox].map(([box, mine]) => ({ box, mine, params: stopParams(mine, archive) }));
+  const onBox = shares.filter((sh) => deps.runs?.onBox(sh.box) && fitsRun(sh.params));
+  // Kept before anything is sent, so a relaunch before a box answers still
+  // finds its run, or asks for it again (reattachStopJobs).
+  if (onBox.length) {
+    const boxes = new Set(onBox.map((sh) => sh.box));
+    remember({ ref, title, started: Date.now(), runs: onBox.map(({ box, params }) => ({ box, params })), items: items.filter((i) => boxes.has(i.group)) });
   }
-  if (asks.length) await Promise.all(asks);
-  const local = rows.filter((r) => !unanswered.has(r.box) && !started.some((s) => s.box === r.box));
+  const local = shares.filter((sh) => !onBox.includes(sh)).flatMap((sh) => sh.mine);
   const tallies = await Promise.all([
-    ...started.map(async ({ box, id, params }) => {
-      for (const w of params.worktrees) if (!removalOf(useRemovals.getState().byKey, box, w.path)) markRemoving(box, w.path, "archive", w.name);
-      return followJobRun(job, box, id, deps.runs!, deps.every);
+    ...onBox.map(async ({ box, mine, params }) => {
+      const t = await onTheBox(job, { ref, title, box, params, keys: mine.map((r) => r.key) }, deps.runs!, deps.every);
+      // Refused (a box from before stop runs): nothing was sent, so the app
+      // does it.
+      return t ?? appStop(job, mine, archive, deps);
     }),
     local.length ? appStop(job, local, archive, deps) : undefined,
   ]);
@@ -151,19 +146,80 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
   return { job, worktrees, clean: !!done && outcomeOf(done) === "clean" };
 }
 
-// startStopRun asks box to take its share as one stop run, and answers
-// with the run's id, or undefined when the box refuses it (4xx: a box from
-// before stop runs), so nothing was sent and the app does it. A box that
-// doesn't answer is asked again, under the same idempotency key, so a run
-// whose answer was lost isn't started twice; still no answer, it throws.
-export async function startStopRun(runs: StopRuns, box: string, req: { title: string; group: string; params: StopRunParams }, every = 1500): Promise<string | undefined> {
-  for (let tries = 1; ; tries++) {
+// onTheBox has box do one share of a job as a stop run and follows it, its
+// rows (keys) waiting for the box until it answers. Undefined is the box
+// refusing it: nothing was sent.
+async function onTheBox(job: number, sh: { ref: string; title: string; box: string; params: StopRunParams; keys: string[] }, runs: StopRuns, every?: number): Promise<Tally | undefined> {
+  const { ref, box, params, keys } = sh;
+  const started = await startStopRun(runs, box, { title: sh.title, group: ref, params }, {
+    every,
+    // A job that left the tray (the app quitting) asks no more; it stays
+    // kept for the next start.
+    cancelled: () => isCancelling(job) || !jobOf(job),
+    waiting: () => {
+      for (const k of keys) if (jobOf(job)?.items.find((i) => i.key === k)?.state === "queued") setItem(job, k, { message: `Waiting for ${box}` });
+    },
+  });
+  const none: Tally = { stopped: 0, unsent: 0, worktrees: {} };
+  if (!jobOf(job)) return none;
+  if (started === "refused") {
+    keptRun(ref, box, undefined);
+    return undefined;
+  }
+  if (started === "unsent") {
+    keptRun(ref, box, undefined);
+    for (const k of keys) setItem(job, k, { state: "cancelled", message: "Not stopped" });
+    return { ...none, unsent: keys.length };
+  }
+  if (started === "unknown") {
+    for (const k of keys) setItem(job, k, { state: "failed", message: `Failed: ${box} didn't answer, so it may still stop it` });
+    return none;
+  }
+  keptRun(ref, box, started.id);
+  for (const w of params.worktrees) if (!removalOf(useRemovals.getState().byKey, box, w.path)) markRemoving(box, w.path, "archive", w.name);
+  return followJobRun(job, box, started.id, runs, every, params);
+}
+
+// What became of asking a box to start a stop run: its id; refused (4xx: a
+// box from before stop runs), so nothing was sent and the app does it;
+// unsent, cancelled before the box had it; or unknown, cancelled while the
+// box never answered.
+export type Started = { id: string } | "refused" | "unsent" | "unknown";
+
+// Asked again no slower than this, while a box doesn't answer.
+const MAX_RETRY_MS = 30_000;
+
+// startStopRun asks box to take its share as one stop run. A box that
+// doesn't answer is asked again, under the same idempotency key, until it
+// does: a run whose answer was lost is neither started twice nor given up
+// on, and its rows never fail for the laptop losing touch. waiting hears
+// each time it goes unanswered. Once cancelled says so it asks no more; a
+// box asked before then is asked whether it has the run (its group), so a
+// run it took is followed, and cancelled, rather than lost.
+export async function startStopRun(runs: StopRuns, box: string, req: { title: string; group: string; params: StopRunParams }, o: { every?: number; cancelled?(): boolean; waiting?(err: unknown): void } = {}): Promise<Started> {
+  const every = o.every ?? 1500;
+  for (let tries = 0; ; tries++) {
+    if (o.cancelled?.()) return tries ? lookUp(runs, box, req.group, every) : "unsent";
     try {
-      return (await runs.start(box, { ...req, idemKey: `${req.group}/${box}` })).id;
+      return { id: (await runs.start(box, { ...req, idemKey: `${req.group}/${box}` })).id };
     } catch (err) {
       const status = (err as { status?: number }).status ?? 0;
-      if (status >= 400 && status < 500) return undefined;
-      if (tries >= 3) throw err;
+      if (status >= 400 && status < 500) return "refused";
+      o.waiting?.(err);
+      await sleep(Math.min(every * 2 * (tries + 1), MAX_RETRY_MS));
+    }
+  }
+}
+
+// lookUp asks box for the run started under group: a few times, as the
+// user is waiting on Stop the rest.
+async function lookUp(runs: StopRuns, box: string, group: string, every: number): Promise<Started> {
+  for (let tries = 1; ; tries++) {
+    try {
+      const run = await runs.find(box, group);
+      return run ? { id: run.id } : "unsent";
+    } catch {
+      if (tries >= 3) return "unknown";
       await sleep(every * 2);
     }
   }
@@ -294,7 +350,7 @@ export async function followStopRun(runs: StopRuns, box: string, id: string, o: 
 }
 
 // followJobRun keeps a job's rows on box in step with its stop run.
-async function followJobRun(job: number, box: string, id: string, runs: StopRuns, every?: number): Promise<Tally> {
+async function followJobRun(job: number, box: string, id: string, runs: StopRuns, every?: number, params?: StopRunParams): Promise<Tally> {
   const read = await followStopRun(runs, box, id, {
     every,
     cancelled: () => isCancelling(job),
@@ -312,6 +368,8 @@ async function followJobRun(job: number, box: string, id: string, runs: StopRuns
   });
   if (!read) {
     for (const i of jobOf(job)?.items ?? []) if (i.group === box && i.state !== "done") setItem(job, i.key, { state: "failed", message: `Failed: ${box} no longer has this run` });
+    // Its worktrees were marked Archiving… for it: no word will come now.
+    for (const w of params?.worktrees ?? []) clearRemoving(box, w.path);
     return { stopped: 0, unsent: 0, worktrees: {} };
   }
   const worktrees: Record<string, WorktreeOutcome> = {};
@@ -395,6 +453,11 @@ async function appStop(job: number, rows: StopItem[], archive: boolean, deps: St
           try {
             const res = await deps.archive(w.box, w.location, w.wt);
             report(w, res.archive ? "archiving" : "archived", archivedMessage(res));
+            if (res.archive && deps.settled) {
+              const how = await deps.settled(w.box, w.wt.path);
+              if (how === "gone") report(w, "archived", archivedMessage({}));
+              else if (how === "failed") report(w, "failed", "Couldn't archive: its archive script failed");
+            }
           } catch (err) {
             if (keepsWork(err)) leave("kept", KEPT_DIRTY);
             else leave("failed", `Couldn't archive: ${deps.errorText(err)}`);
@@ -406,30 +469,48 @@ async function appStop(job: number, rows: StopItem[], archive: boolean, deps: St
   return { stopped: stopped.size, unsent: unsent.length, worktrees };
 }
 
-// The jobs whose runs the boxes carry on with, kept until they're
-// dismissed, so a relaunch brings them back.
+// The jobs whose runs the boxes carry on with, kept from before their start
+// is sent until they're dismissed, so a relaunch brings them back.
 const KEPT_JOBS = "berth.jobs.stopRuns";
-// A run's journal goes after a while; a job that old isn't brought back.
+// A run's journal goes after a while; a job that old isn't brought back,
+// dismissed or not.
 const KEEP_MS = 24 * 60 * 60 * 1000;
 
 interface KeptJob {
   ref: string;
   title: string;
   started: number;
-  runs: { box: string; id: string }[];
+  // Each box's share: id once the box answered the start; params to ask
+  // again with, under the same group and key, and for its worktrees.
+  runs: { box: string; id?: string; params?: StopRunParams }[];
   // The rows of those runs.
   items: Omit<JobItem, "state">[];
 }
 
 const keptJobs = () => load<KeptJob[]>(KEPT_JOBS, []).filter((k) => Date.now() - k.started < KEEP_MS);
 const remember = (k: KeptJob) => save(KEPT_JOBS, [...keptJobs().filter((x) => x.ref !== k.ref), k]);
+// keptRun notes box's run for the job ref, or, without an id, that box has
+// none (it refused, or nothing was sent): its share and rows aren't kept.
+function keptRun(ref: string, box: string, id: string | undefined) {
+  save(
+    KEPT_JOBS,
+    keptJobs().flatMap((k) => {
+      if (k.ref !== ref) return [k];
+      if (id) return [{ ...k, runs: k.runs.map((r) => (r.box === box ? { ...r, id } : r)) }];
+      const runs = k.runs.filter((r) => r.box !== box);
+      return runs.length ? [{ ...k, runs, items: k.items.filter((i) => i.group !== box) }] : [];
+    }),
+  );
+}
 onDismiss((j) => {
   if (j.ref) save(KEPT_JOBS, keptJobs().filter((k) => k.ref !== j.ref));
 });
 
 // reattachStopJobs brings back the stop jobs the boxes carried on with
 // while the app was closed, each as its runs are now or as they ended. A
-// row only says what its box says; until a box answers it waits for it.
+// row only says what its box says; until a box answers it waits for it. A
+// share whose start was never answered is asked for again, under the same
+// key: the box has it, or takes it now.
 export async function reattachStopJobs(deps: { runs: StopRuns; every?: number }) {
   const kept = keptJobs();
   save(KEPT_JOBS, kept);
@@ -438,7 +519,18 @@ export async function reattachStopJobs(deps: { runs: StopRuns; every?: number })
       .filter((k) => !useJobs.getState().jobs.some((j) => j.ref === k.ref))
       .map(async (k) => {
         const job = startJob({ title: k.title, items: k.items.map((i) => ({ ...i, message: "Waiting for its box" })), cancellable: true, ref: k.ref });
-        const tallies = await Promise.all(k.runs.map((r) => followJobRun(job, r.box, r.id, deps.runs, deps.every)));
+        const none: Tally = { stopped: 0, unsent: 0, worktrees: {} };
+        const tallies = await Promise.all(
+          k.runs.map(async (r) => {
+            if (r.id) return followJobRun(job, r.box, r.id, deps.runs, deps.every, r.params);
+            if (!r.params) return none;
+            const keys = k.items.filter((i) => i.group === r.box).map((i) => i.key);
+            const t = await onTheBox(job, { ref: k.ref, title: k.title, box: r.box, params: r.params, keys }, deps.runs, deps.every);
+            if (t) return t;
+            for (const key of keys) setItem(job, key, { state: "failed", message: `Failed: ${r.box} can't run it` });
+            return none;
+          }),
+        );
         const worktrees = Object.values(Object.assign({}, ...tallies.map((t) => t.worktrees)) as Record<string, WorktreeOutcome>);
         if (jobOf(job))
           finishJob(
