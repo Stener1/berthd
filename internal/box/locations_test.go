@@ -260,7 +260,7 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	// Config that hides untracked files from status doesn't hide them here.
 	run(wt.Path, "config", "status.showUntrackedFiles", "no")
 	run(sub, "config", "status.showUntrackedFiles", "no")
-	kept("a file in the submodule, hidden from status", "submodule changes")
+	kept("a file in the submodule, hidden from status", "untracked files in a submodule")
 	os.WriteFile(filepath.Join(wt.Path, "todo"), []byte("wip"), 0o644)
 	os.Remove(filepath.Join(sub, "notes"))
 	kept("a file in the worktree, hidden from status", "modified or untracked")
@@ -276,8 +276,29 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	// Committed in the worktree, git status is clean, but the submodule's
 	// commit is only in the worktree's own copy of its history.
 	run(wt.Path, "commit", "-q", "-am", "bump lib")
-	kept("a submodule commit no remote has", "commits or stashes that no remote has")
+	kept("a submodule commit no remote has", "submodule commits, tags or stashes that no remote has")
 	run(sub, "push", "-q", "origin", "HEAD:refs/heads/shared")
+
+	// A commit only a local tag holds, with the submodule back where the
+	// worktree has it: clean, but the tag's commit would go.
+	run(sub, "commit", "-q", "--allow-empty", "-m", "tagged")
+	run(sub, "-c", "tag.gpgSign=false", "tag", "keep")
+	run(sub, "checkout", "-q", "HEAD~1")
+	kept("a commit only a submodule tag holds", "submodule commits, tags or stashes")
+	run(sub, "tag", "-d", "keep")
+
+	// A deinit takes the submodule's checkout, not its repository: its
+	// branches stay in the worktree's git folder, and so go with it.
+	run(sub, "commit", "-q", "--allow-empty", "-m", "branched")
+	run(sub, "branch", "keep")
+	run(sub, "checkout", "-q", "HEAD~1")
+	run(wt.Path, "submodule", "deinit", "-q", "-f", "lib")
+	kept("a branch in a deinitialized submodule", "submodule commits, tags or stashes")
+	out, err := exec.Command("git", "-C", wt.Path, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "--git-dir="+filepath.Join(strings.TrimSpace(string(out)), "modules", "lib"), "branch", "-D", "-q", "keep")
 
 	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
 		t.Fatalf("a clean worktree with a submodule: %v", err)

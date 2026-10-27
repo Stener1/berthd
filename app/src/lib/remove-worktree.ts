@@ -77,8 +77,8 @@ async function drain(box: string) {
         toastManager.add({
           type: "warning",
           title: `Kept ${wt.name}`,
-          description: /submodule changes/i.test(msg)
-            ? "A submodule in it has changes, commits or stashes no remote has, so it was left as it is."
+          description: /submodule commits/i.test(msg)
+            ? "A submodule in it has commits, tags or stashes no remote has, so it was left as it is."
             : "It has uncommitted changes, so git left it as it is.",
           actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
         });
