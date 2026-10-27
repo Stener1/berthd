@@ -93,7 +93,7 @@ export async function run({ page, shot, step, expect }) {
   await pill.click();
 
   step("it ends as a report of what was kept, each saying why");
-  await expect(first).toContainText("4 stopped, 1 archived, 1 archiving, 2 kept", { timeout: 15_000 });
+  await expect(first).toContainText("4 stopped, 2 archived, 2 kept", { timeout: 15_000 });
   await expect(first.getByRole("listitem")).toHaveCount(2);
   await expect(jobRow("Stopping 4 agents", "checkout-fix")).toContainText("Stopped · Kept: uncommitted changes");
   await expect(jobRow("Stopping 4 agents", "order-export")).toContainText("Stopped · Kept: another agent is still running there");
