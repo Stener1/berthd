@@ -9,6 +9,15 @@ upgrades with `berth upgrade BOX`, or by running the
 [install command](/getting-started/add-a-box#with-the-install-command)
 again.
 
+## Unreleased
+
+- **Upgrading a box no longer leaves dead processes behind.** Each upgrade
+  left the terminals that were open on the box, and any command berthd had
+  running, as zombie processes under berthd until it restarted for good. A
+  box now closes its terminals before it switches to the new build, and the
+  new build cleans up whatever the old one left. Your sessions keep running,
+  and the app reattaches its terminals as before.
+
 ## v0.3.31
 
 - **Worktrees with submodules can be removed.** git refuses to remove any
