@@ -19,7 +19,7 @@ const CUT = "…";
 export function linkParts(text: string): LinkPart[] {
   const out: LinkPart[] = [];
   let at = 0;
-  for (const m of findUrls(text)) {
+  for (const m of findUrls(text, true)) {
     if (!/^https?:\/\//i.test(m.url)) continue;
     let url = m.url;
     if (url.endsWith(CUT)) {

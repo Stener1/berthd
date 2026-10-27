@@ -30,6 +30,16 @@ test("an address the box cut short, into its trailing …, is shown but not link
   assert.deepEqual(linkParts("Open https://example.com/a?x=1&…"), [{ text: "Open https://example.com/a?x=1&…" }]);
 });
 
+test("an apostrophe in an address is part of it, and a quote around one isn't", () => {
+  const url = "https://example.com/search?q=O'Reilly&page=2";
+  assert.deepEqual(linkParts(`See ${url} now`), [{ text: "See " }, { text: url, url }, { text: " now" }]);
+  assert.deepEqual(linkParts("Open 'https://example.com/a' first"), [{ text: "Open '" }, { text: "https://example.com/a", url: "https://example.com/a" }, { text: "' first" }]);
+});
+
+test("an address with an apostrophe that the box cut short is not linked either", () => {
+  assert.deepEqual(linkParts("Open https://example.com/search?q=O'Reill…"), [{ text: "Open https://example.com/search?q=O'Reill…" }]);
+});
+
 test("an ellipsis inside the text is not the box's cut", () => {
   assert.deepEqual(linkParts("Try https://example.com/a… or not"), [{ text: "Try " }, { text: "https://example.com/a", url: "https://example.com/a" }, { text: "… or not" }]);
 });
