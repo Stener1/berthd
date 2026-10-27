@@ -2,6 +2,7 @@ import { toastError } from "@/components/error-note";
 import { toastManager } from "@/components/ui/toast";
 import type { Client } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
+import { keptReason } from "@/lib/kept-reason";
 import { unpinWorktree } from "@/lib/pinned-worktrees";
 import { clearRemoving, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
 import { scheduleRefresh, useStore } from "@/lib/store";
@@ -71,15 +72,12 @@ async function drain(box: string) {
       await removeWorktreeOnBox(client, box, location, wt, "remove", { force });
     } catch (err) {
       clearRemoving(box, wt.path);
-      // git's own words for work it would lose.
-      const msg = errorMessage(err);
-      if (!force && /modified|untracked|uncommitted|contains/i.test(msg)) {
+      const why = force ? null : keptReason(errorMessage(err));
+      if (why) {
         toastManager.add({
           type: "warning",
           title: `Kept ${wt.name}`,
-          description: /submodule commits/i.test(msg)
-            ? "A submodule in it has commits or stashes no remote has, so it was left as it is."
-            : "It has uncommitted changes, so git left it as it is.",
+          description: why,
           actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
         });
       } else toastError(err, { title: `Couldn't remove ${wt.name}`, box });
