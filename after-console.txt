@@ -1,0 +1,5 @@
+[warning] ghostty-web: theme changes after open() are not yet fully supported
+[warning] ghostty-web: theme changes after open() are not yet fully supported
+[warning] ghostty-web: theme changes after open() are not yet fully supported
+[warning] ghostty-web: theme changes after open() are not yet fully supported
+[warning] ghostty-web: theme changes after open() are not yet fully supported

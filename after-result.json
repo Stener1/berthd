@@ -1,0 +1,23 @@
+{
+  "scenario": "chat-question-links",
+  "ok": true,
+  "steps": [
+    "open http://localhost:1433/?mock=1&sidebar=list&view=conversation&scene=question-links",
+    "open gpu/shop's chat: Claude asks 2 questions, with long addresses",
+    "question link href is the whole address (231 chars), the option's too (260 chars)",
+    "theme: Shipyard Light",
+    "theme: Shipyard Dark",
+    "click the link in Approved's description",
+    "opened https://example-shop.myshopify.com/admin/oauth/authorize?cli… in full; Approved is not picked",
+    "Enter on the focused link",
+    "opened again; still nothing picked",
+    "click the question's own link",
+    "click Approved's label: it is picked",
+    "at a phone's width (390x844), the sidebar hidden",
+    "theme: Shipyard Light",
+    "theme: Shipyard Dark",
+    "step 2: the address the box cut short shows, with no link",
+    "the review shows the first question whole"
+  ],
+  "failures": []
+}
