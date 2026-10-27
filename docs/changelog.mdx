@@ -53,6 +53,16 @@ again.
   rest** to send no more. When all went well it sums up and fades away;
   when something was kept or failed, it stays as a short report of those
   until you close it. It keeps going while you work elsewhere in the app.
+- **Closing the laptop no longer halts a bulk Stop.** Each box now stops
+  its agents and archives their worktrees itself, as a run, so the job
+  keeps going while your laptop sleeps or the app is closed. The tray
+  follows the box: after the laptop wakes, or the app starts again, it
+  shows how far each box got, or how it ended. A row only fails when its
+  box says so, never because the laptop lost touch. **Stop the rest**
+  asks the boxes to start nothing more; what they're in the middle of
+  finishes. The Worktrees table's Stop sessions and Archive, and **Stop
+  everything in …** in the sidebar, go through the box the same way.
+  Older boxes are handled by the app, as before.
 - **Archiving a worktree no longer holds its dialog open.** Archive…
   still asks first, but the dialog closes as soon as you press Archive:
   the worktree shows Archiving… and goes when its box gets to it, one at

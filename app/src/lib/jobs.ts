@@ -7,8 +7,10 @@ import { load, save } from "./storage.ts";
 // tray in the corner (components/jobs-tray.tsx) shows each one's rows as
 // they go, folds to a line, and keeps a report when something was kept or
 // failed. A clean job sums itself up and fades. The store is the app's, not
-// a view's: a job carries on when you leave the page that started it. It
-// doesn't outlive the app: rows not yet sent are lost when it quits.
+// a view's: a job carries on when you leave the page that started it. What
+// the app does itself doesn't outlive it: rows not yet sent are lost when it
+// quits. What a box does as a run does, and its job comes back on the next
+// start (ref, lib/stop-job.ts).
 //
 // No imports from "@/": pnpm test runs this file in plain node.
 
@@ -36,6 +38,8 @@ export interface Job {
   // Set when it ends: what it did, "17 stopped, 15 archived".
   summary?: string;
   finished?: number;
+  // What its starter keeps it by across a relaunch, until it's dismissed.
+  ref?: string;
 }
 
 // A clean job's summary stays this long, then goes.
@@ -48,10 +52,10 @@ export const useJobs = create<{ jobs: Job[]; folded: boolean }>()(() => ({ jobs:
 let nextId = 0;
 
 // startJob puts a job on top of the tray and answers with its id.
-export function startJob(job: { title: string; items: Omit<JobItem, "state">[]; cancellable?: boolean }): number {
+export function startJob(job: { title: string; items: Omit<JobItem, "state">[]; cancellable?: boolean; ref?: string }): number {
   const id = ++nextId;
   const items = job.items.map((i) => ({ ...i, state: "queued" as const }));
-  useJobs.setState((s) => ({ jobs: [{ id, title: job.title, items, cancellable: !!job.cancellable }, ...s.jobs] }));
+  useJobs.setState((s) => ({ jobs: [{ id, title: job.title, items, cancellable: !!job.cancellable, ref: job.ref }, ...s.jobs] }));
   return id;
 }
 
@@ -78,7 +82,17 @@ export function finishJob(id: number, summary: string) {
   (t as { unref?: () => void }).unref?.();
 }
 
-export const dismissJob = (id: number) => useJobs.setState((s) => (s.jobs.some((j) => j.id === id) ? { jobs: s.jobs.filter((j) => j.id !== id) } : s));
+const dismissed: ((job: Job) => void)[] = [];
+
+// onDismiss hears of each job as it leaves the tray, dismissed or faded.
+export const onDismiss = (fn: (job: Job) => void) => void dismissed.push(fn);
+
+export function dismissJob(id: number) {
+  const j = jobOf(id);
+  if (!j) return;
+  useJobs.setState((s) => ({ jobs: s.jobs.filter((x) => x.id !== id) }));
+  for (const fn of dismissed) fn(j);
+}
 
 export function setFolded(folded: boolean) {
   useJobs.setState({ folded });

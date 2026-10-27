@@ -316,6 +316,31 @@ func TestArchivingAnswersInJSONAndRemovalStopsTheWorktreesSessions(t *testing.T)
 	}
 }
 
+// Asked twice while its archive script runs, a worktree is archived once:
+// the second ask is answered 202 too, and joins the first.
+func TestAWorktreeOnItsWayOutIsNotArchivedTwice(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	c, bus := servedBox(t)
+	seen, stop := bus.Subscribe()
+	defer stop()
+	repo := gitRepo(t)
+	count := filepath.Join(t.TempDir(), "archived")
+	call(t, c, "POST", "/v1/locations", "", map[string]string{"name": "cal", "path": repo}, nil)
+	call(t, c, "POST", "/v1/locations/cal/worktrees", "", WorktreeRequest{Name: "billing"}, nil)
+	call(t, c, "PUT", "/v1/locations/cal/scripts", "", map[string]string{"archive": "echo run >> " + count + "; sleep 1"}, nil)
+	for i := range 2 {
+		var body map[string]string
+		if status := call(t, c, "DELETE", "/v1/locations/cal/worktrees/billing", "", nil, &body); status != 202 {
+			t.Fatalf("ask %d answered %d %v", i+1, status, body)
+		}
+	}
+	waitFor(t, seen, "worktree.removed")
+	time.Sleep(200 * time.Millisecond)
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("the archive script ran %d times", strings.Count(string(b), "\n"))
+	}
+}
+
 func TestHomeSessionStartsInTheUsersHomeAndNowhereElse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

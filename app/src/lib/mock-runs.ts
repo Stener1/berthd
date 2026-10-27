@@ -1,4 +1,5 @@
-import { ApiError, type BerthEvent, type Run, type RunCandidate, type RunStep, type RunSummary } from "@/lib/api";
+import { ApiError, type BerthEvent, type Run, type RunCandidate, type RunStep, type RunSummary, type Session } from "@/lib/api";
+import { agentOf } from "@/lib/derive";
 
 // Runs in the demo: the shop world on devl has a loop going, an attempts run
 // of three agents waiting for you to pick one in Review's Compare, one whose
@@ -6,7 +7,8 @@ import { ApiError, type BerthEvent, type Run, type RunCandidate, type RunStep, t
 // Gitea repository that finished with its branch pushed and no pull
 // request, a flow's run, a review and a finished broadcast. Deciding, cancelling and starting
 // runs work, so the loops panel, Automations → Runs, Compare and the phone
-// all have something to show.
+// all have something to show. A bulk Stop's stop run plays out against the
+// demo's own sessions and worktrees (playStop).
 
 type Emit = (e: Omit<BerthEvent, "time">) => void;
 
@@ -237,7 +239,73 @@ function world(): Run[] {
 
 const summary = (r: Run): RunSummary => ({ ...r, steps: r.steps.length, candidates: r.candidates?.length });
 
-export function runsCall(box: string, method: string, path: string, body: unknown, emit: Emit, delay: <T>(v: T) => Promise<T>): Promise<unknown> | undefined {
+// Act calls the mock box's own routes, as a run's steps do on a real one.
+type Act = (method: string, path: string) => Promise<unknown>;
+
+// playStop plays a stop run out as the box does (internal/box/runstop.go):
+// the sessions stopped three at a time, then each worktree archived where
+// it's safe, one at a time, through the mock's own routes. Cancelled, it
+// finishes the step in flight and starts no more.
+async function playStop(r: Run, box: string, act: Act, emit: Emit) {
+  const p = r.params as { sessions: string[]; worktrees: { location: string; name: string; path: string; sessions: string[] }[] };
+  const stops: RunStep[] = [];
+  const archives: RunStep[] = [];
+  const show = () =>
+    Object.assign(r, {
+      updated: new Date().toISOString(),
+      steps: [{ id: "stop", path: "0", kind: "map", status: "running", exit_code: 0, children: stops }, ...(archives.length ? [{ id: "archive", path: "1", kind: "map", status: "running", exit_code: 0, children: archives }] : [])],
+    });
+  const put = (list: RunStep[], k: number, path: string, kind: string, status: string, more: Partial<RunStep> = {}) => {
+    const leaf: RunStep = { id: kind === "stop_session" ? "session" : "worktree", path, kind, status, exit_code: 0, ...more };
+    list[k] = { id: `i${k}`, path: path.slice(0, -2), kind: "item", status, exit_code: 0, children: [leaf] };
+    show();
+  };
+  const over = () => stopping.has(r.id);
+  const queue = p.sessions.map((s, k) => [s, k] as const);
+  const worker = async () => {
+    for (let next = queue.shift(); next && !over(); next = queue.shift()) {
+      const [s, k] = next;
+      put(stops, k, `0.i${k}.0`, "stop_session", "running");
+      try {
+        await act("DELETE", `sessions/${encodeURIComponent(s)}`);
+        put(stops, k, `0.i${k}.0`, "stop_session", "succeeded", { output: "stopped" });
+      } catch (err) {
+        put(stops, k, `0.i${k}.0`, "stop_session", "failed", { error: (err as Error).message, exit_code: 1 });
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  for (const [j, w] of p.worktrees.entries()) {
+    if (over()) break;
+    const at = `1.i${j}.0`;
+    put(archives, j, at, "archive_worktree", "running");
+    const live = ((await act("GET", "sessions")) as Session[]).filter((s) => !s.exited && agentOf(s) && (s.dir === w.path || s.dir.startsWith(`${w.path}/`)));
+    if (live.length) {
+      put(archives, j, at, "archive_worktree", "skipped", { output: live.some((s) => p.sessions.includes(s.name)) ? "Kept: an agent there didn't stop" : "Kept: another agent is still running there" });
+      continue;
+    }
+    try {
+      const res = (await act("DELETE", `locations/${encodeURIComponent(w.location)}/worktrees/${encodeURIComponent(w.name)}`)) as { archive?: string };
+      // The box waits for the archive script, then says it's gone.
+      if (res?.archive) await new Promise((ok) => setTimeout(ok, 1600));
+      put(archives, j, at, "archive_worktree", "succeeded", { output: "Archived; its branch is kept" });
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (/modified or untracked/.test(msg)) put(archives, j, at, "archive_worktree", "skipped", { output: "Kept: uncommitted changes" });
+      else if (/no worktree/.test(msg)) put(archives, j, at, "archive_worktree", "succeeded", { output: "already gone" });
+      else put(archives, j, at, "archive_worktree", "failed", { error: msg, exit_code: 1 });
+    }
+  }
+  const failed = stops.some((s) => s.status === "failed") || archives.some((s) => s.status === "failed");
+  const status = over() ? "cancelled" : failed ? "failed" : "succeeded";
+  Object.assign(r, { status, error: status === "succeeded" ? undefined : status === "cancelled" ? "cancelled" : "a step failed", finished: new Date().toISOString(), updated: new Date().toISOString() });
+  emit({ type: "run.finished", box, data: { run: r.id, status } });
+}
+
+// The stop runs asked to stop: they end once the step in flight has.
+const stopping = new Set<string>();
+
+export function runsCall(box: string, method: string, path: string, body: unknown, emit: Emit, delay: <T>(v: T) => Promise<T>, act?: Act): Promise<unknown> | undefined {
   if (box !== "devl" && box !== "gpu") {
     if (method === "GET" && path.startsWith("runs")) return delay(path.startsWith("runs?") ? [] : undefined);
     if (method === "GET" && path === "autofix") return delay([]);
@@ -264,6 +332,10 @@ export function runsCall(box: string, method: string, path: string, body: unknow
   m = /^runs\/([^/]+)\/cancel$/.exec(path);
   if (method === "POST" && m) {
     const r = all.find((x) => x.id === m![1]);
+    if (r?.template === "stop" && r.status === "running") {
+      stopping.add(r.id);
+      return delay({ cancelled: m[1] });
+    }
     if (r) Object.assign(r, { status: "cancelled", finished: new Date().toISOString(), error: "cancelled", gate: undefined });
     emit({ type: "run.finished", box, data: { run: m[1], status: "cancelled" } });
     return delay({ cancelled: m[1] });
@@ -326,6 +398,7 @@ export function runsCall(box: string, method: string, path: string, body: unknow
         wait ? 4200 : 1400,
       );
     }
+    if (r.template === "stop" && act) void playStop(r, box, act, emit);
     return delay(summary(r));
   }
   if (method === "GET" && path.startsWith("review?run=")) {

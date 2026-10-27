@@ -22,6 +22,7 @@ import { removeWorktreeOnBox } from "@/lib/remove-worktree";
 import { load, save } from "@/lib/storage";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { runStopJob } from "@/lib/stop-job";
+import { stopRuns } from "@/lib/stop-on-box";
 import { cn } from "@/lib/utils";
 import { duration } from "@/views/dashboard/agent-card";
 import { type AgentNames, describeAgent, startedAt } from "@/views/dashboard/names";
@@ -52,8 +53,9 @@ async function stopOne(box: string, name: string) {
 }
 
 // stopInBackground stops the confirmed rows as a job in the tray
-// (lib/stop-job.ts), archiving their worktrees where it's safe if asked. A
-// clean run ends with the toast it always had.
+// (lib/stop-job.ts), archiving their worktrees where it's safe if asked: a
+// box with runs does its share itself. A clean run ends with the toast it
+// always had.
 async function stopInBackground(rows: Row[], archive: boolean) {
   const res = await runStopJob(
     rows.map((r) => ({
@@ -78,6 +80,7 @@ async function stopInBackground(rows: Row[], archive: boolean) {
         return removeWorktreeOnBox(client, box, location, wt, "archive");
       },
       errorText: plainError,
+      runs: stopRuns,
     },
   );
   if (!res.clean) return;

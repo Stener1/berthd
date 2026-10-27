@@ -23,6 +23,7 @@ import { portUrl } from "@/lib/browser-url";
 import { agentOf, worktreeSessions } from "@/lib/derive";
 import { ago, errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
+import { stopOnBox } from "@/lib/stop-on-box";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isPinned, pinWorktree, unpinWorktree } from "@/lib/pinned-worktrees";
@@ -404,6 +405,9 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
           confirm: "Stop sessions",
           destructive: true,
           run: async () => {
+            // A box with runs stops them itself (lib/stop-on-box.ts), so the
+            // laptop sleeping halfway leaves none running.
+            if (await stopOnBox(box, `Stop everything in ${name}`, { sessions: sessions.map((s) => s.name), worktrees: [] })) return scheduleRefresh(box, ["sessions"]);
             for (const s of sessions) await stopSession(box, s.name, true);
           },
         }),

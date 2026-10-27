@@ -19,7 +19,8 @@ import (
 // Host does a run's leaf steps; the box implements it.
 type Host interface {
 	// Leaf does one leaf step: run, check, prompt, wait, start_agent,
-	// headless, notify, webhook, collect, handoff, pr or cleanup.
+	// headless, notify, webhook, collect, handoff, pr, cleanup,
+	// stop_session or archive_worktree.
 	Leaf(ctx context.Context, x *StepCtx) Result
 	// Reenter is asked about a leaf step the journal shows started but not
 	// finished: berthd stopped in the middle of it. ok false runs it again;
