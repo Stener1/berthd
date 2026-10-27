@@ -115,12 +115,14 @@ export function outcomeOf(j: Job): "running" | "clean" | "report" {
 }
 
 // runPool runs fn over items, a few at a time, in order. Once stop() says
-// so it takes no more, and answers with the items it never sent.
+// so it takes no more, and answers with the items it never sent. Any item
+// counts, undefined too.
 export async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>, stop: () => boolean = () => false): Promise<T[]> {
   const queue = [...items];
   const unsent: T[] = [];
   const worker = async () => {
-    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+    while (queue.length) {
+      const item = queue.shift() as T;
       if (stop()) {
         unsent.push(item, ...queue.splice(0));
         return;
