@@ -2,6 +2,7 @@ import { toastError } from "@/components/error-note";
 import { toastManager } from "@/components/ui/toast";
 import type { Client } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
+import { unpinWorktree } from "@/lib/pinned-worktrees";
 import { clearRemoving, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { forgetWorktree } from "@/lib/workspaces";
@@ -34,6 +35,7 @@ export async function removeWorktreeOnBox(
   else {
     clearRemoving(box, wt.path);
     forgetWorktree(box, wt.path);
+    unpinWorktree(box, wt.path);
   }
   scheduleRefresh(box, ["locations", "sessions", "services"]);
   return res;
@@ -85,10 +87,12 @@ async function drain(box: string) {
 }
 
 // worktreeGone is the box saying a worktree went: its workspace (tabs,
-// panes) goes too, and an archive the app was waiting on says it is done.
+// panes) and its pin go too, and an archive the app was waiting on says it
+// is done. A failed archive keeps both (archiveFailed).
 export function worktreeGone(box: string, path: string) {
   const was = clearRemoving(box, path);
   forgetWorktree(box, path);
+  unpinWorktree(box, path);
   if (was?.script) toastManager.add({ type: "success", title: `${was.kind === "archive" ? "Archived" : "Removed"} ${was.name ?? "the worktree"}`, description: box });
 }
 

@@ -3,6 +3,7 @@ import {
   GitBranchIcon,
   HomeIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
@@ -42,6 +43,7 @@ import { removalLabel, useRemoval } from "@/lib/removing";
 import { WorktreeNameField } from "@/components/sidebar/rename-worktree";
 import { renameKey, startRenamingWorktree, stopRenamingWorktree, useRenamingWorktree, worktreeLabel } from "@/lib/worktree-names";
 import { below, MAX_INDENT, nest, type TreeNode } from "@/lib/worktree-tree";
+import { isPinned, pinKey, pinnedFirst, usePinned } from "@/lib/pinned-worktrees";
 import { useTeamSuggestions } from "@/lib/team-suggest";
 import { orgName, suggestionFor } from "@/lib/team-suggest-model";
 
@@ -125,6 +127,7 @@ export function Projects({ prefs, update }: { prefs: SidebarPrefs; update(p: Par
   // their actions in its menu and each project's.
   return (
     <>
+      <PinnedWorktrees />
       {prefs.groupBy === "project" ? (
         <ProjectSections prefs={prefs} update={update} />
       ) : (
@@ -205,12 +208,14 @@ function BoxChip({ box }: { box: BoxStatus }) {
 // useRepoTree is what a project on one box shows under its header: its
 // main checkout while it has work or is open, and all its worktrees.
 // foldable says whether the header's fold applies (the
-// two-column sidebar's tasks never fold).
-export function useRepoTree(repo: Repo, prefs: SidebarPrefs, foldable = true) {
+// two-column sidebar's tasks never fold); pinnedApart leaves out the
+// worktrees the list's Pinned heading shows (PinnedWorktrees).
+export function useRepoTree(repo: Repo, prefs: SidebarPrefs, foldable = true, pinnedApart = true) {
   const { box, loc, main, worktrees } = repo;
   const data = useStore((s) => s.boxes[box.name]);
   const current = useWorkspaces((s) => s.current);
   const inWorkspace = useStore((s) => s.view.kind === "workspace");
+  const pins = usePinned((s) => s.keys);
   const online = box.state === "online";
   const collapsed = foldable && (prefs.collapsed[repo.key] ?? false);
 
@@ -219,7 +224,7 @@ export function useRepoTree(repo: Repo, prefs: SidebarPrefs, foldable = true) {
   // The main checkout is a task row like the others while it has work in
   // it or is open; the project's header above it only names the project.
   const mainRow = !!main && (mainSel || mainSessions.some((s) => !s.exited));
-  const rows: TreeRow[] = worktrees.map((wt) => ({
+  const rows: TreeRow[] = worktrees.filter((wt) => !(pinnedApart && isPinned(box.name, wt.path, pins))).map((wt) => ({
     key: wt.path,
     box: box.name,
     loc,
@@ -338,6 +343,8 @@ interface WorktreeRowProps {
   onOpen(): void;
   // Shown when the project spans boxes, to tell its copies apart.
   chip?: BoxStatus;
+  // Its project's name, for a row shown away from its project (pinned).
+  project?: string;
   // The row's box when it is not online. The row stays, dimmed and marked,
   // so the worktree you have open never vanishes from under you; what it
   // last ran is not shown, since the box cannot say whether it still runs.
@@ -370,6 +377,7 @@ const sameRow = (a: Omit<WorktreeRowProps, "onOpen">, b: Omit<WorktreeRowProps, 
   a.wt === b.wt &&
   a.selected === b.selected &&
   a.away === b.away &&
+  a.project === b.project &&
   a.chip?.name === b.chip?.name &&
   a.chip?.state === b.chip?.state &&
   a.data?.stats?.agents === b.data?.stats?.agents &&
@@ -379,7 +387,7 @@ const sameRow = (a: Omit<WorktreeRowProps, "onOpen">, b: Omit<WorktreeRowProps, 
   a.child === b.child &&
   sameList(a.sessions, b.sessions);
 
-const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, selected, onOpen, chip, away, fold, child }: WorktreeRowProps) {
+const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, selected, onOpen, chip, project, away, fold, child }: WorktreeRowProps) {
   // Its agents by what they work on ("Fix checkout webhook · Claude Code").
   const agents = away ? [] : sessions.filter((s) => agentOf(s) && !s.exited).map((s) => sessionName(s, { sessions, agent: true }));
   // A renamed worktree's tip says its own name and branch under the title.
@@ -446,6 +454,11 @@ const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, se
             {((!wt.main && wt.title) || task) && (
               <span data-testid="worktree-row-name" className={cn("hidden min-w-0 max-w-max grow basis-0 truncate font-mono text-tag @min-[22rem]/side:inline", ink.faint)}>
                 {self}
+              </span>
+            )}
+            {project && (
+              <span data-testid="worktree-row-project" className={cn("max-w-[35%] shrink-0 truncate text-tag", ink.faint)}>
+                {project}
               </span>
             )}
             {/* On screen beside another worktree: its colour. */}
@@ -738,6 +751,68 @@ export function RowButton({ label, ...props }: React.ComponentProps<"button"> & 
   );
 }
 
+// PinnedWorktrees heads the list: the worktrees pinned from their menus, in
+// the order they were pinned, each with its project's name. They leave their
+// project's list while pinned; one handed work by a pinned worktree stays
+// under its project.
+function PinnedWorktrees() {
+  const keys = usePinned((s) => s.keys);
+  const boxes = useStore((s) => s.status?.boxes ?? NONE);
+  const data = useStore((s) => s.boxes);
+  const current = useWorkspaces((s) => s.current);
+  const inWorkspace = useStore((s) => s.view.kind === "workspace");
+  const pinned = new Set(keys);
+  const rows = pinnedFirst(
+    boxes.flatMap((b) =>
+      (data[b.name]?.locations ?? []).flatMap((loc) =>
+        (loc.worktrees ?? [])
+          .filter((wt) => !wt.main && pinned.has(pinKey(b.name, wt.path)))
+          .map(
+            (wt): TreeRow => ({
+              key: pinKey(b.name, wt.path),
+              box: b.name,
+              loc,
+              wt,
+              data: data[b.name],
+              sessions: worktreeSessions(data[b.name]?.sessions, wt),
+              selected: inWorkspace && current === wsKey(b.name, wt.path),
+              chip: boxes.length > 1 ? b : undefined,
+              away: b.state === "online" ? undefined : b,
+            }),
+          ),
+      ),
+    ),
+    (r) => r.key,
+    keys,
+  );
+  if (!rows.length) return null;
+  return (
+    <div data-testid="pinned-worktrees" className="mb-3">
+      <div className={cn("flex h-6 items-center gap-1.5 px-2 text-tag font-medium", ink.faint)}>
+        <PinIcon className="size-3" />
+        Pinned
+      </div>
+      <SidebarMenuSub className={rowsClass}>
+        {rows.map((r) => (
+          <WorktreeRow
+            key={r.key}
+            box={r.box}
+            loc={r.loc}
+            wt={r.wt}
+            sessions={r.sessions}
+            data={r.data}
+            selected={r.selected}
+            chip={r.chip}
+            project={r.loc.name}
+            away={r.away}
+            onOpen={() => selectWorktree(refOf(r.box, r.loc, r.wt))}
+          />
+        ))}
+      </SidebarMenuSub>
+    </div>
+  );
+}
+
 // ProjectSections lists projects under their sections (Work, Personal…);
 // projects in none come first. Drag a project onto a section to move it.
 // row draws a project another way (the two-column sidebar's project rows);
@@ -842,13 +917,15 @@ const sameProject = (a: Project, b: Project) =>
 // useProjectTree is what a project shows under its header: with one box
 // its main checkout while it has work or is open, and all the worktrees
 // from all its boxes. foldable says whether the
-// header's fold applies (the two-column sidebar's tasks never fold).
-export function useProjectTree(p: Project, prefs: SidebarPrefs, foldable = true) {
+// header's fold applies (the two-column sidebar's tasks never fold);
+// pinnedApart leaves out the worktrees the list's Pinned heading shows.
+export function useProjectTree(p: Project, prefs: SidebarPrefs, foldable = true, pinnedApart = true) {
   // Only its own boxes' data: agents changing on another box leave it be.
   const memberData = useStore(useShallow((s) => p.members.map((m) => s.boxes[m.box.name])));
   const boxes = useMemo(() => Object.fromEntries(p.members.map((m, i) => [m.box.name, memberData[i]])) as Record<string, BoxData | undefined>, [p.members, memberData]);
   const current = useWorkspaces((s) => s.current);
   const inWorkspace = useStore((s) => s.view.kind === "workspace");
+  const pins = usePinned((s) => (pinnedApart ? s.keys : NO_PINS));
   const key = `project:${p.id}`;
   const collapsed = foldable && (prefs.collapsed[key] ?? false);
   const multi = p.members.length > 1;
@@ -861,7 +938,7 @@ export function useProjectTree(p: Project, prefs: SidebarPrefs, foldable = true)
       p.members.flatMap((m) => {
         const data = boxes[m.box.name];
         return (m.loc.worktrees ?? [])
-          .filter((w) => (multi ? true : !w.main))
+          .filter((w) => (multi ? true : !w.main) && !isPinned(m.box.name, w.path, pins))
           .sort((a, b) => Number(!!b.main) - Number(!!a.main) || worktreeLabel(a).localeCompare(worktreeLabel(b)))
           .map(
             (wt): TreeRow => ({
@@ -877,7 +954,7 @@ export function useProjectTree(p: Project, prefs: SidebarPrefs, foldable = true)
             }),
           );
       }),
-    [p.members, multi, boxes, inWorkspace, current],
+    [p.members, multi, boxes, inWorkspace, current, pins],
   );
   const shown = useMemo(() => nest(rows, (r) => r.key, (r) => (r.wt.parent ? `${r.box}:${r.wt.parent}` : undefined)), [rows]);
   // With one box, the row itself is the main checkout.
@@ -1003,6 +1080,7 @@ function HeaderState({ sessions, data }: { sessions: Session[]; data?: BoxData }
 const ProjectGroup = memo(ProjectGroupBody, (a, b) => a.chips === b.chips && a.prefs === b.prefs && a.update === b.update && sameProject(a.project, b.project));
 
 const NO_SESSIONS: Session[] = [];
+const NO_PINS: string[] = [];
 
 // PlaceTip says where a sidebar row is: its name, then its path on each box.
 export function PlaceTip({ name, sub, lines, work = [] }: { name: string; sub?: string; lines: string[]; work?: string[] }) {

@@ -337,7 +337,7 @@ export function TasksColumn({ picked, prefs, update }: { picked?: Picked; prefs:
 }
 
 function ProjectTasks({ id, project: p, prefs, update }: { id: string; project: Project; prefs: SidebarPrefs; update: Update }) {
-  const t = useProjectTree(p, prefs, false);
+  const t = useProjectTree(p, prefs, false, false);
   const multiBox = useStore((s) => (s.status?.boxes.length ?? 0) > 1);
   const { def, defMain, online } = t;
   return (
@@ -357,7 +357,7 @@ function ProjectTasks({ id, project: p, prefs, update }: { id: string; project: 
 }
 
 function RepoTasks({ id, repo, prefs, update }: { id: string; repo: Repo; prefs: SidebarPrefs; update: Update }) {
-  const t = useRepoTree(repo, prefs, false);
+  const t = useRepoTree(repo, prefs, false, false);
   const multiBox = useStore((s) => (s.status?.boxes.length ?? 0) > 1);
   const { box, loc, main } = repo;
   return (

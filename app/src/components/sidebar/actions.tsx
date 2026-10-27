@@ -1,4 +1,4 @@
-import { ActivityIcon, ListPlusIcon, PaletteIcon, ArchiveIcon, ArrowUpCircleIcon, ArrowUpRightIcon, BotIcon, CheckIcon, FolderInputIcon, MergeIcon, PackageIcon, PencilIcon, PlusIcon, ServerIcon, SplitIcon, CodeXmlIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, FolderOpenIcon, GitBranchIcon, GitCompareArrowsIcon, GitBranchPlusIcon, GitPullRequestIcon, GlobeIcon, HomeIcon, LinkIcon, PlayIcon, RotateCwIcon, Settings2Icon, SquareIcon, SquareTerminalIcon, StethoscopeIcon, Trash2Icon, UnplugIcon, WorkflowIcon, WrenchIcon, BellOffIcon, UsersRoundIcon, HistoryIcon } from "lucide-react";
+import { ActivityIcon, ListPlusIcon, PaletteIcon, ArchiveIcon, ArrowUpCircleIcon, ArrowUpRightIcon, BotIcon, CheckIcon, FolderInputIcon, MergeIcon, PackageIcon, PencilIcon, PinIcon, PinOffIcon, PlusIcon, ServerIcon, SplitIcon, CodeXmlIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, FolderOpenIcon, GitBranchIcon, GitCompareArrowsIcon, GitBranchPlusIcon, GitPullRequestIcon, GlobeIcon, HomeIcon, LinkIcon, PlayIcon, RotateCwIcon, Settings2Icon, SquareIcon, SquareTerminalIcon, StethoscopeIcon, Trash2Icon, UnplugIcon, WorkflowIcon, WrenchIcon, BellOffIcon, UsersRoundIcon, HistoryIcon } from "lucide-react";
 import { type ComponentProps, createContext, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
@@ -25,6 +25,7 @@ import { ago, errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isPinned, pinWorktree, unpinWorktree } from "@/lib/pinned-worktrees";
 import { queueRemoval, removeWorktreeOnBox } from "@/lib/remove-worktree";
 import { addGroup, isShown, refOf, selectWorktree, useWorkspaces, wsKey } from "@/lib/workspaces";
 import { ToneItems } from "@/components/workspace/tab-group";
@@ -372,9 +373,13 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
   if (review) items.push(item("Update review to latest…", <RotateCwIcon />, () => openUpdate(box, loc, wt)));
 
   items.push(sep);
-  // A display name for it; the branch and folder keep theirs.
+  // A display name for it; the branch and folder keep theirs. Pinned, it
+  // sits at the top of the sidebar (lib/pinned-worktrees).
   if (!wt.main) {
-    items.push(item("Rename…", <PencilIcon />, () => openRenameWorktree(box, loc, wt), { shortcut: "F2" }));
+    items.push(
+      isPinned(box, wt.path) ? item("Unpin", <PinOffIcon />, () => unpinWorktree(box, wt.path)) : item("Pin to top", <PinIcon />, () => pinWorktree(box, wt.path)),
+      item("Rename…", <PencilIcon />, () => openRenameWorktree(box, loc, wt), { shortcut: "F2" }),
+    );
     if (wt.title) items.push(item(`Show as ${wt.name}`, <span className="size-4" />, () => void renameWorktree(box, loc, wt, "")));
   }
   if (grouping) items.push({ type: "sub", label: "Colour", icon: <PaletteIcon />, items: () => <ToneItems wsKey={key} /> });

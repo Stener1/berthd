@@ -381,7 +381,7 @@ const lanes = {
 // the list sidebar draws them.
 function ProjectSheet({ project: p, prefs, update }: { project: Project; prefs: SidebarPrefs; update: Update }) {
   const id = useId();
-  const t = useProjectTree(p, prefs, false);
+  const t = useProjectTree(p, prefs, false, false);
   const { def, online } = t;
   const count = p.members.reduce((n, m) => n + (m.loc.worktrees?.filter((w) => !w.main).length ?? 0), 0);
   const boxes = p.members.map((m) => m.box.name).join(", ");
