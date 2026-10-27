@@ -191,6 +191,13 @@ func TestAResumedStopRunNeverArchivesTwice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); f.b.Runs.Wait() })
 	f.b.NewRuns(dir, 0, 0, nil)
+	// The archive in flight is left unfinished in the journal, for the
+	// resumed run to ask again.
+	if r, _ := f.b.Runs.Get(s.ID); r.Status == runs.Succeeded {
+		t.Fatalf("the run finished as berthd stopped: %+v", r.Steps)
+	} else if st, ok := stepAt(r.Steps, "1.i0.0"); !ok || st.Status != runs.Running {
+		t.Fatalf("the archive in flight = %+v", st)
+	}
 	f.b.Runs.Resume(ctx)
 	waitRunStatus(t, f.b, s.ID, runs.Succeeded)
 	deadline = time.Now().Add(10 * time.Second)
@@ -257,5 +264,24 @@ func TestCancellingAStopRunSkipsWhatHasNotStarted(t *testing.T) {
 	}
 	if n := f.archives(); n != 1 {
 		t.Fatalf("the archive script ran %d times", n)
+	}
+}
+
+// An agent started in a worktree while its archive script runs keeps it:
+// the folder going would end that agent.
+func TestAnAgentStartedDuringTheArchiveKeepsTheWorktree(t *testing.T) {
+	f := newStopFixture(t, "echo run >> COUNT; sleep 1", "late")
+	s := f.start(t, []string{f.agents["late"]}, []map[string]string{f.item(t, "late")})
+	deadline := time.Now().Add(10 * time.Second)
+	for f.archives() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	newcomer := f.agent(t, "late", "newcomer")
+	r := waitRunStatus(t, f.b, s.ID, runs.Succeeded, runs.Failed)
+	if st, _ := stepAt(r.Steps, "1.i0.0"); st.Status != runs.Skipped || st.Output != keptOtherAgent {
+		t.Fatalf("the archive = %+v", st)
+	}
+	if f.worktree("late").Path == "" || !f.live(t)[newcomer] {
+		t.Fatalf("the worktree went (%q) or the newcomer stopped (%v)", f.worktree("late").Path, f.live(t))
 	}
 }
