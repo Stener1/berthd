@@ -588,7 +588,8 @@ func unsavedWork(ctx context.Context, dir string) string {
 	// Every submodule repository the removal deletes, against every local
 	// ref it has: those in the worktree's git folder, checked out or not (a
 	// deinit leaves one behind), and those a checked-out submodule keeps in
-	// its own .git (one made with git clone).
+	// its own .git (one made with git clone), with the ones under that .git
+	// in turn.
 	gitDir, err := git(ctx, "-C", dir, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return "has submodules that could not be checked for unpushed work"
@@ -602,8 +603,17 @@ func unsavedWork(ctx context.Context, dir string) string {
 		return "has submodules that could not be checked for unpushed work"
 	}
 	for _, repo := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if repo != "" && !slices.Contains(repos, repo) {
-			repos = append(repos, repo)
+		if repo == "" {
+			continue
+		}
+		nested, err := moduleRepos(filepath.Join(repo, "modules"))
+		if err != nil {
+			return "has submodules that could not be checked for unpushed work"
+		}
+		for _, r := range append([]string{repo}, nested...) {
+			if !slices.Contains(repos, r) {
+				repos = append(repos, r)
+			}
 		}
 	}
 	for _, repo := range repos {
