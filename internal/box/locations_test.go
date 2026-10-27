@@ -215,6 +215,65 @@ func TestAWorktreeSomeoneLockedIsLeftAlone(t *testing.T) {
 	}
 }
 
+func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
+	repo := gitRepo(t)
+	ctx := context.Background()
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "protocol.file.allow=always"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	lib := filepath.Join(filepath.Dir(repo), "lib")
+	os.MkdirAll(lib, 0o755)
+	run(lib, "init", "-q", "-b", "main")
+	run(lib, "commit", "-q", "--allow-empty", "-m", "lib")
+	run(repo, "submodule", "add", "-q", lib, "lib")
+	run(repo, "commit", "-q", "-m", "add lib")
+
+	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
+	if _, err := l.Add(ctx, "cal", repo); err != nil {
+		t.Fatal(err)
+	}
+	wt, err := l.CreateWorktree(ctx, "cal", "vendor", "vendor", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "submodule", "update", "-q", "--init")
+	sub := filepath.Join(wt.Path, "lib")
+
+	kept := func(what, want string) {
+		t.Helper()
+		err := l.RemoveWorktree(ctx, "cal", "vendor", false)
+		if err == nil || !strings.Contains(err.Error(), want) || statusFor(err) != 409 {
+			t.Fatalf("%s: err = %v (status %d), want a 409 saying %q", what, err, statusFor(err), want)
+		}
+		if _, err := os.Stat(wt.Path); err != nil {
+			t.Fatalf("%s: the worktree went: %v", what, err)
+		}
+	}
+	os.WriteFile(filepath.Join(sub, "notes"), []byte("wip"), 0o644)
+	kept("a file in the submodule", "modified or untracked")
+	os.Remove(filepath.Join(sub, "notes"))
+	run(sub, "commit", "-q", "--allow-empty", "-m", "local only")
+	kept("a submodule commit, uncommitted in the worktree", "modified or untracked")
+	// Committed in the worktree, git status is clean, but the submodule's
+	// commit is only in the worktree's own copy of its history.
+	run(wt.Path, "commit", "-q", "-am", "bump lib")
+	kept("a submodule commit no remote has", "submodule commits that no remote has")
+	run(sub, "push", "-q", "origin", "HEAD:refs/heads/shared")
+
+	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
+		t.Fatalf("a clean worktree with a submodule: %v", err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree folder still there: %v", err)
+	}
+}
+
 func TestAFailedAddLeavesNothingBehind(t *testing.T) {
 	repo := gitRepo(t)
 	ctx := context.Background()

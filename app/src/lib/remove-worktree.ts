@@ -72,11 +72,14 @@ async function drain(box: string) {
     } catch (err) {
       clearRemoving(box, wt.path);
       // git's own words for work it would lose.
-      if (!force && /modified|untracked|uncommitted|contains/i.test(errorMessage(err))) {
+      const msg = errorMessage(err);
+      if (!force && /modified|untracked|uncommitted|contains/i.test(msg)) {
         toastManager.add({
           type: "warning",
           title: `Kept ${wt.name}`,
-          description: "It has uncommitted changes, so git left it as it is.",
+          description: /submodule commits/i.test(msg)
+            ? "A submodule in it has commits no remote has, so it was left as it is."
+            : "It has uncommitted changes, so git left it as it is.",
           actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
         });
       } else toastError(err, { title: `Couldn't remove ${wt.name}`, box });

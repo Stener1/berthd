@@ -417,7 +417,17 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 		if force {
 			args = append(args, "--force")
 		}
-		if out, err := git(ctx, args...); err != nil {
+		out, err := git(ctx, args...)
+		// git refuses any worktree with a submodule checked out, however
+		// clean, and only --force gets past it. Look for the work git won't,
+		// and force only when there is none to lose.
+		if err != nil && !force && strings.Contains(string(out), "containing submodules") {
+			if why := unsavedWork(ctx, w.Path); why != "" {
+				return httpError{status: http.StatusConflict, msg: fmt.Sprintf("git worktree remove: '%s' %s, use --force to delete it", w.Path, why)}
+			}
+			out, err = git(ctx, append(args, "--force")...)
+		}
+		if err != nil {
 			return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
 		}
 		// A worktree made again under the same name starts without a title.
@@ -547,6 +557,28 @@ func dirtyWorktree(dir string) bool {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+// unsavedWork says what removing a worktree with submodules would lose, or
+// "" for nothing: changes in it or its submodules, or submodule commits no
+// remote has, since a worktree's submodules keep their history inside it.
+// When git can't tell, that counts as something to lose.
+func unsavedWork(ctx context.Context, dir string) string {
+	out, err := git(ctx, "-C", dir, "status", "--porcelain", "--ignore-submodules=none")
+	if err != nil {
+		return "could not be checked for changes"
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return "contains modified or untracked files"
+	}
+	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive", "git rev-list -1 HEAD --branches --not --remotes")
+	if err != nil {
+		return "has submodules that could not be checked for unpushed commits"
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return "contains submodule commits that no remote has"
+	}
+	return ""
 }
 
 func expandHome(path string) string {
