@@ -67,8 +67,17 @@ export function setItem(id: number, key: string, patch: Partial<Pick<JobItem, "s
 
 export const jobOf = (id: number) => useJobs.getState().jobs.find((j) => j.id === id);
 
+const cancelled: ((job: Job) => void)[] = [];
+
+// onCancel hears of each job asked to send nothing more.
+export const onCancel = (fn: (job: Job) => void) => void cancelled.push(fn);
+
 // cancelJob asks a job to send nothing more. What it already sent finishes.
-export const cancelJob = (id: number) => patchJob(id, (j) => ({ ...j, cancelling: true }));
+export function cancelJob(id: number) {
+  patchJob(id, (j) => ({ ...j, cancelling: true }));
+  const j = jobOf(id);
+  if (j) for (const fn of cancelled) fn(j);
+}
 export const isCancelling = (id: number) => !!jobOf(id)?.cancelling;
 
 // finishJob ends a job with its summary. A clean one goes after FADE_MS; one
