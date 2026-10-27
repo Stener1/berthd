@@ -132,7 +132,7 @@ export function useBulk(onRowDone: (r: Row, patch: Partial<Row>) => void) {
           // Archiving… in the sidebar and elsewhere until the box says.
           if (kind === "archive") markRemoving(r.box, r.path, "archive", r.name);
         }
-        await followStopRun(stopRuns, sh.box, sh.id, {
+        const read = await followStopRun(stopRuns, sh.box, sh.id, {
           cancelled: () => cancelled.current,
           onRead: (read) => {
             for (const r of sh.rows) {
@@ -145,6 +145,11 @@ export function useBulk(onRowDone: (r: Row, patch: Partial<Row>) => void) {
             }
           },
         });
+        if (!read)
+          for (const r of sh.rows) {
+            set(r.key, { state: "failed", message: `${sh.box} no longer has this run` });
+            if (kind === "archive") clearRemoving(r.box, r.path);
+          }
         scheduleRefresh(sh.box, ["sessions", "locations"]);
       });
       const taken = new Set(shares.flatMap((sh) => sh.rows.map((r) => r.key)));
