@@ -78,7 +78,7 @@ async function drain(box: string) {
           type: "warning",
           title: `Kept ${wt.name}`,
           description: /submodule commits/i.test(msg)
-            ? "A submodule in it has commits, tags or stashes no remote has, so it was left as it is."
+            ? "A submodule in it has commits or stashes no remote has, so it was left as it is."
             : "It has uncommitted changes, so git left it as it is.",
           actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
         });

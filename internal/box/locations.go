@@ -560,9 +560,11 @@ func dirtyWorktree(dir string) bool {
 }
 
 // unsavedWork says what removing a worktree with submodules would lose, or
-// "" for nothing: changes in it or its submodules, or anything in a
-// submodule's history no remote has (commits, tags, stashes), since a
-// worktree keeps its submodules' repositories inside its own git folder.
+// "" for nothing: changes in it or its submodules, or submodule commits or
+// stashes no remote has (any local ref's: a branch's, a tag's, the stash),
+// since a worktree keeps its submodules' repositories inside its own git
+// folder. A ref's name on history a remote has is not kept: whether a
+// remote has the tag itself would take asking it, on every removal.
 // Untracked files count whatever status.showUntrackedFiles says, and when
 // git can't tell, that counts as something to lose.
 func unsavedWork(ctx context.Context, dir string) string {
@@ -610,7 +612,7 @@ func unsavedWork(ctx context.Context, dir string) string {
 			return "has submodules that could not be checked for unpushed work"
 		}
 		if strings.TrimSpace(string(out)) != "" {
-			return "contains submodule commits, tags or stashes that no remote has"
+			return "contains submodule commits or stashes that no remote has"
 		}
 	}
 	return ""

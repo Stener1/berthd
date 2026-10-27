@@ -276,7 +276,7 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	// Committed in the worktree, git status is clean, but the submodule's
 	// commit is only in the worktree's own copy of its history.
 	run(wt.Path, "commit", "-q", "-am", "bump lib")
-	kept("a submodule commit no remote has", "submodule commits, tags or stashes that no remote has")
+	kept("a submodule commit no remote has", "submodule commits or stashes that no remote has")
 	run(sub, "push", "-q", "origin", "HEAD:refs/heads/shared")
 
 	// A commit only a local tag holds, with the submodule back where the
@@ -284,7 +284,7 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	run(sub, "commit", "-q", "--allow-empty", "-m", "tagged")
 	run(sub, "-c", "tag.gpgSign=false", "tag", "keep")
 	run(sub, "checkout", "-q", "HEAD~1")
-	kept("a commit only a submodule tag holds", "submodule commits, tags or stashes")
+	kept("a commit only a submodule tag holds", "submodule commits or stashes")
 	run(sub, "tag", "-d", "keep")
 
 	// A deinit takes the submodule's checkout, not its repository: its
@@ -293,7 +293,7 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	run(sub, "branch", "keep")
 	run(sub, "checkout", "-q", "HEAD~1")
 	run(wt.Path, "submodule", "deinit", "-q", "-f", "lib")
-	kept("a branch in a deinitialized submodule", "submodule commits, tags or stashes")
+	kept("a branch in a deinitialized submodule", "submodule commits or stashes")
 	out, err := exec.Command("git", "-C", wt.Path, "rev-parse", "--absolute-git-dir").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	run(sub, "checkout", "-q", "origin/shared")
 	run(sub, "commit", "-q", "--allow-empty", "-m", "embedded")
 	run(wt.Path, "commit", "-q", "-am", "bump lib again")
-	kept("a commit in an embedded submodule repository", "submodule commits, tags or stashes")
+	kept("a commit in an embedded submodule repository", "submodule commits or stashes")
 	run(sub, "push", "-q", "origin", "HEAD:refs/heads/embedded")
 
 	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
