@@ -67,7 +67,7 @@ test("ticked, Stop closes at once; the tray shows the run, folds, and reports th
   await expect(app.worktree("devl/checkout-fix")).toBeVisible();
 });
 
-test("on boxes without runs the app does it: an archive script still running says archiving", async ({ app }) => {
+test("on boxes without runs the app does it: an archive script says archiving until the box says it's gone", async ({ app }) => {
   mockOnly("stops agents and archives worktrees");
   await app.open({ prefs, params: { noruns: "1", slowremove: "3000" } });
   const dialog = await stopPicked(app, ["Speed up product search", "Move acme billing to the new ledger", "Fix checkout webhook retries"]);
@@ -75,7 +75,10 @@ test("on boxes without runs the app does it: an archive script still running say
   await dialog.getByRole("button", { name: "Stop 3 agents" }).click();
   const running = job(app, "Stopping 3 agents");
   await expect(jobRow(app, "Stopping 3 agents", "ci-flake")).toContainText("Archiving…");
-  await expect(running).toContainText("3 stopped, 1 archived, 1 archiving, 1 kept", { timeout: 10_000 });
+  // search-perf's archive script runs on: its row says so, and the job
+  // holds devl's line until the box says the worktree went.
+  await expect(jobRow(app, "Stopping 3 agents", "search-perf")).toContainText("Stopped · Archiving: its archive script runs, then it goes", { timeout: 10_000 });
+  await expect(running).toContainText("3 stopped, 2 archived, 1 kept", { timeout: 10_000 });
   await expect(jobRow(app, "Stopping 3 agents", "checkout-fix")).toContainText("Stopped · Kept: uncommitted changes");
   await expect(app.worktree("gpu/ci-flake")).toHaveCount(0, { timeout: 10_000 });
   await expect(app.worktree("devl/search-perf")).toHaveCount(0, { timeout: 10_000 });

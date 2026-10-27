@@ -182,10 +182,13 @@ test("Stop the rest pressed while an archive looks for agents still holds it bac
 // A box that runs the stop itself (internal/box/runs/templates/stop.json),
 // faked: each run is read back as the box would build its steps. held keeps
 // it on its first three stops until it's cancelled or let go.
-function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; startsLost?: number; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number } = {}) {
+// startsLost: answers lost after the box took the run; startsDropped:
+// asks that never reached it. forgets: the box no longer has the run.
+function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; startsLost?: number; startsDropped?: number; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number; forgets?: boolean } = {}) {
   const started: { box: string; title: string; group: string; params: StopRunParams; idemKey: string }[] = [];
   const asked: string[] = [];
   let lost = 0;
+  let dropped = 0;
   const cancelled = new Set<string>();
   let reads = 0;
   const step = (path: string, kind: string, s: Partial<StopRunStep>): StopRunStep => ({ path, kind, status: "succeeded", ...s });
@@ -194,14 +197,20 @@ function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; star
     start: async (box, req) => {
       asked.push(req.idemKey);
       if (o.refuses?.includes(box)) throw Object.assign(new Error('template stop: no template "stop"'), { status: 400 });
+      if (dropped++ < (o.startsDropped ?? 0)) throw Object.assign(new Error(`${box} is offline`), { status: 503 });
       // The run is taken (once per key), but the answer never comes back.
       if (!started.some((s) => s.idemKey === req.idemKey)) started.push({ box, ...req });
       if (lost++ < (o.startsLost ?? 0)) throw Object.assign(new Error(`${box} is offline`), { status: 503 });
       return { id: `r${started.findIndex((s) => s.idemKey === req.idemKey) + 1}` };
     },
+    find: async (box, group) => {
+      const k = started.findIndex((s) => s.box === box && s.group === group);
+      return k < 0 ? undefined : { id: `r${k + 1}` };
+    },
     get: async (_box, id) => {
       // The laptop asleep, or the box out of reach: no answer.
       if (++reads <= (o.awayFor ?? 0)) throw Object.assign(new Error("devl is offline"), { status: 503 });
+      if (o.forgets) throw Object.assign(new Error("no run with that id"), { status: 404 });
       const { params } = started[Number(id.slice(1)) - 1];
       const held = o.held && !cancelled.has(id);
       const sent = held || cancelled.has(id) ? params.sessions.slice(0, 3) : params.sessions;
@@ -210,7 +219,11 @@ function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; star
       const status = held ? "running" : cancelled.has(id) ? "cancelled" : "succeeded";
       return { status, params: { ...params }, steps: [step("0", "map", { status, children: stops }), ...(archives.length ? [step("1", "map", { children: archives })] : [])] };
     },
-    cancel: async (_box, id) => void cancelled.add(id),
+    // The box takes a moment to cancel: reads meanwhile still say running.
+    cancel: async (_box, id) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      cancelled.add(id);
+    },
   };
   return { runs, started, asked, cancelled, release: () => (o.held = false) };
 }
@@ -258,12 +271,76 @@ test("a start whose answer was lost is asked again under the same key: one run, 
   assert.equal(jobOf(res.job)!.summary, "1 stopped, 1 archived");
 });
 
-test("a box that never answers the start fails its rows, and the app doesn't do them as well", async () => {
-  const { runs } = runsBox({ startsLost: 9 });
+test("a box that doesn't answer the start is asked until it does: its rows wait for it, and nothing fails", async () => {
+  const { runs, started, asked } = runsBox({ startsDropped: 6 });
   const { deps, calls } = fakeBoxes({ runs, every: 1 });
-  const res = await runStopJob([row("a", "fix"), row("b", "ci", "gpu")], true, deps);
-  assert.equal(itemsOf(res.job)["devl/a"], "failed: Failed: devl is offline");
-  assert.deepEqual(calls, []);
+  const running = runStopJob([row("a", "fix")], true, deps);
+  for (let i = 0; i < 100 && asked.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(itemsOf(useJobs.getState().jobs[0].id)["devl/a"], "queued: Waiting for devl");
+  const res = await running;
+  assert.equal(asked.length, 7);
+  assert.equal(started.length, 1);
+  assert.deepEqual(calls, [], "the app didn't do it as well");
+  assert.equal(jobOf(res.job)!.summary, "1 stopped, 1 archived");
+});
+
+test("Stop the rest while a start goes unanswered: a run the box took is cancelled there, and with none nothing is done", async () => {
+  // The box took it, but every answer was lost.
+  const took = runsBox({ startsLost: 1000, held: true });
+  const a = fakeBoxes({ runs: took.runs, every: 1 });
+  const first = runStopJob([row("a", "fix")], true, a.deps);
+  for (let i = 0; i < 100 && took.asked.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+  cancelJob(useJobs.getState().jobs[0].id);
+  const r1 = await first;
+  assert.deepEqual([...took.cancelled], ["r1"], "its run is found by its group, and cancelled");
+  assert.deepEqual(a.calls, []);
+  assert.equal(itemsOf(r1.job)["devl/a"], "cancelled: Stopped · Not archived");
+
+  // No ask ever reached the box.
+  const never = runsBox({ startsDropped: 1000 });
+  const b = fakeBoxes({ runs: never.runs, every: 1 });
+  const second = runStopJob([row("b", "perf")], true, b.deps);
+  for (let i = 0; i < 100 && never.asked.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+  cancelJob(useJobs.getState().jobs[0].id);
+  const r2 = await second;
+  assert.equal(never.started.length, 0);
+  assert.deepEqual(b.calls, []);
+  assert.equal(itemsOf(r2.job)["devl/b"], "cancelled: Not stopped");
+  assert.equal(jobOf(r2.job)!.summary, "0 stopped, 1 not stopped");
+});
+
+test("a run its box no longer has fails its rows and lets go of their Archiving… marks", async () => {
+  const { runs } = runsBox({ forgets: true });
+  const { deps } = fakeBoxes({ runs, every: 1 });
+  const res = await runStopJob([row("a", "fix")], true, deps);
+  assert.equal(itemsOf(res.job)["devl/a"], "failed: Failed: devl no longer has this run");
+  assert.equal(removalOf(useRemovals.getState().byKey, "devl", "/w/fix"), undefined);
+});
+
+test("an archive whose script runs holds its box's line until the box says the worktree went", async () => {
+  const order: string[] = [];
+  let gone: (how: "gone") => void = () => {};
+  const { deps } = fakeBoxes({
+    archive: async (_box, _loc, wt) => {
+      order.push(`archive ${wt.name}`);
+      return { archive: "pnpm archive" };
+    },
+    settled: (_box, path) =>
+      new Promise((resolve) => {
+        order.push(`script ${path}`);
+        gone = resolve;
+      }),
+  });
+  const running = runStopJob([row("a", "fix"), row("b", "perf")], true, deps);
+  for (let i = 0; i < 100 && order.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(order, ["archive fix", "script /w/fix"], "perf waits for fix's script");
+  gone("gone");
+  for (let i = 0; i < 100 && order.length < 4; i++) await new Promise((r) => setTimeout(r, 1));
+  gone("gone");
+  const res = await running;
+  assert.deepEqual(order, ["archive fix", "script /w/fix", "archive perf", "script /w/perf"]);
+  assert.equal(jobOf(res.job)!.summary, "2 stopped, 2 archived");
 });
 
 test("the run's steps become the rows, in the app's words, and a step not reached yet waits", () => {
@@ -357,6 +434,36 @@ test("after a relaunch the job comes back from the box's runs, with how they end
     assert.equal(useJobs.getState().jobs.length, 1);
     dismissJob(job.id);
     assert.deepEqual(JSON.parse(kept.get("berth.jobs.stopRuns")!), []);
+  } finally {
+    Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
+test("a job is kept before its start is sent, so one the app quit on before the box answered is asked for again after a relaunch", async () => {
+  const kept = new Map<string, string>();
+  Object.assign(globalThis, { localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v) } });
+  try {
+    useJobs.setState({ jobs: [] });
+    const box = runsBox({ startsDropped: 1000 });
+    const { deps } = fakeBoxes({ runs: box.runs, every: 1 });
+    const first = runStopJob([row("a", "fix")], true, deps);
+    for (let i = 0; i < 100 && box.asked.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+    const [saved] = JSON.parse(kept.get("berth.jobs.stopRuns")!);
+    assert.equal(saved.runs[0].id, undefined, "kept with no run yet");
+    assert.deepEqual(saved.runs[0].params.sessions, ["a"]);
+    // The app quits while the box is out of reach.
+    useJobs.setState({ jobs: [] });
+    await first;
+
+    // Back, the box answers: asked again under the same key, it takes it.
+    const back = runsBox();
+    await reattachStopJobs({ runs: back.runs, every: 1 });
+    assert.equal(back.started.length, 1);
+    assert.equal(back.started[0].idemKey, box.asked[0], "the same key");
+    const [job] = useJobs.getState().jobs;
+    assert.equal(job.summary, "1 stopped, 1 archived");
+    assert.equal(JSON.parse(kept.get("berth.jobs.stopRuns")!)[0].runs[0].id, "r1");
+    dismissJob(job.id);
   } finally {
     Reflect.deleteProperty(globalThis, "localStorage");
   }
