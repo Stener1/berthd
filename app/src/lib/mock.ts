@@ -106,6 +106,9 @@ const fresh = new URLSearchParams(location.search).has("fresh");
 const slowRemove = Number(new URLSearchParams(location.search).get("slowremove")) || 0;
 // ?mock=1&slowstop=MS: a box takes that long to answer a session's stop.
 const slowStop = Number(new URLSearchParams(location.search).get("slowstop")) || undefined;
+// ?noruns: every box is one from before runs, so the app does what a box's
+// runs would (a bulk Stop's own loop, lib/stop-job.ts).
+const noRuns = new URLSearchParams(location.search).has("noruns");
 if (fresh) {
   status.boxes = [];
   status.forwards = [];
@@ -675,7 +678,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
   if (team) return team;
   const flows = flowsCall(box, method, path, body, emit, delay);
   if (flows) return flows;
-  const runs = runsCall(box, method, path, body, emit, delay);
+  const runs = runsCall(box, method, path, body, emit, delay, (m, p) => boxCall(box, m, p));
   if (runs) return runs;
   const browser = browserCall(box, method, path);
   if (browser) return delay(browser);
@@ -767,7 +770,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
       home: HOME,
       // gpu runs an older berthd (mockBuilds): it can't keep worktree names,
       // and its agent browser has no tabs.
-      capabilities: ["diff", "turns", "queue", "ask", "answer", "journal", "runs", "exec.detach", "browser", "browser.devtools", "titles", "sample", "service.terminal", "session.home", "agents.install", "artifacts", "processes", ...(box === "gpu" ? [] : ["worktree.titles", "agents.paths", "browser.tabs"]), ...(structuredDemo ? ["driver.claude", "conversations", "sessions.past"] : [])],
+      capabilities: ["diff", "turns", "queue", "ask", "answer", "journal", ...(noRuns ? [] : ["runs"]), "exec.detach", "browser", "browser.devtools", "titles", "sample", "service.terminal", "session.home", "agents.install", "artifacts", "processes", ...(box === "gpu" ? [] : ["worktree.titles", "agents.paths", "browser.tabs"]), ...(structuredDemo ? ["driver.claude", "conversations", "sessions.past"] : [])],
       // Claude Code from npm under nvm, as the person's shell finds it;
       // Codex from Shipyard's own installer.
       agent_paths: [

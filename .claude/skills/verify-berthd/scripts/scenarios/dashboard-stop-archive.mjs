@@ -1,13 +1,16 @@
 // The Agent Dashboard's bulk Stop, with "Archive their worktrees where it's
 // safe" ticked (views/dashboard/stop.tsx): the dialog closes at once and
 // the run goes on in the background-jobs tray (components/jobs-tray.tsx).
-// A clean worktree with an archive script archives in the background, one
-// without archives (slowly: ?slowremove), a dirty one is kept, and one with
-// another agent still in it is kept; the tray reports those two. Then a
+// With ?noruns every box is one from before runs, so this is the app's own
+// loop, the fallback (boxes with runs: dashboard-stop-lid on a real box, and
+// the e2e). A clean worktree with an archive script archives in the
+// background, one without archives (slowly: ?slowremove), a dirty one is
+// kept, and one with another agent still in it is kept; the tray reports
+// those two. Then a
 // clean run fades, and Stop the rest leaves the unsent ones (?slowstop).
 // features/dashboard-stop.md.
 
-export const params = { slowremove: "4000", slowstop: "1500" };
+export const params = { slowremove: "4000", slowstop: "1500", noruns: "1" };
 
 const picks = [
   // devl / search-perf: shop has an archive script, so it runs first.
