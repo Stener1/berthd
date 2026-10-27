@@ -18,7 +18,7 @@ import { boxApi } from "@/lib/api";
 import { agentOf, type SessionState } from "@/lib/derive";
 import { plainError } from "@/lib/errors";
 import { plural } from "@/lib/format";
-import { removeWorktreeOnBox } from "@/lib/remove-worktree";
+import { archiveEnded, removeWorktreeOnBox } from "@/lib/remove-worktree";
 import { load, save } from "@/lib/storage";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { runStopJob } from "@/lib/stop-job";
@@ -79,6 +79,7 @@ async function stopInBackground(rows: Row[], archive: boolean) {
         if (!client) throw new Error("Not connected to the laptop agent");
         return removeWorktreeOnBox(client, box, location, wt, "archive");
       },
+      settled: archiveEnded,
       errorText: plainError,
       runs: stopRuns,
     },
