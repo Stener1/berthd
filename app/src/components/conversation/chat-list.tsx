@@ -149,7 +149,10 @@ export function ChatList<T>({ rows, rowKey, estimate, render, header, tail, grew
     const user = () => {
       userAt.current = Date.now();
     };
-    const onScroll = () => {
+    // Only the view's own moves: the list's word to its rows (below) is no
+    // sign the person scrolled.
+    const onScroll = (e: Event) => {
+      if (!e.isTrusted) return;
       const near = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
       if (near) pinned.current = true;
       else if (Date.now() - userAt.current < 1000) pinned.current = false;
@@ -167,18 +170,24 @@ export function ChatList<T>({ rows, rowKey, estimate, render, header, tail, grew
   // Whatever changes the height (a row measured, words streamed, a queued
   // prompt) keeps a pinned view at the foot; a fold the person just opened
   // doesn't pull the view away from it.
+  //
+  // The rows drawn are those near where the list last heard the view was.
+  // When the chat gets shorter under it (a long reply folds into its turn's
+  // steps), the view moves up with no scroll event in WebKit, so the list
+  // would leave the rows now in view undrawn: it is told where the view is.
   useEffect(() => {
     const sc = scroller;
     const el = root.current;
     if (!sc || !el) return;
     const stick = () => {
       if (pinned.current && Date.now() - userAt.current > 600) sc.scrollTop = sc.scrollHeight;
+      if (v.scrollOffset !== null && Math.abs(v.scrollOffset - sc.scrollTop) >= 1) sc.dispatchEvent(new Event("scroll"));
     };
     stick();
     const ro = new ResizeObserver(stick);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [scroller]);
+  }, [scroller, v]);
   useLayoutEffect(() => {
     if (pinned.current && scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [scroller, rows.length, grew]);
