@@ -51,6 +51,8 @@ interface BoxShare {
   rows: Row[];
   // By row: the sessions it stops.
   sessions: Record<string, string[]>;
+  // Set when the box didn't answer the start.
+  error?: string;
 }
 
 // startOnBoxes hands each box with runs its rows as one stop run
@@ -69,8 +71,13 @@ async function startOnBoxes(kind: "stop" | "archive", rows: Row[]): Promise<BoxS
         sessions: mine.flatMap((r) => sessions[r.key]),
         worktrees: kind === "archive" ? mine.map((r) => ({ location: r.location, name: r.name, path: r.path, sessions: sessions[r.key] })) : [],
       };
-      const id = await startStopOnBox(box, kind === "stop" ? `Stop sessions in ${plural(mine.length, "worktree")}` : `Archive ${plural(mine.length, "worktree")}`, params);
-      return id ? { box, id, rows: mine, sessions } : undefined;
+      try {
+        const id = await startStopOnBox(box, kind === "stop" ? `Stop sessions in ${plural(mine.length, "worktree")}` : `Archive ${plural(mine.length, "worktree")}`, params);
+        return id ? { box, id, rows: mine, sessions } : undefined;
+      } catch (err) {
+        // It may have the run all the same: the app doesn't do it as well.
+        return { box, id: "", rows: mine, sessions, error: plainError(err) };
+      }
     }),
   );
   return shares.filter((s): s is BoxShare => !!s);
@@ -119,6 +126,7 @@ export function useBulk(onRowDone: (r: Row, patch: Partial<Row>) => void) {
       const shares = action.kind === "stop" || action.kind === "archive" ? await startOnBoxes(action.kind, forBoxes) : [];
       const following = shares.map(async (sh) => {
         const kind = action.kind as "stop" | "archive";
+        if (sh.error) return void sh.rows.forEach((r) => set(r.key, { state: "failed", message: sh.error }));
         for (const r of sh.rows) {
           set(r.key, { state: "running" });
           // Archiving… in the sidebar and elsewhere until the box says.

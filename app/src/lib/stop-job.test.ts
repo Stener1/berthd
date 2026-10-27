@@ -182,17 +182,22 @@ test("Stop the rest pressed while an archive looks for agents still holds it bac
 // A box that runs the stop itself (internal/box/runs/templates/stop.json),
 // faked: each run is read back as the box would build its steps. held keeps
 // it on its first three stops until it's cancelled or let go.
-function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number } = {}) {
-  const started: { box: string; title: string; group: string; params: StopRunParams }[] = [];
+function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; startsLost?: number; stopFails?: Record<string, string>; archive?: Record<string, Pick<StopRunStep, "status" | "output" | "error">>; held?: boolean; awayFor?: number } = {}) {
+  const started: { box: string; title: string; group: string; params: StopRunParams; idemKey: string }[] = [];
+  const asked: string[] = [];
+  let lost = 0;
   const cancelled = new Set<string>();
   let reads = 0;
   const step = (path: string, kind: string, s: Partial<StopRunStep>): StopRunStep => ({ path, kind, status: "succeeded", ...s });
   const runs: StopRuns = {
     onBox: (box) => o.onBox?.(box) ?? true,
     start: async (box, req) => {
-      if (o.refuses?.includes(box)) throw new Error("no template \"stop\"");
-      started.push({ box, ...req });
-      return { id: `r${started.length}` };
+      asked.push(req.idemKey);
+      if (o.refuses?.includes(box)) throw Object.assign(new Error('template stop: no template "stop"'), { status: 400 });
+      // The run is taken (once per key), but the answer never comes back.
+      if (!started.some((s) => s.idemKey === req.idemKey)) started.push({ box, ...req });
+      if (lost++ < (o.startsLost ?? 0)) throw Object.assign(new Error(`${box} is offline`), { status: 503 });
+      return { id: `r${started.findIndex((s) => s.idemKey === req.idemKey) + 1}` };
     },
     get: async (_box, id) => {
       // The laptop asleep, or the box out of reach: no answer.
@@ -207,7 +212,7 @@ function runsBox(o: { onBox?: (box: string) => boolean; refuses?: string[]; stop
     },
     cancel: async (_box, id) => void cancelled.add(id),
   };
-  return { runs, started, cancelled, release: () => (o.held = false) };
+  return { runs, started, asked, cancelled, release: () => (o.held = false) };
 }
 
 test("a box with runs does its share as one run; a box without gets the app's loop", async () => {
@@ -240,6 +245,25 @@ test("a box offline at the start, or from before stop runs, gets the app's loop 
   );
   assert.deepEqual(calls.sort(), ["archive devl:fix", "archive gpu:ci", "stop devl/a", "stop gpu/b"]);
   assert.equal(jobOf(res.job)!.summary, "3 stopped, 3 archived");
+});
+
+test("a start whose answer was lost is asked again under the same key: one run, followed, nothing done twice", async () => {
+  const { runs, started, asked } = runsBox({ startsLost: 2 });
+  const { deps, calls } = fakeBoxes({ runs, every: 1 });
+  const res = await runStopJob([row("a", "fix")], true, deps);
+  assert.equal(asked.length, 3);
+  assert.equal(new Set(asked).size, 1, "one idempotency key");
+  assert.equal(started.length, 1);
+  assert.deepEqual(calls, [], "the app didn't do it as well");
+  assert.equal(jobOf(res.job)!.summary, "1 stopped, 1 archived");
+});
+
+test("a box that never answers the start fails its rows, and the app doesn't do them as well", async () => {
+  const { runs } = runsBox({ startsLost: 9 });
+  const { deps, calls } = fakeBoxes({ runs, every: 1 });
+  const res = await runStopJob([row("a", "fix"), row("b", "ci", "gpu")], true, deps);
+  assert.equal(itemsOf(res.job)["devl/a"], "failed: Failed: devl is offline");
+  assert.deepEqual(calls, []);
 });
 
 test("the run's steps become the rows, in the app's words, and a step not reached yet waits", () => {
