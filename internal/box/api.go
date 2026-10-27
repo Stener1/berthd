@@ -130,6 +130,11 @@ type Box struct {
 	// Helpers runs the helper programs plugins bring (helpers.go); nil on a
 	// box without them.
 	Helpers *Helpers
+
+	// dropping is the worktrees on their way out, by path, with whoever
+	// else asked meanwhile (dropWorktree).
+	dropMu   sync.Mutex
+	dropping map[string][]func(error)
 }
 
 func (b *Box) own(path string) {
@@ -581,8 +586,18 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 // succeeds (async); without one it goes at once. Unless forced, a worktree
 // with uncommitted or untracked files is refused before any of that, in
 // git's words. done, when set, hears how it ended. A review worktree's
-// removal is journaled as review.removed, with why.
+// removal is journaled as review.removed, with why. A worktree already on
+// its way out isn't torn down twice: a second ask (a stop run resumed, a
+// request sent again) is async, and its done hears how the first ends.
 func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error)) (async bool, err error) {
+	if !b.dropBegin(dir, done) {
+		return true, nil
+	}
+	defer func() {
+		if err != nil {
+			b.dropEnd(dir, err)
+		}
+	}()
 	_, mark := b.Locations.reviewAt(dir)
 	if mark != nil && branch == "" {
 		// A review's branch is Shipyard's own, made for it: it goes too.
@@ -591,6 +606,7 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 		}
 	}
 	finish := func(err error) {
+		b.dropEnd(dir, err)
 		if done != nil {
 			done(err)
 		}
@@ -651,6 +667,38 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 
 // stopSessionsIn ends the sessions working in a removed worktree: their
 // folder is gone, so they would only linger in the app with nowhere to work.
+// dropBegin marks dir on its way out. When it already is, done waits with
+// the first ask for how it ends, and dropBegin says so with false.
+func (b *Box) dropBegin(dir string, done func(error)) bool {
+	b.dropMu.Lock()
+	defer b.dropMu.Unlock()
+	if b.dropping == nil {
+		b.dropping = map[string][]func(error){}
+	}
+	if waiting, ok := b.dropping[dir]; ok {
+		if done != nil {
+			b.dropping[dir] = append(waiting, done)
+		}
+		return false
+	}
+	b.dropping[dir] = nil
+	return true
+}
+
+// dropEnd says how dir's removal ended to those who asked again meanwhile.
+func (b *Box) dropEnd(dir string, err error) {
+	b.dropMu.Lock()
+	waiting, ok := b.dropping[dir]
+	delete(b.dropping, dir)
+	b.dropMu.Unlock()
+	if !ok {
+		return
+	}
+	for _, w := range waiting {
+		w(err)
+	}
+}
+
 func (b *Box) stopSessionsIn(from, dir string) {
 	ctx := context.Background()
 	all, err := b.Sessions.List(ctx)
