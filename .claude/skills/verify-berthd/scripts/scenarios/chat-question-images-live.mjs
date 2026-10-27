@@ -59,7 +59,8 @@ export async function run({ page, shot, step, expect }) {
   const dropped = await image(page, "ORANGE GIRAFFE 7316", "#f97316");
   await field.evaluate((el, bytes) => {
     const dt = new DataTransfer();
-    dt.items.add(new File([new Uint8Array(bytes)], "giraffe.png", { type: "image/png" }));
+    // A name with a space, and none of the words on the image.
+    dt.items.add(new File([new Uint8Array(bytes)], "checkout step 2.png", { type: "image/png" }));
     for (const type of ["dragover", "drop"]) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
   }, dropped);
   const chips = form.getByTestId("attachment-chip");
@@ -85,13 +86,16 @@ export async function run({ page, shot, step, expect }) {
   await expect(form).toHaveCount(0, { timeout: 60_000 });
   const answered = chat.locator("[data-testid=chat-item][data-kind=question]").last();
   await expect(answered).toContainText(WORDS, { timeout: 60_000 });
-  await expect(answered.getByTestId("answer-attachments")).toHaveText(/giraffe\.png, pasted-\d+\.png/);
+  await expect(answered.getByTestId("answer-attachments")).toHaveText(/checkout-step-2\.png, pasted-\d+\.png/);
   await expect(composer.getByTestId("attachment-chip")).toHaveCount(0);
   await shot("2-answered");
 
   step("Claude reads both images and says what they show");
   const last = chat.locator("[data-testid=chat-item][data-kind=text]").last();
-  await expect(last).toContainText(/giraffe/i, { timeout: 180_000 });
-  await expect(last).toContainText(/anchor/i);
+  // Both words at once: the second can come a sentence after the first.
+  await expect(last).toContainText(/^(?=[\s\S]*giraffe)(?=[\s\S]*anchor)/i, { timeout: 180_000 });
+  // By now the card shows the answer as Claude's record has it, not as sent.
+  await expect(answered).toContainText(WORDS);
+  await expect(answered.getByTestId("answer-attachments")).toHaveText(/checkout-step-2\.png, pasted-\d+\.png/);
   await shot("3-claude-read-them");
 }

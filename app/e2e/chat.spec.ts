@@ -302,7 +302,7 @@ test("files in the reply box and dropped on the form go with its answer", async 
   await expect(form).toHaveCount(0);
   const answered = app.chat.locator("[data-testid=chat-item][data-kind=question]");
   await expect(answered.getByTestId("answer-attachments")).toHaveText("notes.md, shot.png, flow-step-3.png");
-  await expect(app.chat).toContainText(/I'll plan it for the banner step was off \[attached: \S+\/\.berth\/attachments\/\d{8}-\d{6}-notes\.md \S+-shot\.png \S+-flow-step-3\.png\]/);
+  await expect(app.chat).toContainText(/I'll plan it for the banner step was off \[attached: \S+\/\.berth\/attachments\/\d{8}-\d{6}-notes\.md, \S+-shot\.png, \S+-flow-step-3\.png\]/);
   await expect(app.composer.getByTestId("attachment-chip")).toHaveCount(0);
 });
 
