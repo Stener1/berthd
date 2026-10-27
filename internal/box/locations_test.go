@@ -300,6 +300,15 @@ func TestAWorktreeWithSubmodulesIsRemovedWhenNothingWouldBeLost(t *testing.T) {
 	}
 	run(wt.Path, "--git-dir="+filepath.Join(strings.TrimSpace(string(out)), "modules", "lib"), "branch", "-D", "-q", "keep")
 
+	// A submodule cloned by hand keeps its repository in its own .git,
+	// inside the worktree's folder, and so goes with it too.
+	run(wt.Path, "clone", "-q", lib, "lib")
+	run(sub, "checkout", "-q", "origin/shared")
+	run(sub, "commit", "-q", "--allow-empty", "-m", "embedded")
+	run(wt.Path, "commit", "-q", "-am", "bump lib again")
+	kept("a commit in an embedded submodule repository", "submodule commits, tags or stashes")
+	run(sub, "push", "-q", "origin", "HEAD:refs/heads/embedded")
+
 	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
 		t.Fatalf("a clean worktree with a submodule: %v", err)
 	}
