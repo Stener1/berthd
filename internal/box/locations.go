@@ -219,7 +219,7 @@ func (l *Locations) worktreePaths(ctx context.Context) []Location {
 	out := make([]Location, 0, len(saved))
 	for _, s := range saved {
 		loc := Location{Name: s.Name, Path: s.Path}
-		if b, err := git(ctx, "-C", s.Path, "worktree", "list", "--porcelain"); err == nil {
+		if b, err := worktreeList(ctx, s.Path); err == nil {
 			loc.Worktrees = parseWorktrees(b, s.Path)
 		}
 		out = append(out, loc)
@@ -436,7 +436,7 @@ func describe(ctx context.Context, s savedLocation) Location {
 	}
 	repo, trust, _ := repoLayer(s)
 	loc.RepoTrust = trust.State
-	out, err := git(ctx, "-C", s.Path, "worktree", "list", "--porcelain")
+	out, err := worktreeList(ctx, s.Path)
 	if err != nil {
 		return loc
 	}
