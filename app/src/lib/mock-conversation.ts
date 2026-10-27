@@ -33,6 +33,9 @@ async function stream(key: string, text: string) {
   showDraft(key, undefined);
 }
 
+// An item of any kind without its id, which the demo gives it.
+type Unsaved<T> = T extends unknown ? Omit<T, "id"> : never;
+
 // The demo's screen, for the app's tests and screenshots (app/e2e): show
 // what an agent is writing, land its message (or any other step: an edit,
 // a command) in its record, or clear it.
@@ -49,7 +52,7 @@ if (typeof window !== "undefined" && new URLSearchParams(window.location.search)
   (window as unknown as { __berthDraft: unknown }).__berthDraft = {
     show: (box: string, session: string, text: string, clipped?: boolean) => showDraft(keyOf(box, session), { text, clipped }),
     land: (box: string, session: string, text: string) => put(box, session, { kind: "text", id: id(), text }),
-    record: (box: string, session: string, item: Omit<TranscriptItem, "id">) => put(box, session, { ...item, id: id() } as TranscriptItem),
+    record: (box: string, session: string, item: Unsaved<TranscriptItem>) => put(box, session, { ...item, id: id() } as TranscriptItem),
     clear: (box: string, session: string) => showDraft(keyOf(box, session), undefined),
   };
   // An agent's crew: helpers started `ago` seconds back, and back `back`

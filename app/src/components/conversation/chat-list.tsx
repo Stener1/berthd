@@ -149,7 +149,10 @@ export function ChatList<T>({ rows, rowKey, estimate, render, header, tail, grew
     const user = () => {
       userAt.current = Date.now();
     };
-    const onScroll = () => {
+    // Only the view's own moves: the list's word to its rows (below) is no
+    // sign the person scrolled.
+    const onScroll = (e: Event) => {
+      if (!e.isTrusted) return;
       const near = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
       if (near) pinned.current = true;
       else if (Date.now() - userAt.current < 1000) pinned.current = false;
