@@ -367,6 +367,49 @@ func TestADeinitializedSubmoduleInsideAClonedOneIsChecked(t *testing.T) {
 	}
 }
 
+func TestANestedSubmoduleMovedBehindAnIgnoreIsChecked(t *testing.T) {
+	repo := gitRepo(t)
+	ctx := context.Background()
+	run := submoduleGit(t)
+	// cal has lib, and lib has deep at deep's second commit.
+	deep := filepath.Join(filepath.Dir(repo), "deep")
+	lib := filepath.Join(filepath.Dir(repo), "lib")
+	os.MkdirAll(deep, 0o755)
+	os.MkdirAll(lib, 0o755)
+	run(deep, "init", "-q", "-b", "main")
+	run(deep, "commit", "-q", "--allow-empty", "-m", "deep")
+	run(deep, "commit", "-q", "--allow-empty", "-m", "deep 2")
+	run(lib, "init", "-q", "-b", "main")
+	run(lib, "submodule", "add", "-q", deep, "deep")
+	run(lib, "commit", "-q", "-m", "add deep")
+	run(repo, "submodule", "add", "-q", lib, "lib")
+	run(repo, "commit", "-q", "-m", "add lib")
+
+	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
+	if _, err := l.Add(ctx, "cal", repo); err != nil {
+		t.Fatal(err)
+	}
+	wt, err := l.CreateWorktree(ctx, "cal", "vendor", "vendor", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(wt.Path, "submodule", "update", "-q", "--init", "--recursive")
+	sub := filepath.Join(wt.Path, "lib")
+	// lib ignores deep, and deep moves to a commit its remote has: only
+	// asking lib itself, ignores overridden, shows the move.
+	run(sub, "config", "submodule.deep.ignore", "all")
+	run(filepath.Join(sub, "deep"), "checkout", "-q", "HEAD~1")
+
+	err = l.RemoveWorktree(ctx, "cal", "vendor", false)
+	if err == nil || !strings.Contains(err.Error(), "files in a submodule") || statusFor(err) != 409 {
+		t.Fatalf("err = %v (status %d), want a 409 about changes in a submodule", err, statusFor(err))
+	}
+	run(filepath.Join(sub, "deep"), "checkout", "-q", "main")
+	if err := l.RemoveWorktree(ctx, "cal", "vendor", false); err != nil {
+		t.Fatalf("with deep back where lib has it: %v", err)
+	}
+}
+
 func TestAFailedAddLeavesNothingBehind(t *testing.T) {
 	repo := gitRepo(t)
 	ctx := context.Background()

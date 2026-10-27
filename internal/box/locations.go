@@ -576,9 +576,10 @@ func unsavedWork(ctx context.Context, dir string) string {
 		return "contains modified or untracked files"
 	}
 	// Each checked-out submodule is asked itself too, so its own config
-	// can't hide a change from the status above.
+	// (status.showUntrackedFiles, submodule.<name>.ignore for the ones
+	// inside it) can't hide a change from the status above.
 	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive",
-		"git status --porcelain --untracked-files=normal --ignore-submodules=all")
+		"git status --porcelain --untracked-files=normal --ignore-submodules=none")
 	if err != nil {
 		return "has submodules that could not be checked for changes"
 	}
