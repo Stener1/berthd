@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronRightIcon, ClockIcon, CornerDownRightIcon, FileTextIcon, GitCompareArrowsIcon, PencilLineIcon, RotateCwIcon, SearchIcon, SendHorizontalIcon, SparklesIcon, TerminalIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, ClockIcon, CornerDownRightIcon, FileTextIcon, GitCompareArrowsIcon, HourglassIcon, PencilLineIcon, RotateCwIcon, SearchIcon, SendHorizontalIcon, SparklesIcon, TerminalIcon, XIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { PixelGrid, PixelLoader } from "@/components/pixel-loader";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { QueuedPrompt, SessionDiff } from "@/lib/api";
+import { ON_ITS_WORK } from "@/lib/derive";
 import { errorMessage } from "@/lib/format";
 import type { LineComments } from "@/lib/git/diff-view";
 import { type ToolCall, type ToolDetail, toolSummary, type TranscriptItem } from "@/lib/transcript";
@@ -370,7 +371,7 @@ function foldTurn(turn: TranscriptItem[], working: boolean, c: FoldCache): Block
   const steps: TranscriptItem[] = [];
   const shown: TranscriptItem[] = [];
   turn.forEach((it, i) => {
-    if ((answer >= 0 && i >= answer && it.kind === "text") || it.kind === "edit" || it.kind === "artifact" || it.kind === "question" || it.kind === "ask" || it.kind === "thinking" || it.kind === "notice") shown.push(it);
+    if ((answer >= 0 && i >= answer && it.kind === "text") || it.kind === "edit" || it.kind === "artifact" || it.kind === "question" || it.kind === "ask" || it.kind === "thinking" || it.kind === "on-its-work" || it.kind === "notice") shown.push(it);
     else steps.push(it);
   });
   const out: Block[] = [];
@@ -514,6 +515,16 @@ function ItemBody({ it, onAnswer, edits, who }: { it: TranscriptItem; onAnswer(i
       );
     case "thinking":
       return <Thinking since={it.since} label={it.label} elapsed={it.elapsed} meta={it.meta} step={it.step} />;
+    case "on-its-work":
+      // As the dashboard's card says it.
+      return (
+        <Tip label={ON_ITS_WORK}>
+          <div className="cv-in flex w-fit items-center gap-2 text-muted-foreground">
+            <HourglassIcon className="size-3.5" aria-hidden />
+            Waiting on its work
+          </div>
+        </Tip>
+      );
     case "tools":
       return <Tools it={it} edits={edits} />;
     case "edit":
