@@ -23,4 +23,7 @@ test("a check that couldn't run still offers Remove anyway, without calling it u
 test("other failures aren't a reason to force", () => {
   assert.equal(keptReason("git worktree remove: fatal: 'shop-fix' is not a working tree"), null);
   assert.equal(keptReason("not connected"), null);
+  // Words that only sound like unsaved work.
+  assert.equal(keptReason("git worktree remove: fatal: '/home/acme/code/shop-fix' contains a .git file that is not a gitlink"), null);
+  assert.equal(keptReason("git worktree remove: error: unable to unlink old 'src/modified.ts': Permission denied"), null);
 });
