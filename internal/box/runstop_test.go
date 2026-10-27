@@ -285,3 +285,52 @@ func TestAnAgentStartedDuringTheArchiveKeepsTheWorktree(t *testing.T) {
 		t.Fatalf("the worktree went (%q) or the newcomer stopped (%v)", f.worktree("late").Path, f.live(t))
 	}
 }
+
+// Two stop runs archiving on one box take turns: the second's archive
+// script starts only once the first's worktree is gone.
+func TestStopRunsOnABoxArchiveOneAtATime(t *testing.T) {
+	f := newStopFixture(t, "echo start >> COUNT; sleep 0.5; echo end >> COUNT", "left", "right")
+	a := f.start(t, []string{f.agents["left"]}, []map[string]string{f.item(t, "left")})
+	b := f.start(t, []string{f.agents["right"]}, []map[string]string{f.item(t, "right")})
+	for _, id := range []string{a.ID, b.ID} {
+		r := waitRunStatus(t, f.b, id, runs.Succeeded)
+		if st, _ := stepAt(r.Steps, "1.i0.0"); st.Output != stopArchived {
+			t.Errorf("run %s's archive = %+v", id, st)
+		}
+	}
+	if b, _ := os.ReadFile(f.count); string(b) != "start\nend\nstart\nend\n" {
+		t.Fatalf("the archive scripts ran side by side: %q", b)
+	}
+}
+
+// No session starts between a stop run's last look for agents and its
+// worktree going: one asked for meanwhile waits, then finds no folder.
+func TestNoAgentStartsUnseenAsAWorktreeGoes(t *testing.T) {
+	f := newStopFixture(t, "", "last")
+	looking, done := make(chan struct{}), make(chan struct{})
+	removed := make(chan error, 1)
+	go func() {
+		removed <- f.b.removeAfter(func() error {
+			close(looking)
+			<-done
+			return nil
+		}, func() error { return f.b.Locations.RemoveWorktree(context.Background(), "cal", "last", true) })
+	}()
+	<-looking
+	started := make(chan int, 1)
+	go func() {
+		started <- f.do("POST", "/v1/sessions", SessionRequest{Name: "latecomer", Location: "cal/last", Command: "claude"}, nil)
+	}()
+	select {
+	case st := <-started:
+		t.Fatalf("a session started (%d) during the last look", st)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(done)
+	if err := <-removed; err != nil {
+		t.Fatal(err)
+	}
+	if st := <-started; st == 200 || f.live(t)["latecomer"] {
+		t.Fatalf("a session started in the removed worktree: %d", st)
+	}
+}

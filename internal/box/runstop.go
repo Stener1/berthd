@@ -55,10 +55,28 @@ func (h *runHost) stopSession(ctx context.Context, x *runs.StepCtx) runs.Result 
 // shells close with it, as when archiving by hand. One already gone is
 // done; one already on its way out is waited for, not archived twice
 // (dropWorktree). A review worktree's review/ branch is Shipyard's own and
-// goes with it, as with every Archive (dropWorktree).
+// goes with it, as with every Archive (dropWorktree). The box's stop runs
+// archive one at a time (archiveTurn), each looking for agents once its turn
+// comes.
 func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Result {
 	b := h.b
 	location, name, path := x.Vars["item.location"], x.Vars["item.name"], x.Vars["item.path"]
+	// Its turn first, then the worktree looked up: one archived meanwhile
+	// is found gone.
+	release, err := b.archiveTurn(ctx)
+	if err != nil {
+		// Cancelled, or berthd stopping, while it waited its turn: nothing
+		// was done, and a resumed run asks again.
+		return runs.Result{Status: runs.Cancelled}
+	}
+	// The turn ends when the archive does, which may be after this step
+	// (cancelled while the script runs).
+	handed := false
+	defer func() {
+		if !handed {
+			release()
+		}
+	}()
 	loc, err := b.Locations.Get(ctx, location)
 	if errors.Is(err, ErrUnknownLocation) {
 		return runs.Result{Status: runs.Succeeded, Out: "already gone"}
@@ -94,15 +112,23 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 	}
 	b.own(wt.Path)
 	// An agent started there while the archive script ran keeps it too:
-	// the folder going would end it.
+	// the folder going would end it. None starts between this last look
+	// and the folder going (removeAfter). A listing that fails fails the
+	// step, rather than passing for an agent.
 	keep := func() error {
-		if why, err := h.agentsIn(context.Background(), wt.Path, batch); err != nil || why != "" {
+		why, err := h.agentsIn(context.Background(), wt.Path, batch)
+		if err != nil {
+			return err
+		}
+		if why != "" {
 			return errAgentArrived
 		}
 		return nil
 	}
 	done := make(chan error, 1)
-	if _, err := b.dropWorktreeIf(origOf(x), loc, wt.Name, wt.Path, "", false, "archived", func(err error) { done <- err }, keep); err != nil {
+	handed = true
+	if _, err := b.dropWorktreeIf(origOf(x), loc, wt.Name, wt.Path, "", false, "archived", func(err error) { release(); done <- err }, keep); err != nil {
+		release()
 		if errors.Is(err, errAgentArrived) {
 			return kept(keptOtherAgent)
 		}

@@ -135,6 +135,14 @@ type Box struct {
 	// else asked meanwhile (dropWorktree).
 	dropMu   sync.Mutex
 	dropping map[string][]func(error)
+	// lastLook is held for writing from a removal's last look for agents
+	// until the folder is gone, and for reading while a session starts
+	// (startSession), so no agent starts unseen in between.
+	lastLook sync.RWMutex
+	// archiveLine lets a box's stop runs archive one worktree at a time
+	// (archiveTurn).
+	archiveOnce sync.Once
+	archiveLine chan struct{}
 }
 
 func (b *Box) own(path string) {
@@ -597,6 +605,13 @@ func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, 
 // asked right before the folder goes (after the archive script), and an
 // error from it leaves the worktree as it is, done hearing why.
 func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error), keep func() error) (async bool, err error) {
+	// git refuses a worktree with uncommitted or untracked files unless
+	// forced. Ask before anything is torn down, so an archive script never
+	// runs on work that git will then keep, and before it counts as on its
+	// way out, so a second ask hears the same.
+	if !force && dirtyWorktree(dir) {
+		return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
+	}
 	if !b.dropBegin(dir, done) {
 		return true, nil
 	}
@@ -616,14 +631,6 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 		b.dropEnd(dir, err)
 		if done != nil {
 			done(err)
-		}
-	}
-	// git refuses a worktree with uncommitted or untracked files unless
-	// forced. Ask before anything is torn down, so an archive script never
-	// runs on work that git will then keep.
-	if !force {
-		if dirtyWorktree(dir) {
-			return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
 		}
 	}
 	b.stopServices(loc.Name, name)
@@ -651,12 +658,7 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 			var removeErr error
 			b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
 				ran = true
-				if keep != nil {
-					if removeErr = keep(); removeErr != nil {
-						return removeErr
-					}
-				}
-				if removeErr = b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); removeErr != nil {
+				if removeErr = b.removeAfter(keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); removeErr != nil {
 					return removeErr
 				}
 				removed(context.Background())
@@ -669,12 +671,7 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 		}()
 		return true, nil
 	}
-	if keep != nil {
-		if err := keep(); err != nil {
-			return false, err
-		}
-	}
-	if err := b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); err != nil {
+	if err := b.removeAfter(keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); err != nil {
 		return false, err
 	}
 	removed(context.Background())
@@ -682,8 +679,21 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 	return false, nil
 }
 
-// stopSessionsIn ends the sessions working in a removed worktree: their
-// folder is gone, so they would only linger in the app with nowhere to work.
+// removeAfter removes a worktree with remove once keep, when set, has no
+// objection. No session starts from keep's look until the folder is gone,
+// so an agent either counts or finds no folder (startSession).
+func (b *Box) removeAfter(keep func() error, remove func() error) error {
+	if keep == nil {
+		return remove()
+	}
+	b.lastLook.Lock()
+	defer b.lastLook.Unlock()
+	if err := keep(); err != nil {
+		return err
+	}
+	return remove()
+}
+
 // dropBegin marks dir on its way out. When it already is, done waits with
 // the first ask for how it ends, and dropBegin says so with false.
 func (b *Box) dropBegin(dir string, done func(error)) bool {
@@ -716,6 +726,37 @@ func (b *Box) dropEnd(dir string, err error) {
 	}
 }
 
+// startUnseen starts a session with start, never while a removal takes
+// its last look for agents (removeAfter): one that waited for it finds its
+// folder gone, or counted.
+func (b *Box) startUnseen(dir string, start func() (Session, error)) (Session, error) {
+	b.lastLook.RLock()
+	defer b.lastLook.RUnlock()
+	if dir != "" {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			return Session{}, httpError{http.StatusConflict, fmt.Sprintf("%s is gone: its worktree was archived or removed", dir)}
+		}
+	}
+	return start()
+}
+
+// archiveTurn waits until no other stop run on this box is archiving, as
+// the app's own removals wait their turn on a box (lib/removing.ts inTurn),
+// so archive scripts don't run side by side. release ends the turn; it is
+// safe to call more than once. ctx ending first is an error.
+func (b *Box) archiveTurn(ctx context.Context) (release func(), err error) {
+	b.archiveOnce.Do(func() { b.archiveLine = make(chan struct{}, 1) })
+	select {
+	case b.archiveLine <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-b.archiveLine }) }, nil
+}
+
+// stopSessionsIn ends the sessions working in a removed worktree: their
+// folder is gone, so they would only linger in the app with nowhere to work.
 func (b *Box) stopSessionsIn(from, dir string) {
 	ctx := context.Background()
 	all, err := b.Sessions.List(ctx)
