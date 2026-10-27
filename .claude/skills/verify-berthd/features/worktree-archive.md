@@ -11,7 +11,7 @@ A worktree that is done goes one of two ways. **Archive…** asks first, then st
 - `archive-dirty`: uncommitted work makes git refuse. The worktree comes back as it was, with a warning toast **Couldn't archive NAME** / "NAME has uncommitted changes, so it was left as it is. Commit them first, or use Remove worktree to discard them."
 - `archive-queue`: archives (and removals) on one box go one after another; each row keeps its mark until its turn is done. Another box's don't wait.
 - `remove`: Remove worktree, the dashboard's Stop and remove worktree, and Delete in the Worktrees table: no dialog, **Removing…**, and a dirty one gives **Kept NAME** with **Remove anyway**.
-- Bulk Archive in the Worktrees table (`views/worktrees/archive-dialog.tsx`) is separate: its dialog stays open on purpose, with each row's outcome, and runs one row after another across every box (`use-bulk.ts`).
+- Bulk Archive in the Worktrees table (`views/worktrees/archive-dialog.tsx`) is separate: its dialog stays open on purpose, with each row's outcome (`use-bulk.ts`). On a box with runs, its rows (and Stop sessions') are one `stop` run there (`startOnBoxes`, as the board's bulk Stop): the worktree's sessions stop first, then it's archived where it's safe, and a row the box keeps reads `Kept: …` (skipped). A row with uncommitted changes, one already on its way out, and every row of a box without runs go one after another from the app, as before.
 
 ## How to get to it (user POV)
 
