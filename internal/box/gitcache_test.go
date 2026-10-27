@@ -165,3 +165,43 @@ func TestALocationThatIsALinkedWorktreeIsCachedByItsRepository(t *testing.T) {
 		t.Fatal("a plain folder has git dirs")
 	}
 }
+
+// A reftable repository keeps a linked worktree's HEAD in that worktree's
+// own reftable, not in a file the main checkout's stamp covers.
+func TestAReftableRepositorysLinkedWorktreeIsAskedAgainWhenItSwitches(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(root, "cal")
+	if out, err := exec.Command("git", "init", "-q", "--ref-format=reftable", "-b", "main", repo).CombinedOutput(); err != nil {
+		t.Skipf("this git has no reftable: %s", out)
+	}
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	gitIn(t, repo, "branch", "other")
+	side := filepath.Join(root, "cal-side")
+	gitIn(t, repo, "worktree", "add", "-q", "-b", "side", side)
+	ctx := context.Background()
+	branchOf := func() string {
+		out, _ := worktreeList(ctx, repo)
+		for _, w := range parseWorktrees(out, repo) {
+			if w.Path == side {
+				return w.Branch
+			}
+		}
+		return ""
+	}
+	if b := branchOf(); b != "side" {
+		t.Fatalf("branch = %q, want side", b)
+	}
+	if b := defaultBranch(ctx, side); b != "side" {
+		t.Fatalf("default branch of the linked worktree = %q, want side", b)
+	}
+	gitIn(t, side, "checkout", "-q", "other")
+	if b := branchOf(); b != "other" {
+		t.Errorf("after checkout in the linked worktree, branch = %q, want other", b)
+	}
+	if b := defaultBranch(ctx, side); b != "other" {
+		t.Errorf("after checkout, its default branch = %q, want other", b)
+	}
+}

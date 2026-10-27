@@ -157,7 +157,9 @@ func worktreeStamp(g gitDirs) string {
 	ents, _ := os.ReadDir(filepath.Join(g.common, "worktrees"))
 	for _, e := range ents {
 		dir := filepath.Join(g.common, "worktrees", e.Name())
-		files = append(files, filepath.Join(dir, "gitdir"), filepath.Join(dir, "locked"))
+		// A reftable repository keeps a linked worktree's HEAD in a
+		// reftable of its own.
+		files = append(files, filepath.Join(dir, "gitdir"), filepath.Join(dir, "locked"), filepath.Join(dir, "reftable", "tables.list"))
 		files = append(files, headFiles(g.common, filepath.Join(dir, "HEAD"))...)
 	}
 	return stampOf(files...)
@@ -184,7 +186,7 @@ func configStamp(g gitDirs) string {
 
 // defaultBranchStamp covers origin's HEAD and the checkout's own.
 func defaultBranchStamp(g gitDirs) string {
-	files := append(refStores(g.common), filepath.Join(g.common, "refs", "remotes", "origin", "HEAD"), filepath.Join(g.git, "HEAD"))
+	files := append(refStores(g.common), filepath.Join(g.common, "refs", "remotes", "origin", "HEAD"), filepath.Join(g.git, "HEAD"), filepath.Join(g.git, "reftable", "tables.list"))
 	return stampOf(files...)
 }
 
