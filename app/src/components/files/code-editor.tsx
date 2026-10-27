@@ -32,6 +32,8 @@ export interface CodeEditorProps {
   // Scroll this line near the top (1-based); reveal changes when asked to
   // go there again.
   revealLine?: number;
+  // The last line of a range to select from revealLine (editable only).
+  revealEnd?: number;
   reveal?: number;
   wrap?: boolean;
   fontSize?: number;
@@ -62,7 +64,8 @@ const languageFor = (path: string) => LANGS.find(([re]) => re.test(path))?.[1];
 
 const v = (role: string) => ({ color: `var(--syn-${role}, var(--syn-text))`, fontStyle: `var(--syn-${role}-i, normal)`, fontWeight: `var(--syn-${role}-b, inherit)` });
 
-const highlight = HighlightStyle.define([
+// Shared with the SQL editor plugins get (sql-editor.tsx).
+export const highlight = HighlightStyle.define([
   { tag: t.keyword, ...v("keyword") },
   { tag: t.controlKeyword, ...v("control") },
   { tag: t.moduleKeyword, ...v("module") },
@@ -127,7 +130,7 @@ function fallbackVars(theme: Theme): Record<string, string> {
 const shikiCache = new Map<string, Record<string, string>>();
 
 // useSyntaxVars is the active theme's code colours as custom properties.
-function useSyntaxVars(theme: Theme): Record<string, string> {
+export function useSyntaxVars(theme: Theme): Record<string, string> {
   const name = theme.appearance === "dark" ? syntaxThemes(theme).dark : syntaxThemes(theme).light;
   // Each colour reads on this theme's background (4.5:1, lightness only),
   // the active line's tint included.
@@ -156,7 +159,7 @@ function useSyntaxVars(theme: Theme): Record<string, string> {
 
 // ---- The editor's chrome, in the app's tokens ----
 
-const chrome = EditorView.theme({
+export const chrome = EditorView.theme({
   "&": { height: "100%", backgroundColor: "transparent", color: "var(--syn-text)", fontSize: "var(--ed-font)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
@@ -270,7 +273,7 @@ const conflictTints = EditorView.decorations.compute([marksField, "doc"], (state
 
 // ---- The component ----
 
-export function CodeEditor({ path, text, onChange, onSave, changes, conflictLines, readOnly, revealLine, reveal, wrap, fontSize = 12.5, className, style }: CodeEditorProps) {
+export function CodeEditor({ path, text, onChange, onSave, changes, conflictLines, readOnly, revealLine, revealEnd, reveal, wrap, fontSize = 12.5, className, style }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const cb = useRef({ onChange, onSave });
@@ -351,9 +354,10 @@ export function CodeEditor({ path, text, onChange, onSave, changes, conflictLine
     const v = view.current;
     if (!v || !revealLine || revealLine > v.state.doc.lines) return;
     const pos = v.state.doc.line(revealLine).from;
-    v.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 48 }), ...(readOnly ? {} : { selection: { anchor: pos } }) });
+    const head = revealEnd && revealEnd > revealLine ? v.state.doc.line(Math.min(revealEnd, v.state.doc.lines)).to : undefined;
+    v.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 48 }), ...(readOnly ? {} : { selection: { anchor: pos, head } }) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealLine, reveal, path]);
+  }, [revealLine, revealEnd, reveal, path]);
 
   const vars = useMemo(
     () =>

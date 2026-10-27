@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cosscom/shipyard/internal/events"
@@ -59,10 +60,14 @@ type Browsers struct {
 	// Idle closes a browser unused this long (default BrowserIdle).
 	Idle time.Duration
 
+	// MaxTabs caps the tabs one worktree's browser has (0: by the box's
+	// memory).
+	MaxTabs int
+
 	mu   sync.Mutex
 	vpMu sync.Mutex // viewports.json
 	b    *Box
-	open map[string]*browser // worktree path →
+	open map[string]*chromium // worktree path →
 	stop chan struct{}
 
 	failure   *startFailure // the last start that failed, until one starts
@@ -93,19 +98,20 @@ type frame struct {
 	URL    string  `json:"url,omitempty"`
 }
 
+// browser is one tab of a worktree's Chromium: the page an agent drives,
+// with its own refs, console, requests, size and watchers. The main tab
+// (tab "") is the one agents get without --tab; a named tab has a browser
+// context of its own, so its cookies and storage are its own too.
 type browser struct {
-	m        *Browsers
-	path     string
-	location string
-	worktree string
-	cmd      *exec.Cmd
-	cdp      *cdpConn
-	session  string
-	profile  string
-	started  time.Time
-	done     chan struct{}
+	*chromium
+	tab     string
+	target  string
+	session string
+	bctx    string // its browser context; "" for the main tab's, the default
+	opened  time.Time
 
-	run sync.Mutex // one command at a time
+	run  sync.Mutex // one command at a time
+	busy atomic.Int32
 
 	mu          sync.Mutex
 	url, title  string
@@ -134,7 +140,7 @@ type browser struct {
 
 // NewBrowsers makes the box's browser manager.
 func (b *Box) NewBrowsers(dir string, max int) *Browsers {
-	m := &Browsers{Dir: dir, Max: max, b: b, open: map[string]*browser{}, stop: make(chan struct{})}
+	m := &Browsers{Dir: dir, Max: max, b: b, open: map[string]*chromium{}, stop: make(chan struct{})}
 	b.Browsers = m
 	return m
 }
@@ -166,18 +172,23 @@ func (m *Browsers) Run(ctx context.Context) {
 				}
 			}
 		case <-t.C:
+			// A named tab goes when it is idle; the browser when all of
+			// its tabs are.
 			m.mu.Lock()
-			var stale []*browser
-			for _, br := range m.open {
-				br.mu.Lock()
-				if time.Since(br.lastUsed) > idle && len(br.watchers) == 0 {
-					stale = append(stale, br)
-				}
-				br.mu.Unlock()
+			all := make([]*chromium, 0, len(m.open))
+			for _, c := range m.open {
+				all = append(all, c)
 			}
 			m.mu.Unlock()
-			for _, br := range stale {
-				m.close(br, "idle")
+			for _, c := range all {
+				for _, br := range c.list() {
+					if br.tab != "" && br.idleFor() > idle {
+						c.closeTab(br, "idle")
+					}
+				}
+				if c.idleFor() > idle {
+					m.close(c, "idle")
+				}
 			}
 		}
 	}
@@ -255,173 +266,8 @@ func FindChromium() (string, error) {
 
 var errNoChromium = errors.New("no Chromium on this box; install one with `berthd browser install` (Playwright's headless shell) or set BERTH_CHROMIUM")
 
-// get returns the worktree's browser, starting one if need be.
-func (m *Browsers) get(ctx context.Context, loc Location, wt Worktree) (*browser, error) {
-	m.mu.Lock()
-	if br := m.open[wt.Path]; br != nil {
-		select {
-		case <-br.done:
-			delete(m.open, wt.Path)
-		default:
-			m.mu.Unlock()
-			br.touch()
-			return br, nil
-		}
-	}
-	// At the cap, the least recently used goes.
-	var lru *browser
-	if len(m.open) >= m.limit() {
-		for _, br := range m.open {
-			br.mu.Lock()
-			if lru == nil || br.lastUsed.Before(lru.lastUsed) {
-				lru = br
-			}
-			br.mu.Unlock()
-		}
-	}
-	m.mu.Unlock()
-	if lru != nil {
-		m.close(lru, "another worktree needed a browser")
-	}
-	br, err := m.launch(ctx, loc, wt)
-	m.noteStart(err)
-	if err != nil {
-		reason := "error"
-		if errors.Is(err, ErrBrowserSandbox) {
-			reason = "sandbox"
-		}
-		m.b.Events.Publish(events.Event{Type: "browser.failed", Box: m.b.Name, Origin: "browser", Data: map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path, "reason": reason}})
-		return nil, err
-	}
-	m.mu.Lock()
-	m.open[wt.Path] = br
-	m.mu.Unlock()
-	m.b.Events.Publish(events.Event{Type: "browser.opened", Box: m.b.Name, Origin: "browser", Data: map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path}})
-	return br, nil
-}
-
-// Lookup returns the worktree's browser if it runs.
-func (m *Browsers) Lookup(path string) *browser {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if br := m.open[filepath.Clean(path)]; br != nil {
-		select {
-		case <-br.done:
-			return nil
-		default:
-			return br
-		}
-	}
-	return nil
-}
-
-func (m *Browsers) close(br *browser, why string) {
-	m.mu.Lock()
-	if m.open[br.path] == br {
-		delete(m.open, br.path)
-	}
-	m.mu.Unlock()
-	br.shutdown()
-	m.b.Events.Publish(events.Event{Type: "browser.closed", Box: m.b.Name, Origin: "browser", Data: map[string]any{"location": br.location, "name": br.worktree, "path": br.path, "reason": why}})
-}
-
-// Close closes a worktree's browser.
-func (m *Browsers) Close(path, why string) bool {
-	if br := m.Lookup(path); br != nil {
-		m.close(br, why)
-		return true
-	}
-	return false
-}
-
-// CloseAll closes every browser.
-func (m *Browsers) CloseAll(why string) {
-	m.mu.Lock()
-	all := make([]*browser, 0, len(m.open))
-	for _, br := range m.open {
-		all = append(all, br)
-	}
-	m.mu.Unlock()
-	for _, br := range all {
-		m.close(br, why)
-	}
-}
-
-// CloseLRU closes the least recently used browser nobody watches, for the
-// memory guard, which closes browsers before it pauses agents.
-func (m *Browsers) CloseLRU(why string) (*BrowserStatus, bool) {
-	m.mu.Lock()
-	var lru *browser
-	for _, br := range m.open {
-		br.mu.Lock()
-		if len(br.watchers) == 0 && (lru == nil || br.lastUsed.Before(lru.lastUsed)) {
-			lru = br
-		}
-		br.mu.Unlock()
-	}
-	m.mu.Unlock()
-	if lru == nil {
-		return nil, false
-	}
-	st := lru.status()
-	m.close(lru, why)
-	return &st, true
-}
-
-// mains is every running browser's main process and worktree, without
-// the cost of status (its memory, its proxy).
-func (m *Browsers) mains() []BrowserStatus {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []BrowserStatus
-	for _, br := range m.open {
-		if br.cmd.Process != nil {
-			out = append(out, BrowserStatus{Location: br.location, Worktree: br.worktree, Path: br.path, PID: br.cmd.Process.Pid})
-		}
-	}
-	return out
-}
-
-// List is every running browser's status.
-func (m *Browsers) List() []BrowserStatus {
-	m.mu.Lock()
-	all := make([]*browser, 0, len(m.open))
-	for _, br := range m.open {
-		all = append(all, br)
-	}
-	m.mu.Unlock()
-	out := []BrowserStatus{}
-	for _, br := range all {
-		out = append(out, br.status())
-	}
-	return out
-}
-
 func (m *Browsers) shotDir(location, worktree string) string {
 	return filepath.Join(m.Dir, "shots", location, worktree)
-}
-
-func (m *Browsers) launch(ctx context.Context, loc Location, wt Worktree) (*browser, error) {
-	if err := m.simulatedSandbox(); err != nil {
-		return nil, err
-	}
-	bin := m.Chromium
-	if bin == "" {
-		var err error
-		if bin, err = FindChromium(); err != nil {
-			return nil, err
-		}
-	}
-	px, err := m.b.BrowserProxies.For(m.b, wt.Path)
-	if err != nil {
-		return nil, err
-	}
-	br, err := m.start(ctx, bin, px.Addr(), wt.Path, m.Viewport(wt.Path))
-	if err != nil {
-		return nil, err
-	}
-	br.location, br.worktree = loc.Name, wt.Name
-	return br, nil
 }
 
 // Check starts Chromium once, on a blank page with nowhere to go, and
@@ -434,10 +280,10 @@ func (m *Browsers) Check(ctx context.Context) error {
 			bin, err = FindChromium()
 		}
 		if err == nil {
-			var br *browser
+			var c *chromium
 			// A proxy that refuses everything: the page is about:blank.
-			if br, err = m.start(ctx, bin, "127.0.0.1:9", "", DefaultViewport); err == nil {
-				br.shutdown()
+			if c, err = m.start(ctx, bin, "127.0.0.1:9", "", DefaultViewport); err == nil {
+				c.shutdown()
 			}
 		}
 	}
@@ -457,8 +303,8 @@ func (m *Browsers) simulatedSandbox() error {
 }
 
 // start runs Chromium with its only way out through proxy, for the
-// worktree at path (where downloads go), at the size v.
-func (m *Browsers) start(ctx context.Context, bin, proxy, path string, v Viewport) (*browser, error) {
+// worktree at path (where downloads go), its main tab at the size v.
+func (m *Browsers) start(ctx context.Context, bin, proxy, path string, v Viewport) (*chromium, error) {
 	profile, err := os.MkdirTemp(filepath.Join(m.Dir, "profiles"), "p-")
 	if err != nil {
 		os.MkdirAll(filepath.Join(m.Dir, "profiles"), 0o700)
@@ -489,19 +335,18 @@ func (m *Browsers) start(ctx context.Context, bin, proxy, path string, v Viewpor
 	}
 	toChrome.Close()
 	fromChrome.Close()
-	br := &browser{m: m, cmd: cmd, path: path, viewport: v, profile: profile, started: time.Now(), lastUsed: time.Now(),
-		done: make(chan struct{}), refs: map[int64]string{}, reqs: map[string]string{}, inflight: map[string]bool{}, watchers: map[chan frame]struct{}{}}
-	br.cdp = newCDP(ours, theirs, br.onEvent)
+	c := &chromium{m: m, cmd: cmd, path: path, profile: profile, started: time.Now(), done: make(chan struct{}), tabs: map[string]*browser{}, sessions: map[string]*browser{}}
+	c.cdp = newCDP(ours, theirs, c.onEvent)
 	go func() {
 		cmd.Wait()
 		ours.Close()
 		theirs.Close()
-		close(br.done)
+		close(c.done)
 	}()
 	cctx, cancel := context.WithTimeout(ctx, browserStartTimeout())
 	defer cancel()
-	if err := br.attach(cctx); err != nil {
-		br.shutdown()
+	if err := c.attachMain(cctx, v); err != nil {
+		c.shutdown()
 		if out := strings.ToLower(stderr.String()); strings.Contains(out, "sandbox") || strings.Contains(out, "namespace") {
 			return nil, sandboxError(readUserns())
 		}
@@ -510,7 +355,7 @@ func (m *Browsers) start(ctx context.Context, bin, proxy, path string, v Viewpor
 		}
 		return nil, fmt.Errorf("starting Chromium: %w", err)
 	}
-	return br, nil
+	return c, nil
 }
 
 // chromiumArgs is how berthd runs Chromium, the agents' browser and the
@@ -592,90 +437,9 @@ func (t *stderrTail) String() string {
 	return string(t.b)
 }
 
-func (br *browser) attach(ctx context.Context) error {
-	var targets struct {
-		TargetInfos []struct {
-			TargetID string `json:"targetId"`
-			Type     string `json:"type"`
-		} `json:"targetInfos"`
-	}
-	if err := br.cdp.call(ctx, "", "Target.getTargets", nil, &targets); err != nil {
-		return err
-	}
-	target := ""
-	for _, t := range targets.TargetInfos {
-		if t.Type == "page" {
-			target = t.TargetID
-			break
-		}
-	}
-	if target == "" {
-		var created struct {
-			TargetID string `json:"targetId"`
-		}
-		if err := br.cdp.call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &created); err != nil {
-			return err
-		}
-		target = created.TargetID
-	}
-	var att struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := br.cdp.call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": target, "flatten": true}, &att); err != nil {
-		return err
-	}
-	br.session = att.SessionID
-	for _, m := range []string{"Page.enable", "Runtime.enable", "Network.enable", "Log.enable", "DOM.enable", "Accessibility.enable"} {
-		if err := br.cdp.call(ctx, br.session, m, nil, nil); err != nil && !strings.HasPrefix(m, "Log") {
-			return err
-		}
-	}
-	if err := br.applyViewport(ctx, br.viewport); err != nil {
-		return err
-	}
-	// Downloads land in the worktree, where the agent can read them.
-	if br.path != "" {
-		dl := filepath.Join(br.path, ".berth", "browser")
-		os.MkdirAll(dl, 0o755)
-		br.cdp.call(ctx, "", "Browser.setDownloadBehavior", map[string]any{"behavior": "allow", "downloadPath": dl}, nil)
-	}
-	return nil
-}
-
-func (br *browser) shutdown() {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	br.cdp.call(ctx, "", "Browser.close", nil, nil)
-	cancel()
-	select {
-	case <-br.done:
-	case <-time.After(3 * time.Second):
-		if br.cmd.Process != nil {
-			br.cmd.Process.Kill()
-		}
-		<-br.done
-	}
-	br.cdp.close()
-	os.RemoveAll(br.profile)
-	br.mu.Lock()
-	for ch := range br.watchers {
-		close(ch)
-		delete(br.watchers, ch)
-	}
-	br.mu.Unlock()
-}
-
-func (br *browser) touch() {
-	br.mu.Lock()
-	br.lastUsed = time.Now()
-	br.mu.Unlock()
-}
-
 // onEvent keeps what the page says: navigations, console errors, failed
 // requests, in-flight requests, screencast frames. Buffers are bounded.
-func (br *browser) onEvent(method, session string, params json.RawMessage) {
-	if session != br.session && session != "" {
-		return
-	}
+func (br *browser) onEvent(method string, params json.RawMessage) {
 	switch method {
 	case "Page.frameNavigated":
 		var p struct {
@@ -692,10 +456,10 @@ func (br *browser) onEvent(method, session string, params json.RawMessage) {
 		br.mu.Lock()
 		br.url = p.Frame.URL
 		// A new document: new elements, new refs.
-		br.refs, br.nextRef, br.lastSnap = map[int64]string{}, 0, nil
+		br.refs, br.nextRef, br.lastSnap, br.title = map[int64]string{}, 0, nil, ""
 		br.mu.Unlock()
 		if !strings.HasPrefix(p.Frame.URL, "about:") {
-			br.m.b.Events.Publish(events.Event{Type: "browser.navigated", Box: br.m.b.Name, Origin: "browser", Data: map[string]any{"location": br.location, "name": br.worktree, "path": br.path, "url": p.Frame.URL}})
+			br.m.b.Events.Publish(events.Event{Type: "browser.navigated", Box: br.m.b.Name, Origin: "browser", Data: map[string]any{"location": br.location, "name": br.worktree, "path": br.path, "tab": br.tab, "url": p.Frame.URL}})
 		}
 	case "Page.navigatedWithinDocument":
 		var p struct {
@@ -956,41 +720,6 @@ func (br *browser) settle(ctx context.Context, max time.Duration) {
 	br.mu.Unlock()
 }
 
-// BrowserStatus is a browser as status and lists show it.
-type BrowserStatus struct {
-	Location string    `json:"location"`
-	Worktree string    `json:"worktree"`
-	Path     string    `json:"path"`
-	URL      string    `json:"url,omitempty"`
-	PID      int       `json:"pid"`
-	RSS      uint64    `json:"rss_bytes,omitempty"`
-	Started  time.Time `json:"started"`
-	LastUsed time.Time `json:"last_used"`
-	Watchers int       `json:"watchers"`
-	Refused  int       `json:"refused,omitempty"`
-	// Viewport is the page's size, and Size it as text (1920×1080).
-	Viewport Viewport `json:"viewport"`
-	Size     string   `json:"size"`
-}
-
-func (br *browser) status() BrowserStatus {
-	br.mu.Lock()
-	st := BrowserStatus{Location: br.location, Worktree: br.worktree, Path: br.path, URL: br.url, Started: br.started, LastUsed: br.lastUsed, Watchers: len(br.watchers), Viewport: br.viewport}
-	br.mu.Unlock()
-	if st.Viewport.Width == 0 {
-		st.Viewport = DefaultViewport
-	}
-	st.Size = st.Viewport.String()
-	if br.cmd.Process != nil {
-		st.PID = br.cmd.Process.Pid
-		st.RSS = treeRSS(st.PID)
-	}
-	if px, err := br.m.b.BrowserProxies.For(br.m.b, br.path); err == nil {
-		st.Refused, _ = px.Refused()
-	}
-	return st
-}
-
 // treeRSS is the resident memory of pid and its descendants (Chromium's
 // renderers and GPU process), in bytes.
 func treeRSS(pid int) uint64 {
@@ -1076,9 +805,7 @@ func (br *browser) pageTitle(ctx context.Context) string {
 // Open navigates and prints a first look: title, URL and a compact
 // interactive snapshot, with any errors.
 func (br *browser) Open(ctx context.Context, url string) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	loaded := make(chan struct{})
 	br.mu.Lock()
 	br.loaded = loaded
@@ -1108,7 +835,11 @@ func (br *browser) Open(ctx context.Context, url string) (BrowserResult, error) 
 	br.mu.Lock()
 	br.lastSnap, br.lastSnapURL = full, cur
 	br.mu.Unlock()
-	fmt.Fprintf(&b, "url: %s\ntitle: %s\nsize: %s\n", cur, clip(br.pageTitle(ctx), 120), br.currentViewport())
+	title := clip(br.pageTitle(ctx), 120)
+	br.mu.Lock()
+	br.title = title
+	br.mu.Unlock()
+	fmt.Fprintf(&b, "url: %s\ntitle: %s\nsize: %s\n", cur, title, br.currentViewport())
 	text, file := br.capLines(lines, firstLookCap)
 	b.WriteString(strings.TrimRight(text, "\n"))
 	br.appendLogs(&b, consoleAfter, netAfter)
@@ -1212,9 +943,7 @@ func (br *browser) capLines(lines []string, limit int) (string, string) {
 // Snapshot prints the page, or with delta what changed since the last
 // snapshot of this page.
 func (br *browser) Snapshot(ctx context.Context, full, delta bool, selector string, depth int) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	o := snapOptions{full: full, depth: depth, maxLines: 2000}
 	if selector != "" {
 		id, err := br.resolve(ctx, selector)
@@ -1346,9 +1075,7 @@ var keyCodes = map[string]int{"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 
 // Act clicks, fills, presses, selects or hovers, then prints what changed:
 // a delta of the snapshot, new console errors and failed requests.
 func (br *browser) Act(ctx context.Context, action, target, value string) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	before := br.currentURL()
 	var id int64
 	if action != "press" || target != "" {
@@ -1457,9 +1184,7 @@ func (br *browser) Act(ctx context.Context, action, target, value string) (Brows
 // Wait waits for text on the page, a URL containing url, or the network
 // to go quiet.
 func (br *browser) Wait(ctx context.Context, text, url string, idle bool, timeout time.Duration) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	if timeout <= 0 || timeout > time.Minute {
 		timeout = 10 * time.Second
 	}
@@ -1507,9 +1232,7 @@ func jsString(s string) string {
 // width pixels wide (800 by default, which an agent reads for about 530
 // tokens), or with native the page's own pixels, its size at its scale.
 func (br *browser) Shot(ctx context.Context, el string, full bool, width int, native bool) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	if width <= 0 {
 		width = 800
 	}
@@ -1580,7 +1303,7 @@ func (br *browser) Shot(ctx context.Context, el string, full bool, width int, na
 	}
 	pruneShots(dir, keepShots)
 	cur := br.currentURL()
-	br.m.b.Events.Publish(events.Event{Type: "browser.shot", Box: br.m.b.Name, Origin: "browser", Data: map[string]any{"location": br.location, "name": br.worktree, "path": br.path, "file": name, "url": cur}})
+	br.m.b.Events.Publish(events.Event{Type: "browser.shot", Box: br.m.b.Name, Origin: "browser", Data: map[string]any{"location": br.location, "name": br.worktree, "path": br.path, "tab": br.tab, "file": name, "url": cur}})
 	pw, ph := pngSize(raw)
 	if pw == 0 {
 		pw, ph = int(math.Round(w*scale*dpr)), int(math.Round(h*scale*dpr))
@@ -1632,9 +1355,7 @@ func (br *browser) Network() BrowserResult {
 
 // Eval runs JavaScript in the page and prints its value, at most 2 KB.
 func (br *browser) Eval(ctx context.Context, js string) (BrowserResult, error) {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	raw, err := br.evaluate(ctx, js)
 	if err != nil {
 		return BrowserResult{Text: "error: " + err.Error()}, nil
@@ -1721,7 +1442,8 @@ func (m *Browsers) Artifacts(location, worktree, path string) *BrowserArtifacts 
 		}
 		a.Shots = append(a.Shots, filepath.Base(s))
 	}
-	if br := m.Lookup(path); br != nil {
+	if c := m.lookupChromium(path); c != nil && c.recent() != nil {
+		br := c.recent()
 		br.mu.Lock()
 		a.URL = br.url
 		for i := len(br.console) - 1; i >= 0 && len(a.Errors) < 5; i-- {

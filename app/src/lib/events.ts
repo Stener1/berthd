@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { BerthEvent } from "@/lib/api";
+import { handleBrowserOpened } from "@/lib/agent-browser-open";
 import { handleArtifactEvent } from "@/lib/art/model";
 import { agentLabel, agentOf, sessionAgent, sessionName } from "@/lib/derive";
 import { isLive, useLoops } from "@/lib/loops";
@@ -10,6 +11,7 @@ import { handleQueueEvent } from "@/lib/queue";
 import { scheduleRuns } from "@/lib/runs";
 import { handleTeamEvent } from "@/lib/team";
 import { handleSessionOpen } from "@/lib/session-open";
+import { handleSkillsEvent } from "@/lib/skills-notice";
 import { archiveFailed, worktreeGone } from "@/lib/remove-worktree";
 import { markRemoving, markScript, removalOf, useRemovals } from "@/lib/removing";
 import { type BoxPart, scheduleRefresh, useStore } from "@/lib/store";
@@ -27,6 +29,8 @@ const refreshes: [prefix: string, parts: BoxPart[]][] = [
   ["agent.", ["sessions", "stats"]],
   // A task is a new worktree and the agent in it.
   ["task.", ["locations", "sessions"]],
+  // A PR review opened, moved on or removed: its worktree and its mark.
+  ["review.", ["locations"]],
   // Agent CLIs added or found on the box: the agents it offers.
   ["agents.", ["info"]],
 ];
@@ -60,6 +64,9 @@ export function handleEvent(e: BerthEvent) {
   if (e.type.startsWith("queue.")) handleQueueEvent(e);
   // A team setup's runner on a box, or a newer commit of one (lib/team).
   if (e.type.startsWith("team.") || e.type === "box.connected") handleTeamEvent(e);
+  // A box's skills installed or removed, or the reminder's snooze changed
+  // in another window (lib/skills-notice).
+  if (e.type.startsWith("skills.") || e.type === "app.changed") handleSkillsEvent(e);
   notifyFor(e);
 }
 
@@ -96,6 +103,8 @@ function notifyFor(e: BerthEvent) {
     }
   }
   if (e.type === "preview.open") handlePreview(e);
+  // An agent opened its browser: its live view beside it, when it's showing.
+  if (e.type === "browser.opened") handleBrowserOpened(e);
   // An artifact added, rewritten or removed: the worktree's list, live.
   if (e.type.startsWith("artifact.")) handleArtifactEvent(e);
   if (e.type === "session.open") handleSessionOpen(e);

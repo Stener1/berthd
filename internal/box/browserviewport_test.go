@@ -89,47 +89,47 @@ func TestABrowserSizeIsKeptPerWorktreeUntilChanged(t *testing.T) {
 	dir := t.TempDir()
 	b := &Box{Name: "devbox", Events: &events.Bus{}}
 	m := b.NewBrowsers(dir, 1)
-	if v := m.Viewport("/w/cal-billing"); v != DefaultViewport {
+	if v := m.Viewport("/w/cal-billing", ""); v != DefaultViewport {
 		t.Fatalf("before any: %+v", v)
 	}
 	phone := Viewport{390, 844, 3}
-	if br, err := m.Resize(context.Background(), "/w/cal-billing", phone); err != nil || br != nil {
+	if br, err := m.Resize(context.Background(), "/w/cal-billing", "", phone); err != nil || br != nil {
 		t.Fatalf("resize with no browser: %v %v", br, err)
 	}
-	if _, err := m.Resize(context.Background(), "/w/cal-other", Viewport{100, 100, 1}); err == nil {
+	if _, err := m.Resize(context.Background(), "/w/cal-other", "", Viewport{100, 100, 1}); err == nil {
 		t.Fatal("a size out of range was kept")
 	}
 	// Kept on disk: a berthd that restarts still has it.
 	again := (&Box{Name: "devbox", Events: &events.Bus{}}).NewBrowsers(dir, 1)
-	if v := again.Viewport("/w/cal-billing/"); v != phone {
+	if v := again.Viewport("/w/cal-billing/", ""); v != phone {
 		t.Fatalf("after a restart: %+v", v)
 	}
-	if v := again.Viewport("/w/cal-other"); v != DefaultViewport {
+	if v := again.Viewport("/w/cal-other", ""); v != DefaultViewport {
 		t.Fatalf("another worktree: %+v", v)
 	}
 	// A size that isn't sane any more (a hand edit) is the default.
 	os.WriteFile(filepath.Join(dir, "viewports.json"), []byte(`{"/w/cal-billing":{"width":99999,"height":1,"scale":1}}`), 0o600)
-	if v := again.Viewport("/w/cal-billing"); v != DefaultViewport {
+	if v := again.Viewport("/w/cal-billing", ""); v != DefaultViewport {
 		t.Fatalf("a bad saved size: %+v", v)
 	}
-	again.Resize(context.Background(), "/w/cal-billing", phone)
+	again.Resize(context.Background(), "/w/cal-billing", "", phone)
 	// Back to the default leaves nothing behind.
-	again.Resize(context.Background(), "/w/cal-billing", DefaultViewport)
+	again.Resize(context.Background(), "/w/cal-billing", "", DefaultViewport)
 	if raw, _ := os.ReadFile(filepath.Join(dir, "viewports.json")); strings.Contains(string(raw), "cal-billing") {
 		t.Fatalf("the default is kept as an entry: %s", raw)
 	}
 	// A removed worktree's size goes with it.
-	again.Resize(context.Background(), "/w/cal-billing", phone)
+	again.Resize(context.Background(), "/w/cal-billing", "", phone)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { again.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 	deadline := time.Now().Add(5 * time.Second)
-	for again.Viewport("/w/cal-billing") == phone && time.Now().Before(deadline) {
+	for again.Viewport("/w/cal-billing", "") == phone && time.Now().Before(deadline) {
 		again.b.Events.Publish(events.Event{Type: "worktree.removed", Data: map[string]any{"path": "/w/cal-billing"}})
 		time.Sleep(50 * time.Millisecond)
 	}
-	if v := again.Viewport("/w/cal-billing"); v != DefaultViewport {
+	if v := again.Viewport("/w/cal-billing", ""); v != DefaultViewport {
 		t.Fatalf("a removed worktree's size stayed: %+v", v)
 	}
 }
@@ -221,7 +221,7 @@ func TestTheBrowserSizeReachesARealChromium(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	loc, _ := b.Locations.Get(ctx, "cal")
-	br, err := m.get(ctx, loc, wt)
+	br, err := m.get(ctx, loc, wt, "")
 	if errors.Is(err, ErrBrowserSandbox) {
 		t.Skip(err)
 	}
@@ -260,7 +260,7 @@ func TestTheBrowserSizeReachesARealChromium(t *testing.T) {
 	}
 
 	// A phone at 2x, applied to the running page at once.
-	if _, err := m.Resize(ctx, wt.Path, Viewport{390, 844, 2}); err != nil {
+	if _, err := m.Resize(ctx, wt.Path, "", Viewport{390, 844, 2}); err != nil {
 		t.Fatal(err)
 	}
 	if got := inner(); got != `"390 844 2"` {
@@ -318,7 +318,7 @@ func TestTheBrowserSizeReachesARealChromium(t *testing.T) {
 	br.Eval(ctx, "document.querySelector('h1').textContent = 'Changed'")
 	checkFrame(390, 844, 780, 1688)
 	// A size changed while someone watches reaches them.
-	if _, err := m.Resize(ctx, wt.Path, Viewport{1280, 800, 1}); err != nil {
+	if _, err := m.Resize(ctx, wt.Path, "", Viewport{1280, 800, 1}); err != nil {
 		t.Fatal(err)
 	}
 	checkFrame(1280, 800, 1280, 800)
@@ -326,7 +326,7 @@ func TestTheBrowserSizeReachesARealChromium(t *testing.T) {
 
 	// A browser that starts again starts at the kept size.
 	m.CloseAll("test")
-	br, err = m.get(ctx, loc, wt)
+	br, err = m.get(ctx, loc, wt, "")
 	if err != nil {
 		t.Fatal(err)
 	}

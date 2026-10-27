@@ -1,9 +1,14 @@
 name: ci
 
-# Pull requests are checked; a push to main is not (it was checked as its
-# pull request). Run it on main by hand from the Actions tab if needed.
+# A pull request is checked only once it has the run-ci label (adding the
+# label starts a run; each push after it runs again); a release's pull
+# request is no different, since its tag runs everything anyway. A push to
+# main is not checked (it was, as its pull request, if anyone asked). Run it
+# by hand from the Actions tab if needed. A release always runs all of it:
+# release.yml calls it on the tag.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   # release.yml runs all of this on the tag first, and fails the release on
   # any failure.
@@ -14,9 +19,10 @@ permissions:
 
 # A newer push to a pull request cancels the run still going for the older one.
 # A release's checks (workflow_call) run under the tag's ref, so they are
-# never cancelled by a push to main.
+# never cancelled by a push to main. Adding some other label runs nothing,
+# in a group of its own, so it cancels nothing either.
 concurrency:
-  group: ci-${{ github.workflow_ref }}-${{ github.ref }}
+  group: ci-${{ github.workflow_ref }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'run-ci' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 # Jobs run on omarchy, the owner's self-hosted runner (ci/runner/), when the
@@ -24,6 +30,8 @@ concurrency:
 # everything else, pull requests included, runs on ubuntu-latest.
 jobs:
   go:
+    # Only what was asked for: see "on" above.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' || github.event.label.name == 'run-ci') && contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     steps:
       # omarchy runs only the owner's pushes; its job-started hook
@@ -67,6 +75,8 @@ jobs:
           BERTH_BROWSER_START_TIMEOUT: "90s"
 
   shell:
+    # Only what was asked for: see "on" above.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' || github.event.label.name == 'run-ci') && contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     steps:
       # omarchy runs only the owner's pushes; its job-started hook
@@ -86,7 +96,7 @@ jobs:
           fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       # ubuntu-latest ships shellcheck. install.sh is served at berthd.app/install.
-      - run: shellcheck site/install.sh scripts/build-release.sh scripts/build-tmux.sh scripts/publish.sh scripts/mac-release.sh scripts/linux-release.sh
+      - run: shellcheck site/install.sh scripts/build-release.sh scripts/build-tmux.sh scripts/publish.sh scripts/mac-release.sh scripts/linux-release.sh scripts/release-helper.sh scripts/release-leadline-helper.sh
       # The release tests (warnings and errors; their style is their own).
       - run: shellcheck -x -S warning scripts/release-check.sh scripts/fresh-user-test.sh scripts/linux-box-test.sh scripts/upgrade-test.sh scripts/release-test/common.sh scripts/release-test/macos/lib.sh scripts/release-test/macos/launchctl scripts/release-test/linux/lib.sh scripts/release-test/linux/fake-chromium
       - run: sh -n site/install.sh && dash -n site/install.sh
@@ -94,6 +104,8 @@ jobs:
       - run: shellcheck -x -S warning scripts/release-test/feed-merge-test.sh && scripts/release-test/feed-merge-test.sh
 
   app:
+    # Only what was asked for: see "on" above.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' || github.event.label.name == 'run-ci') && contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     defaults:
       run:
@@ -128,6 +140,10 @@ jobs:
       - run: pnpm typecheck:plugins
       # Tooltips are the app's own, never the HTML title attribute.
       - run: pnpm check:titles
+      # Text is sized by the type scale in index.css (scripts/check-type.mjs).
+      - run: pnpm check:type
+      # Bars and gutters come from the layout grid in index.css (scripts/check-grid.mjs).
+      - run: pnpm check:grid
       # The release CSP must let the app load its own built-in plugins.
       - run: pnpm check:csp
       # Every built-in theme's text, states and terminal meet their contrast
@@ -189,6 +205,8 @@ jobs:
   # (scripts/linux-release.sh) does the rest. Cached, it takes a few minutes,
   # beside the app job's longer e2e suite.
   linux-app:
+    # Only what was asked for: see "on" above.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' || github.event.label.name == 'run-ci') && contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -238,6 +256,8 @@ jobs:
           ls -la "$deb" "$appimage"
 
   docs-site:
+    # Only what was asked for: see "on" above.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' || github.event.label.name == 'run-ci') && contains(github.event.pull_request.labels.*.name, 'run-ci')
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     defaults:
       run:

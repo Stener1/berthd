@@ -14,19 +14,22 @@ import { copyText } from "@/lib/clipboard";
 import { ago, errorMessage } from "@/lib/format";
 import { openUrl } from "@/lib/open-url";
 import { useStore } from "@/lib/store";
-import { type GitHubState, isLink, loadTeams, type PlanStep, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, teamRef, useTeam, useTeamAddBox } from "@/lib/team";
+import { defaultUse, type ExistingClone, type GitHubState, isLink, loadTeams, type PlanStep, putRun, refreshGitHub, runFor, sudoCount, teamApi, type TeamStatus, type TeamView as View, teamRef, useTeam, useTeamAddBox } from "@/lib/team";
 import { focusSession } from "@/lib/workspaces";
 import { useKeepFocusIn } from "@/lib/focus-home";
 import { finishOnboarding } from "@/views/onboarding/onboarding-state";
 import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { TeamDone } from "@/views/team/team-done";
 import { TeamFiles } from "@/views/team/team-files";
+import { FoundClones } from "@/views/team/team-found";
+import { KitChoices } from "@/views/team/team-kit-sheet";
 import { GitHubMark, OrgAvatar, OrgHeader, Section } from "@/views/team/team-parts";
 import { Plan } from "@/views/team/team-plan";
 import { Checklist, RunCard } from "@/views/team/team-rail";
 import { ViewHeader } from "@/views/view-header";
+import { OrgField } from "@/views/team/org-field";
 
-type From = "onboarding" | "addbox" | "link" | "sidebar" | "palette";
+type From = "onboarding" | "addbox" | "link" | "sidebar" | "palette" | "suggestion";
 
 // TeamSetupView is Team setup as one page: the org's .berth, read like its
 // repo on GitHub, what you'll get with every command a click away, and a
@@ -86,7 +89,7 @@ export function TeamSetupView({ org: initial, from, box: wantBox, update, onBack
 
 function Loading() {
   return (
-    <div className="mx-auto max-w-6xl px-8 pt-8">
+    <div className="mx-auto max-w-[calc(68rem+2*var(--spacing-page))] px-page pt-8">
       <div className="flex items-center gap-4">
         <Skeleton className="size-13 rounded-xl" />
         <div className="space-y-2">
@@ -133,21 +136,21 @@ function ConnectGitHub({ github, org }: { github: GitHubState; org: string }) {
         <span className="flex size-11 items-center justify-center rounded-xl border bg-card">
           <GitHubMark className="size-5" />
         </span>
-        <h1 className="mt-5 font-semibold text-2xl tracking-tight">{missing ? "Install GitHub's CLI first" : "Connect GitHub"}</h1>
+        <h1 className="mt-5 text-title">{missing ? "Install GitHub's CLI first" : "Connect GitHub"}</h1>
         <p className="mt-2 text-muted-foreground leading-relaxed">
           Shipyard reads {org ? <span className="font-mono text-foreground">{isLink(org) ? org : `${org}/.berth`}</span> : "your org's team setup"} and the repos it lists with <span className="font-mono text-foreground">gh</span>, GitHub's own CLI, signed in as you. Private setups and private repos need it. Shipyard has no GitHub app of its own and keeps no token.
         </p>
         {missing ? (
           <div className="mt-6 rounded-xl border bg-card p-4">
-            <p className="font-medium text-sm">Install GitHub CLI</p>
-            <div className="mt-2 flex items-center gap-2 rounded-lg border bg-background px-3 py-2 font-mono text-sm">
+            <p className="text-row">Install GitHub CLI</p>
+            <div className="mt-2 flex items-center gap-2 rounded-lg border bg-background px-3 py-2 font-mono text-mono">
               <span className="text-muted-foreground">$</span>
               <span className="min-w-0 flex-1 truncate">{github.install?.command ?? "brew install gh"}</span>
               <Button size="icon-xs" variant="ghost" aria-label="Copy the command" onClick={() => void copyText(github.install?.command ?? "brew install gh", "Copied the command")}>
                 <CopyIcon />
               </Button>
             </div>
-            <p className="mt-2 text-muted-foreground text-xs">
+            <p className="mt-2 text-muted-foreground text-desc">
               {github.install?.os === "linux" ? "On Linux, from GitHub's own apt or dnf repository." : github.install?.os === "windows" ? "With winget, in PowerShell." : "With Homebrew, in Terminal."} Other ways:{" "}
               <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => void openUrl(github.install?.url ?? "https://cli.github.com")}>
                 cli.github.com
@@ -164,16 +167,16 @@ function ConnectGitHub({ github, org }: { github: GitHubState; org: string }) {
                 <Button data-testid="connect-github" onClick={connect}>
                   <GitHubMark /> Connect GitHub
                 </Button>
-                <p className="mt-2.5 text-muted-foreground text-xs leading-relaxed">
+                <p className="mt-2.5 text-muted-foreground text-desc">
                   Opens a terminal running <span className="font-mono">gh auth login</span>. Sign in there in your browser; this page carries on by itself.
                 </p>
               </>
             ) : (
               <>
-                <p className="flex items-center gap-2 font-medium text-sm">
+                <p className="flex items-center gap-2 text-row">
                   <Spinner className="size-3.5" /> Waiting for gh auth login to finish
                 </p>
-                <p className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                <p className="mt-1.5 text-desc text-muted-foreground">
                   A terminal is running <span className="font-mono">{command}</span>. Follow it there; this page checks again on its own.
                 </p>
                 <Button className="mt-3" size="sm" variant="ghost" onClick={connect}>
@@ -183,7 +186,7 @@ function ConnectGitHub({ github, org }: { github: GitHubState; org: string }) {
             )}
           </div>
         )}
-        {github.error && <ErrorText className="mt-3 text-destructive-foreground text-xs" text={github.error} />}
+        {github.error && <ErrorText className="mt-3 text-destructive-foreground text-meta" text={github.error} />}
       </div>
     </Centered>
   );
@@ -195,7 +198,7 @@ function AskOrg({ onOrg, initial = "", note }: { onOrg(org: string): void; initi
   return (
     <Centered>
       {note}
-      <h1 className="font-semibold text-2xl tracking-tight">Which GitHub org?</h1>
+      <h1 className="text-title">Which GitHub org?</h1>
       <p className="mt-2 text-muted-foreground leading-relaxed">
         If your team publishes a team setup (a repo called .berth), Shipyard sets your box up the same way the team's are. If not, you pick its repos. A link to a setup in any repo, branch or folder works too.
       </p>
@@ -212,18 +215,6 @@ function AskOrg({ onOrg, initial = "", note }: { onOrg(org: string): void; initi
         </Button>
       </form>
     </Centered>
-  );
-}
-
-// OrgField takes an org, or a link to a setup (owner/repo/tree/branch/folder
-// after the github.com/ it shows, or a whole URL pasted, which hides it).
-export function OrgField({ value, onChange, autoFocus }: { value: string; onChange(v: string): void; autoFocus?: boolean }) {
-  const whole = /github\.com|:\/\//i.test(value);
-  return (
-    <label className="flex min-w-0 flex-1 items-center rounded-lg border bg-background pl-3 font-mono text-sm shadow-xs/5 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/24 dark:bg-input/32">
-      {!whole && <span className="shrink-0 text-muted-foreground">github.com/</span>}
-      <Input unstyled aria-label="GitHub org or link" autoFocus={autoFocus} spellCheck={false} autoCapitalize="off" placeholder="your-org" value={value} onChange={(e) => onChange(e.target.value)} className="font-mono [&_input]:pl-0.5" />
-    </label>
   );
 }
 
@@ -244,6 +235,10 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const [checks, setChecks] = useState(0);
   // 1Password or not, for the shared keys that are op:// references.
   const [skipOP, setSkipOP] = useState(false);
+  // Which clone on the box each repo uses (by project id, or repo for an
+  // org without .berth): a folder there, or "" for a fresh clone. Chosen
+  // again for repos whose clones the box reports anew.
+  const [use, setUse] = useState<Record<string, string>>({});
 
   // The box: the one asked for, the one it was set up on, else the online
   // box with the fewest projects (a new one, usually). Chosen again as the
@@ -267,6 +262,17 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       const v = await teamApi.view(client, org, { box, from: from === "link" ? "link" : undefined });
       setView(v);
       setPicked((p) => p ?? new Set(v.state === "none" ? (v.repos ?? []).filter((r) => r.has_berth).map((r) => r.full_name) : v.projects.filter((x) => x.access).map((x) => x.id)));
+      // Each repo starts on the clone it would use anyway (a Shipyard
+      // project of it, or its one clean clone), else a fresh clone.
+      const found: [string, ExistingClone[]][] = v.state === "none" ? (v.repos ?? []).map((r) => [r.full_name, r.existing ?? []]) : v.projects.map((x) => [x.id, x.existing ?? []]);
+      setUse((u) => {
+        const next: Record<string, string> = {};
+        for (const [id, clones] of found) {
+          if (!clones.length) continue;
+          next[id] = id in u && (u[id] === "" || clones.some((c) => c.path === u[id])) ? u[id] : defaultUse(clones);
+        }
+        return next;
+      });
     } catch (err) {
       setError(errorMessage(err));
       if (/gh_/.test(String((err as { code?: string }).code))) void refreshGitHub();
@@ -307,7 +313,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   if (error) {
     return (
       <Centered>
-        <ErrorText className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-destructive-foreground text-sm" text={error} />
+        <ErrorText className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-destructive-foreground text-body" text={error} />
         <Button className="mt-4" variant="outline" onClick={() => setChecks((n) => n + 1)}>
           <RotateCwIcon /> Try again
         </Button>
@@ -316,7 +322,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   }
   if (!view) return <Loading />;
   if (view.state === "no-org") {
-    return <AskOrg onOrg={onOrg} note={<p className="mb-5 rounded-lg border bg-muted/40 px-3 py-2 text-sm">GitHub has no org or user called <span className="font-mono">{org}</span> that {github.login} can see.</p>} />;
+    return <AskOrg onOrg={onOrg} note={<p className="mb-5 rounded-lg border bg-muted/40 px-3 py-2 text-body">GitHub has no org or user called <span className="font-mono">{org}</span> that {github.login} can see.</p>} />;
   }
   if (view.state === "unreadable") return <Unreadable view={view} link={isLink(org) ? org : undefined} github={github} onCheck={() => setChecks((n) => n + 1)} onOrg={onOrg} />;
 
@@ -344,10 +350,14 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
       if (!skipping && opKeys.some((o) => o.project === p && o.key === k)) continue;
       (byProject[p] ??= {})[k] = v;
     }
+    // The clone each repo with one found uses, or "" for a fresh clone:
+    // the box checks a chosen folder's origin again before using it.
+    const chosen = Object.fromEntries(Object.entries(use).filter(([id]) => (view.state === "none" ? sel.has(id) : view.projects.some((x) => x.id === id && x.access && (x.required || sel.has(x.id))))));
+    const useReq = Object.keys(chosen).length ? chosen : undefined;
     const req =
       view.state === "none"
-        ? { box, repos: [...sel] }
-        : { box, commit: updating ? view.update!.to : view.commit?.sha, projects: view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).map((x) => x.id), keys: byProject, skip_onepassword: skipping || undefined };
+        ? { box, repos: [...sel], use: useReq }
+        : { box, commit: updating ? view.update!.to : view.commit?.sha, projects: view.projects.filter((x) => x.access && (x.required || sel.has(x.id))).map((x) => x.id), keys: byProject, skip_onepassword: skipping || undefined, use: useReq };
     const s = await teamApi.setup(client, key, req);
     putRun(s);
     if (updating) {
@@ -399,6 +409,20 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
     if (run && s) void focusSession(run.box, s);
   };
   const openSession = (s: string) => run && void focusSession(run.box, s);
+  const onUse = (id: string, path: string) => setUse((u) => ({ ...u, [id]: path }));
+  // Pull is its own button, for a found clone that is behind: using a
+  // clone never pulls.
+  const pull = async (repo: string, c: ExistingClone) => {
+    if (!client || !box) return;
+    try {
+      const fresh = await teamApi.pull(client, key, box, repo, c.path);
+      const swap = (list?: ExistingClone[]) => list?.map((x) => (x.path === c.path ? { ...x, ...fresh } : x));
+      setView((v) => v && { ...v, projects: v.projects.map((x) => ({ ...x, existing: swap(x.existing) })), repos: v.repos?.map((r) => ({ ...r, existing: swap(r.existing) })) });
+      toastManager.add({ title: `Pulled ${c.display}`, description: fresh.branch ? `${fresh.branch} is up to date with its upstream` : undefined });
+    } catch (err) {
+      toastManager.add({ type: "error", title: `Couldn't pull ${c.display}`, description: errorMessage(err) });
+    }
+  };
   const startOn = (project: string) => {
     const r = run?.projects.find((x) => x.id === project);
     if (!run || !r?.location) return;
@@ -407,7 +431,7 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
   const background = () => useStore.getState().setView({ kind: "workspace" });
 
   if (view.state === "none") {
-    return <NoBerth view={view} github={github} boxes={boxes} box={box} noTmux={noTmux} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} />;
+    return <NoBerth view={view} github={github} boxes={boxes} box={box} noTmux={noTmux} onBox={chooseBox} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} busy={busy} onRun={start} run={run} onRetry={retry} onOpenTerminal={openTerminal} onStartOn={startOn} onBackground={background} use={use} onUse={onUse} onPull={pull} />;
   }
 
   const live = run && run.phase !== "done" && !updating ? run : undefined;
@@ -448,10 +472,11 @@ function OrgPage({ org, from, wantBox, wantUpdate, github, onOrg }: { org: strin
 
   return (
     <>
-      <OrgHeader view={view} from={from} badge={updating ? <span className="rounded-full bg-info/10 px-2.5 py-1 font-medium text-info-foreground text-xs">Update · {view.update!.from} → {view.update!.to}</span> : undefined} />
-      <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_300px] gap-8 px-8 pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:px-5 @max-[819px]:pt-4">
+      <OrgHeader view={view} from={from} badge={updating ? <span className="rounded-full bg-info/10 px-2.5 py-1 text-info-foreground text-label">Update · {view.update!.from} → {view.update!.to}</span> : undefined} />
+      <div className="mx-auto grid max-w-[calc(68rem+2*var(--spacing-page))] grid-cols-[minmax(0,1fr)_300px] gap-8 px-page pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:pt-4">
         <div className="min-w-0 @max-[819px]:order-2">
-          <Plan view={(live ? live.onepassword_skipped : skipping) ? { ...view, steps: view.steps?.filter((s) => s.id !== "1password") } : view} skipOP={live ? live.onepassword_skipped : skipping} run={live} box={box} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} onRetry={retry} onOpenTerminal={openTerminal} onOpenSession={openSession} onStartOn={startOn} onFiles={() => setFiles(true)} update={updating ? view.update : undefined} />
+          {!live && !updating && <KitChoices view={view} box={box} />}
+          <Plan view={(live ? live.onepassword_skipped : skipping) ? { ...view, steps: view.steps?.filter((s) => s.id !== "1password") } : view} skipOP={live ? live.onepassword_skipped : skipping} run={live} box={box} picked={sel} onPick={(id, on) => setPicked((p) => toggled(p, id, on))} onRetry={retry} onOpenTerminal={openTerminal} onOpenSession={openSession} onStartOn={startOn} onFiles={() => setFiles(true)} update={updating ? view.update : undefined} use={use} onUse={onUse} onPull={(x, c) => pull(x.repo, c)} />
         </div>
         <div className="@max-[819px]:order-1">
           <div className="sticky top-4 @max-[819px]:hidden">{rail(false)}</div>
@@ -481,17 +506,17 @@ function Unreadable({ view, link, github, onCheck, onOrg }: { view: View; link?:
       <div data-testid="team-unreadable" className="flex items-center gap-3">
         <OrgAvatar org={view.org} size={44} />
         <div>
-          <p className="flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground text-sm">
+          <p className="flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground text-body">
             <GitHubMark className="size-3.5 shrink-0" /> <span className="truncate">{where}</span>
           </p>
           <p className="font-medium">{view.org.name}</p>
         </div>
       </div>
-      <h1 className="mt-6 font-semibold text-2xl tracking-tight">You can't read this setup</h1>
+      <h1 className="mt-6 text-title">You can't read this setup</h1>
       <p className="mt-2 text-muted-foreground leading-relaxed">
         GitHub doesn't show <span className="break-all font-mono text-foreground">{where}</span> to <span className="text-foreground">{github.login}</span>. It's private, and this account hasn't been given access, or it isn't there{link ? ": check the branch and folder in the link" : ""}.
       </p>
-      <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm">
+      <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-body">
         <li>Ask an admin of {view.org.name} on GitHub for access to its repos (your team's onboarding channel is the place).</li>
         <li>Accept the invitation on GitHub, if one comes by email.</li>
         <li>Check again here.</li>
@@ -507,7 +532,7 @@ function Unreadable({ view, link, github, onCheck, onOrg }: { view: View; link?:
           Another org or link
         </Button>
       </div>
-      <p className="mt-4 text-muted-foreground text-xs">Signed in to gh as {github.login}. To use another account, run gh auth login again in a terminal.</p>
+      <p className="mt-4 text-desc text-muted-foreground">Signed in to gh as {github.login}. To use another account, run gh auth login again in a terminal.</p>
       {other && (
         <div className="mt-6">
           <OrgSwitch onOrg={onOrg} />
@@ -554,7 +579,13 @@ function NoBerth({
   onStartOn,
   onBackground,
   noTmux,
+  use,
+  onUse,
+  onPull,
 }: {
+  use: Record<string, string>;
+  onUse(id: string, path: string): void;
+  onPull(repo: string, c: ExistingClone): Promise<void>;
   view: View;
   github: GitHubState;
   boxes: { name: string; detail: string }[];
@@ -602,30 +633,31 @@ function NoBerth({
   return (
     <>
       <div className="border-b bg-gradient-to-b from-muted/50 to-transparent">
-        <div className="mx-auto flex max-w-6xl items-start gap-4 px-8 pt-6 pb-5 @max-[819px]:px-5">
+        <div className="mx-auto flex max-w-[calc(68rem+2*var(--spacing-page))] items-start gap-4 px-page pt-6 pb-5">
           <OrgAvatar org={view.org} size={48} />
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 font-mono text-muted-foreground text-sm">
+            <p className="flex items-center gap-1.5 font-mono text-muted-foreground text-body">
               <GitHubMark className="size-3.5" /> {view.org.login}
             </p>
-            <h1 data-testid="team-none" className="mt-0.5 font-semibold text-2xl tracking-tight">
+            <h1 data-testid="team-none" className="mt-0.5 text-title">
               {view.org.name}
             </h1>
-            <p className="mt-1 max-w-[70ch] text-muted-foreground text-xs leading-relaxed">
+            <p className="mt-1 max-w-[70ch] text-desc text-muted-foreground">
               No team setup here: <span className="font-mono">{view.org.login}/.berth</span> isn't a repo {github.login} can read. You can still set up its repos; an admin can publish one to set up boxes too.
             </p>
           </div>
         </div>
       </div>
-      <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_300px] gap-8 px-8 pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:px-5 @max-[819px]:pt-4">
+      <div className="mx-auto grid max-w-[calc(68rem+2*var(--spacing-page))] grid-cols-[minmax(0,1fr)_300px] gap-8 px-page pt-6 pb-16 @max-[819px]:grid-cols-1 @max-[819px]:gap-4 @max-[819px]:pt-4">
         <div className="min-w-0 @max-[819px]:order-2">
           {live ? (
             <Section title="Repos" aside={`${live.projects.length} cloned as you`}>
               <div className="divide-y overflow-hidden rounded-xl border bg-card">
                 {live.projects.map((p) => (
                   <div key={p.id} className="flex items-center gap-2.5 px-4 py-2.5">
-                    <span className="font-mono text-[13px]">{p.repo}</span>
-                    <span className="ml-auto text-muted-foreground text-xs">{p.state === "ready" ? <Button size="xs" onClick={() => onStartOn(p.id)}>Start on {p.id}</Button> : p.state}</span>
+                    <span className="font-mono text-desc">{p.repo}</span>
+                    {p.adopted && p.path && <span className="truncate text-muted-foreground text-meta">in your existing checkout</span>}
+                    <span className="ml-auto text-meta text-muted-foreground">{p.state === "ready" ? <Button size="xs" onClick={() => onStartOn(p.id)}>Start on {p.id}</Button> : p.state}</span>
                   </div>
                 ))}
               </div>
@@ -633,31 +665,36 @@ function NoBerth({
           ) : (
             <Section title="Repos you can reach" aside={`${withBerth} have Shipyard setup and are picked`}>
               <div className="mb-2">
-                <label className="flex items-center gap-2 rounded-lg border bg-background px-2.5 text-sm dark:bg-input/32">
+                <label className="flex items-center gap-2 rounded-lg border bg-background px-2.5 text-body dark:bg-input/32">
                   <SearchIcon className="size-3.5 text-muted-foreground" />
                   <Input unstyled aria-label="Filter repos" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
                 </label>
               </div>
               <ul className="divide-y overflow-hidden rounded-xl border bg-card">
                 {repos.map((r) => (
-                  <li key={r.full_name}>
+                  <li key={r.full_name} data-testid={`pick-${r.full_name}`}>
                     <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-accent/30">
                       <Checkbox className="not-dark:border-foreground/25" checked={picked.has(r.full_name)} onCheckedChange={(v) => onPick(r.full_name, !!v)} />
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2">
-                          <span className="font-medium font-mono text-[13px]">{r.full_name}</span>
+                          <span className="font-medium font-mono text-desc">{r.full_name}</span>
                           {r.private && <LockIcon className="size-3 text-muted-foreground" />}
-                          {r.has_berth && <span className="rounded-md border border-success/35 bg-success/8 px-1.5 py-px font-mono text-[10.5px] text-success-foreground">.berth/config.json</span>}
+                          {r.has_berth && <span className="rounded-md border border-success/35 bg-success/8 px-1.5 py-px font-mono text-tag text-success-foreground">.berth/config.json</span>}
                         </span>
-                        <span className="block text-muted-foreground text-xs">
+                        <span className="block text-desc text-muted-foreground">
                           {r.description} · pushed {ago(r.pushed_at)}
                         </span>
                       </span>
                     </label>
+                    {picked.has(r.full_name) && !!r.existing?.length && (
+                      <div className="px-4 pb-2.5 pl-11">
+                        <FoundClones id={r.full_name.split("/")[1]} repo={r.full_name} clones={r.existing} use={use[r.full_name] ?? ""} onUse={(path) => onUse(r.full_name, path)} onPull={(c) => onPull(r.full_name, c)} />
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 text-muted-foreground text-xs leading-relaxed">
+              <p className="mt-3 text-desc text-muted-foreground">
                 Repos with their own <span className="font-mono">.berth/config.json</span> are set up by it, trusted as it is now. The rest clone as they are; add ports and services later in Project settings. The box signs in to GitHub itself first.
               </p>
             </Section>

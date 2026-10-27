@@ -6,7 +6,7 @@ import { useEventLog } from "@/lib/events";
 import { flowsApi, isOverridden, overrides, type ScopedFlow } from "@/lib/flows";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { STEP_KINDS, summary } from "@/views/automations/flows/model";
+import { kindMeta, summary } from "@/views/automations/flows/model";
 import { Section, SourceBadge } from "@/views/project/parts";
 
 // FlowsSection lists this repo's flows on this box; they open in the flow
@@ -42,7 +42,7 @@ export function FlowsSection({ box, location }: { box: string; location: string 
       }
     >
       {flows && shown.length === 0 ? (
-        <button type="button" onClick={() => open()} className="flex w-full items-center gap-2 px-4 py-3 text-left text-muted-foreground text-sm hover:text-foreground">
+        <button type="button" onClick={() => open()} className="flex w-full items-center gap-2 px-4 py-3 text-left text-muted-foreground text-body hover:text-foreground">
           <WorkflowIcon className="size-4" />
           No flows for {location} yet. Make one.
         </button>
@@ -52,7 +52,7 @@ export function FlowsSection({ box, location }: { box: string; location: string 
             <button key={`${f.source}:${f.flow.id}`} type="button" onClick={() => open(f.flow.id)} className={cn("flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/40", !f.flow.enabled && "opacity-60")}>
               <span className="flex shrink-0 -space-x-1">
                 {[...new Set(f.flow.steps.map((s) => s.kind))].slice(0, 3).map((k) => {
-                  const m = STEP_KINDS[k];
+                  const m = kindMeta(k);
                   return (
                     <span key={k} className={cn("inline-flex size-6 items-center justify-center rounded-md border-2 border-card bg-muted", m.tone)}>
                       <m.Icon className="size-3.5" />
@@ -61,10 +61,10 @@ export function FlowsSection({ box, location }: { box: string; location: string 
                 })}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-sm">{f.flow.name}</span>
-                <span className="block truncate text-muted-foreground text-xs">{summary(f.flow)}</span>
+                <span className="block truncate text-row">{f.flow.name}</span>
+                <span className="block truncate text-desc text-muted-foreground">{summary(f.flow)}</span>
               </span>
-              {!f.flow.enabled && <span className="text-muted-foreground text-xs">Off</span>}
+              {!f.flow.enabled && <span className="text-meta text-muted-foreground">Off</span>}
               <SourceBadge source={f.source === "local" ? (overrides(f, flows!) ? "override" : "box") : f.source === "box" ? "box" : f.source} box={box} />
               <ChevronRightIcon className="size-3.5 text-muted-foreground" />
             </button>

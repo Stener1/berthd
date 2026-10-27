@@ -27,6 +27,7 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="preload" href="assets/fonts/inter-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/cal-sans-wordmark.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/harbour/day.webp" as="image" media="(prefers-color-scheme: light)">
 <link rel="preload" href="assets/harbour/night.webp" as="image" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="styles.css">
@@ -67,14 +68,20 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+<div class="rails" aria-hidden="true"></div>
+<div class="head-marks marks" aria-hidden="true"></div>
 
 <header class="site-header">
-  <a class="brand" href="#top" aria-label="Shipyard, back to top"><svg viewBox="80 20 384 472" aria-hidden="true"><path d="M116 84 H300 a96 96 0 0 1 0 192 H116 Z M116 276 H324 a104 104 0 0 1 0 208 H116 Z" transform="translate(0,-28)" fill="none" stroke="currentColor" stroke-width="68" stroke-linejoin="round"/><circle cx="296" cy="152" r="30" fill="var(--amber)"/></svg>shipyard</a>
-  <nav aria-label="Main">
-    <button class="pill lid" type="button" aria-pressed="false" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 11.5 H13.5 M4 11.5 V4.5 H12 V11.5 M1.5 13.5 H14.5"/></svg><span>Close the laptop</span></button>
-    <a class="pill" href="https://docs.berthd.app">Docs</a>
-    <a class="pill" href="https://github.com/cosscom/shipyard" aria-label="Shipyard on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
-  </nav>
+  <div class="site-header-inner">
+    <a class="brand" href="#top" aria-label="Shipyard, back to top">coss.com <span class="product">shipyard</span></a>
+    <nav aria-label="Main">
+      <a class="ghost" href="https://docs.berthd.app">Docs</a>
+      <a class="ghost dl" href="#install-now">Download</a>
+      <span class="sep" aria-hidden="true"></span>
+      <a class="ghost gh" href="https://github.com/cosscom/shipyard" aria-label="Shipyard on GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 20.5675C6.57143 21.7248 3.71429 20.5675 2 17"/><path d="M10 22V18.7579C10 18.1596 10.1839 17.6396 10.4804 17.1699C10.6838 16.8476 10.5445 16.3904 10.1771 16.2894C7.13394 15.4528 5 14.1077 5 9.64606C5 8.48611 5.38005 7.39556 6.04811 6.4464C6.21437 6.21018 6.29749 6.09208 6.31748 5.9851C6.33746 5.87813 6.30272 5.73852 6.23322 5.45932C5.95038 4.32292 5.96871 3.11619 6.39322 2.02823C6.39322 2.02823 7.27042 1.74242 9.26698 2.98969C9.72282 3.27447 9.95075 3.41686 10.1515 3.44871C10.3522 3.48056 10.6206 3.41384 11.1573 3.28041C11.8913 3.09795 12.6476 3 13.5 3C14.3524 3 15.1087 3.09795 15.8427 3.28041C16.3794 3.41384 16.6478 3.48056 16.8485 3.44871C17.0493 3.41686 17.2772 3.27447 17.733 2.98969C19.7296 1.74242 20.6068 2.02823 20.6068 2.02823C21.0313 3.11619 21.0496 4.32292 20.7668 5.45932C20.6973 5.73852 20.6625 5.87813 20.6825 5.9851C20.7025 6.09207 20.7856 6.21019 20.9519 6.4464C21.6199 7.39556 22 8.48611 22 9.64606C22 14.1077 19.8661 15.4528 16.8229 16.2894C16.4555 16.3904 16.3162 16.8476 16.5196 17.1699C16.8161 17.6396 17 18.1596 17 18.7579V22"/></svg><span class="stars" hidden></span></a>
+      <button class="ghost lid" type="button" aria-pressed="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"/><path d="M5 20L19 5"/><path d="M16 9L22 13.8528M12.4128 12.4059L19.3601 18.3634M8 15.6672L15 21.5"/></svg><span>Close the laptop</span></button>
+    </nav>
+  </div>
 </header>
 
 <main id="main">
@@ -112,7 +119,8 @@
      scripts/loops.sh) load and play only near the viewport; their posters
      stand in until then, and for good under reduced motion or Save-Data
      (assets/clips.js). -->
-<section class="chapter" id="start" aria-labelledby="start-h">
+<section class="chapter ruled" id="start" aria-labelledby="start-h">
+  <div class="rule marks" aria-hidden="true"></div>
   <div class="wrap">
     <div class="chapter-head">
       <div class="chapter-mark"><span class="scene" data-scene="setting-out"></span><span class="kicker">Start</span></div>
@@ -123,7 +131,8 @@
   </div>
 </section>
 
-<section class="chapter" id="work" aria-labelledby="work-h">
+<section class="chapter ruled" id="work" aria-labelledby="work-h">
+  <div class="rule marks" aria-hidden="true"></div>
   <div class="wrap">
     <div class="chapter-head">
       <div class="chapter-mark"><span class="scene" data-scene="signal"></span><span class="kicker">Watch it work</span></div>
@@ -145,7 +154,8 @@
   </div>
 </section>
 
-<section class="chapter" id="side" aria-labelledby="side-h">
+<section class="chapter ruled" id="side" aria-labelledby="side-h">
+  <div class="rule marks" aria-hidden="true"></div>
   <div class="wrap">
     <div class="chapter-head">
       <div class="chapter-mark"><span class="scene" data-scene="rafted"></span><span class="kicker">Side by side</span></div>
@@ -165,7 +175,8 @@
   </div>
 </section>
 
-<section class="chapter" id="yours" aria-labelledby="yours-h">
+<section class="chapter ruled" id="yours" aria-labelledby="yours-h">
+  <div class="rule marks" aria-hidden="true"></div>
   <div class="wrap">
     <div class="chapter-head">
       <div class="chapter-mark"><span class="scene" data-scene="anchor"></span><span class="kicker">Make it yours</span></div>
@@ -235,6 +246,19 @@
 
 
 <script>
+  // The repository's stars beside GitHub, as on coss.com; nothing when the
+  // API doesn't answer.
+  fetch("https://api.github.com/repos/cosscom/shipyard")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((repo) => {
+      const n = repo && repo.stargazers_count;
+      if (typeof n !== "number") return;
+      const el = document.querySelector(".stars");
+      el.textContent = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+      el.hidden = false;
+    })
+    .catch(() => {});
+
   // "Close the laptop" puts the page to night (or back to day) and the
   // harbour redraws; nothing else on the page moves.
   (() => {
@@ -255,10 +279,6 @@
       document.querySelector('meta[name=theme-color]').content = n ? "#18191c" : "#ffffff";
     };
     lid.hidden = false;
-    // The label keeps the width of its longer wording, so the header never
-    // moves when it changes.
-    label.style.display = "inline-block";
-    label.style.minWidth = `${Math.max(...["Close the laptop", "Open the laptop"].map((t) => ((label.textContent = t), label.getBoundingClientRect().width)))}px`;
     lid.addEventListener("click", () => {
       root.dataset.theme = night() ? "day" : "night";
       sync();

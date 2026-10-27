@@ -6,7 +6,7 @@ import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { Command, CommandCollection, CommandDialog, CommandDialogPopup, CommandEmpty, CommandFooter, CommandGroup, CommandGroupLabel, CommandInput, CommandItem, CommandList, CommandPanel } from "@/components/ui/command";
 import { Kbd } from "@/components/ui/kbd";
 import { useOnScreen, WtDot } from "@/components/workspace/worktree-tone";
-import { agentPresets, startSession } from "@/lib/actions";
+import { agentPresets, startAgent, startSession } from "@/lib/actions";
 import { type Location, type Worktree } from "@/lib/api";
 import { portUrl } from "@/lib/browser-url";
 import { agentOf, sessionAgent, sessionName, sessionState, sortedWorktrees, worktreeSessions } from "@/lib/derive";
@@ -183,7 +183,7 @@ export function WorktreePicker() {
     const fresh: Item[] = target
       ? [
           { value: "terminal", label: "New terminal", icon: slot(<SquareTerminalIcon />), run: done(() => void startSession("", target, "Terminal", key)) },
-          ...agentPresets(ref.box, ref.location).map((p) => ({ value: `agent:${p.id}`, label: `New ${p.name}`, icon: slot(<AgentIcon agent={p.id} />), run: done(() => void startSession(p.command, target, p.name, key)) })),
+          ...agentPresets(ref.box, ref.location).map((p) => ({ value: `agent:${p.id}`, label: `New ${p.name}`, icon: slot(<AgentIcon agent={p.id} />), run: done(() => void startAgent(p, target, p.name, key)) })),
         ]
       : [];
     return [
@@ -248,7 +248,7 @@ export function WorktreePicker() {
                       >
                         {item.icon}
                         <span className="truncate">{item.label}</span>
-                        {item.detail && <span className="ml-auto min-w-0 shrink truncate text-muted-foreground text-xs">{item.detail}</span>}
+                        {item.detail && <span className="ml-auto min-w-0 shrink truncate text-muted-foreground text-meta">{item.detail}</span>}
                         {item.trailing}
                       </CommandItem>
                     )}
@@ -257,7 +257,7 @@ export function WorktreePicker() {
               )}
             </CommandList>
           </CommandPanel>
-          <CommandFooter className="text-[11px] text-muted-foreground">
+          <CommandFooter className="text-tag text-muted-foreground">
             {picked ? (
               <button type="button" className="flex items-center gap-1 hover:text-foreground" onClick={() => useWorktreePicker.setState({ picked: undefined })}>
                 <ArrowLeftIcon className="size-3" />
@@ -289,7 +289,7 @@ export function WorktreePicker() {
 // OnScreen marks a worktree that already shows, in its colour.
 function OnScreen({ wsKey }: { wsKey: string }) {
   return (
-    <span className="flex shrink-0 items-center gap-1 text-muted-foreground text-xs">
+    <span className="flex shrink-0 items-center gap-1 text-muted-foreground text-meta">
       <WtDot wsKey={wsKey} className="size-1.5" />
       on screen
     </span>

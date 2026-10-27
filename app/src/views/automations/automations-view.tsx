@@ -129,7 +129,7 @@ export function AutomationsView() {
         }
       />
       <Tabs value={tab} onValueChange={(v) => pickTab(v as Tab)} className="flex min-h-0 flex-1 flex-col">
-        <div className="shrink-0 border-b px-6">
+        <div className="shrink-0 border-b px-page">
           <TabsList variant="underline" className="-mb-px">
             <TabsTab value="flows" data-focus-home="">
               Flows
@@ -143,12 +143,12 @@ export function AutomationsView() {
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {tab === "flows" && (
-            <div className="h-full overflow-y-auto px-6 pt-5 pb-12">
+            <div className="h-full overflow-y-auto px-page pt-5 pb-12">
               <FlowList boxes={boxes} byBox={byBox} projects={projects} lastRun={lastRun} onEdit={open} onToggle={(box, f, on) => void setEnabled(box, f, on)} onNew={create} onStarter={(st) => createHere(st)} />
             </div>
           )}
           {tab === "runs" && (
-            <div className="h-full overflow-y-auto px-6 pt-5 pb-12">
+            <div className="h-full overflow-y-auto px-page pt-5 pb-12">
               <RunsTab runs={runs} boxes={boxes} names={nameOf} />
             </div>
           )}

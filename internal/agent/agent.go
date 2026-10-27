@@ -91,7 +91,10 @@ type Config struct {
 	// UserDir holds hooks, themes, templates and plugins. Defaults to
 	// ~/.berth.
 	UserDir string
-	Log     *log.Logger
+	// PluginRegistry is the index.json the plugin marketplace lists
+	// (marketplace.go); defaults to DefaultPluginRegistry.
+	PluginRegistry string
+	Log            *log.Logger
 	// Now reads the wall clock; tests replace it to simulate sleep.
 	Now func() time.Time
 	// Networks reaches boxes on other tailnets. Defaults to embedded
@@ -220,6 +223,9 @@ type Status struct {
 	Forwards []ForwardStatus `json:"forwards"`
 	Routes   []Route         `json:"routes"`
 	Proxy    ProxyStatus     `json:"proxy"`
+	// TeamSuggestions are orgs of the person's projects that publish a team
+	// setup they haven't accepted (teamsuggest.go).
+	TeamSuggestions []TeamSuggestion `json:"team_suggestions"`
 }
 
 type Agent struct {
@@ -246,6 +252,16 @@ type Agent struct {
 	// under way that a restart waits for (restart.go).
 	startedAs startedAs
 	work      workSet
+	// suggest is what team suggestions know (teamsuggest.go).
+	suggest teamSuggest
+	// market is the plugin listing last read, and the one install or
+	// removal under way (marketplace.go).
+	market marketState
+	// helperWork is the helpers being installed on boxes now (helpers.go).
+	helperWork helperWork
+	// helperLedger is the helpers this computer is to remove from boxes,
+	// and the removals not done yet (helpercleanup.go).
+	helperLedger helperLedger
 
 	// ctx lives as long as the agent; forwards added through the API run under
 	// it rather than under the request that created them.
@@ -264,6 +280,8 @@ type Agent struct {
 	hostsMu sync.Mutex
 	hostsAt time.Time
 	hosts   []string
+	// boxRoutes keeps box-routes.json between changes (boxroutes.go).
+	boxRoutes statefile.Cache[map[string]BoxRoutes]
 
 	mu      sync.Mutex
 	svc     map[string]serviceCache
@@ -329,7 +347,7 @@ func Run(ctx context.Context, cfg Config) error {
 		id:       id,
 		boxes:    trust.NewStore(filepath.Join(cfg.Dir, "boxes.json")),
 		forwards: forwardStore{path: filepath.Join(cfg.Dir, "forwards.json")},
-		routes:   routeStore{path: filepath.Join(cfg.Dir, "routes.json")},
+		routes:   newRouteStore(filepath.Join(cfg.Dir, "routes.json")),
 		clients:  map[string]*boxState{},
 		seqs:     newSeqStore(cfg.Dir),
 		running:  map[string]*runningForward{},
@@ -359,6 +377,8 @@ func Run(ctx context.Context, cfg Config) error {
 	go a.routeLoop(ctx)
 	go a.keepLocalBoxCurrent(ctx)
 	go a.watchTeamUpdates(ctx)
+	go a.watchTeamSuggestions(ctx)
+	go a.keepHelpersTidy(ctx)
 	a.hooks = &hooks.Runner{Path: filepath.Join(cfg.UserDir, "hooks.json"), PluginsDir: filepath.Join(cfg.UserDir, "plugins"), Log: cfg.Log}
 	go a.hooks.Run(ctx, &a.bus)
 
@@ -415,6 +435,8 @@ func (a *Agent) startProxy(ctx context.Context) {
 		Route:    a.route,
 		Worktree: a.worktree,
 		BoxAlias: a.boxAlias,
+		// Logging a worktree in as a dev user (proxy/login.go, login.go).
+		Login: a.login,
 		// An artifact's page, for its own origin (proxy/artifact.go): over
 		// this laptop's paired channel, so the page never holds a token.
 		Artifact: func(ctx context.Context, name, id, version string) (*http.Response, error) {
@@ -930,10 +952,11 @@ func (a *Agent) removeForward(id string) (Forward, error) {
 func (a *Agent) status() Status {
 	settings := a.routeSettings()
 	hosts := a.configHosts()
+	suggestions := a.TeamSuggestions()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := Status{Boxes: []BoxStatus{}, Forwards: []ForwardStatus{}, Routes: []Route{}, Proxy: a.proxySt}
-	if routes, err := a.routes.list(); err == nil && routes != nil {
+	s := Status{Boxes: []BoxStatus{}, Forwards: []ForwardStatus{}, Routes: []Route{}, Proxy: a.proxySt, TeamSuggestions: suggestions}
+	if routes, err := a.routes.current(); err == nil && routes != nil {
 		s.Routes = routes
 	}
 	s.Proxy.URLPort = s.Proxy.Port

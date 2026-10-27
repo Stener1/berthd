@@ -87,3 +87,19 @@ func TestNotificationMessageIsAnAsk(t *testing.T) {
 		t.Fatalf("ask = %v", e.Data[adapters.AskKey])
 	}
 }
+
+func TestAStructuredAgentsHooksSayNothing(t *testing.T) {
+	t.Setenv("BERTH_DRIVER", "structured")
+	var out, errs strings.Builder
+	emitted := false
+	Hook([]string{"claude", "Stop", `{"cwd":"/w"}`}, os.Stdin, &out, &errs, func(events.Event) error {
+		emitted = true
+		return nil
+	})
+	if emitted || errs.Len() > 0 {
+		t.Fatalf("the hook spoke for a driven agent: %v %q", emitted, errs.String())
+	}
+	if out.String() != Reply("claude") {
+		t.Fatalf("the hook's reply = %q", out.String())
+	}
+}

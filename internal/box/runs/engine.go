@@ -46,7 +46,7 @@ type StepCtx struct {
 
 // Result is what a leaf step did.
 type Result struct {
-	Status    string // succeeded, failed, unknown, cancelled
+	Status    string // succeeded, failed, skipped, unknown, cancelled
 	Code      int
 	Out       string
 	Err       string
@@ -56,7 +56,7 @@ type Result struct {
 	Candidate *Candidate
 }
 
-func (r Result) ok() bool { return r.Status == Succeeded }
+func (r Result) ok() bool { return r.Status == Succeeded || r.Status == Skipped }
 
 // Request starts a run.
 type Request struct {

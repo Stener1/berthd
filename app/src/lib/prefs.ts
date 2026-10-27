@@ -1,8 +1,9 @@
 import { create } from "zustand";
 
 import { type ChatBackground, DEFAULT_CHAT_BACKGROUND, normalizeChatBackground } from "@/lib/chat-background";
+import { DEFAULT_HEADER_PICTURE, type HeaderPicture, normalizeHeaderPicture } from "@/lib/header-picture";
 import type { HomeLayout } from "@/lib/home-layout";
-import { clampWidth, SIDEBAR_DEFAULT } from "@/lib/sidebar-width";
+import { clampTasks, clampWidth, defaultWidth, SIDEBAR_DEFAULT, SIDEBAR_NARROW_DEFAULT, TASKS_DEFAULT } from "@/lib/sidebar-width";
 import { load, save } from "@/lib/storage";
 import { DEFAULT_TERMINAL_PREFS, type TerminalPrefs } from "@/lib/terminal";
 
@@ -24,6 +25,16 @@ export interface Prefs {
   sidebarCollapsed: boolean;
   // How wide the open sidebar is, dragged by its edge (lib/sidebar-width).
   sidebarWidth: number;
+  // The sidebar's layout: a rail of projects with the picked one's
+  // worktrees beside it (components/sidebar/rail-layout.tsx), one list of
+  // every project's tasks, or two columns, the projects and the tasks of the
+  // one picked (components/sidebar/columns.tsx).
+  sidebarLayout: "rail" | "list" | "columns";
+  // Two columns: how wide the tasks column is, whether it is folded away,
+  // and the project last picked in the first column.
+  tasksWidth: number;
+  tasksFolded: boolean;
+  sidebarPick: string | null;
   // Ask before closing a pane or tab stops a shell on its box.
   confirmCloseShells: boolean;
   // What closing an agent's pane or tab does to the agent: stop it (with a
@@ -43,6 +54,11 @@ export interface Prefs {
   labsChosen: boolean;
   // Labs: how an agent's pane opens, until switched.
   agentView: "terminal" | "conversation";
+  // What an agent's permissions do (Settings › Agents › Permissions):
+  // "bypass" has berthd allow them (questions and plans still ask), "ask"
+  // brings each to you. Agents run structured wherever the box can
+  // (lib/structured.ts); there is no setting for that.
+  approvals: "bypass" | "ask";
   // Labs: zen (⌘.): no sidebar or status bar, a switcher for a tab strip,
   // agents as conversations.
   zen: boolean;
@@ -52,6 +68,9 @@ export interface Prefs {
   // The picture behind conversations and its effects (Settings ›
   // Appearance › Chat background); none by default.
   chatBackground: ChatBackground;
+  // The picture across the top of a new chat, the launcher and Home
+  // (Settings › Appearance › Header picture); the harbour by default.
+  headerPicture: HeaderPicture;
   // How wide the conversation's column is (Settings › Appearance › Chat).
   chatWidth: ChatWidth;
   // Show the reply Claude is writing as it grows (lib/draft), read from its
@@ -59,6 +78,9 @@ export interface Prefs {
   chatDrafts: boolean;
   // The Files panel beside the worktree's tabs (⌘⇧E), for every worktree.
   filesPanel: boolean;
+  // When an agent opens its browser in the worktree showing, its live view
+  // opens beside the agent's pane (lib/agent-browser-open).
+  agentBrowserBeside: boolean;
   // The themes "Match system" uses by day and when macOS is dark.
   systemThemes: { light: string; dark: string };
   // Home's widgets, in order and size (lib/home-layout.ts). Null until the
@@ -86,6 +108,10 @@ const DEFAULTS: Prefs = {
   enabledPlugins: [],
   sidebarCollapsed: false,
   sidebarWidth: SIDEBAR_DEFAULT,
+  sidebarLayout: "rail",
+  tasksWidth: TASKS_DEFAULT,
+  tasksFolded: false,
+  sidebarPick: null,
   confirmCloseShells: true,
   closeAgents: "stop",
   closeAgentsChosen: false,
@@ -93,12 +119,15 @@ const DEFAULTS: Prefs = {
   labs: true,
   labsChosen: false,
   agentView: "terminal",
+  approvals: "bypass",
   zen: false,
   autoUpdateBoxes: false,
   chatBackground: DEFAULT_CHAT_BACKGROUND,
+  headerPicture: DEFAULT_HEADER_PICTURE,
   chatWidth: "default",
   chatDrafts: true,
   filesPanel: false,
+  agentBrowserBeside: true,
   systemThemes: { light: "berth-light", dark: "berth-dark" },
   home: null,
   installAgents: null,
@@ -107,7 +136,8 @@ const DEFAULTS: Prefs = {
 
 // PREFS_VERSION counts changes of default that saved prefs are moved to
 // once. 2: closing an agent's tab stops it ("keep" was the default before).
-const PREFS_VERSION = 3;
+// 3: Labs on. 4: the project rail is the sidebar.
+const PREFS_VERSION = 4;
 
 type Saved = Partial<Prefs> & { version?: number };
 
@@ -124,6 +154,9 @@ export function migratePrefs(saved: Saved): Saved {
   }
   // Version 3 turns Labs on: off was only the old default.
   if ((saved.version ?? 1) < 3 && !saved.labsChosen) out.labs = true;
+  // Version 4 makes the project rail the sidebar: the list was the only
+  // other default. Two columns was chosen in Labs, so it stays.
+  if ((saved.version ?? 1) < 4 && saved.sidebarLayout !== "columns") out.sidebarLayout = "rail";
   out.version = PREFS_VERSION;
   return out;
 }
@@ -133,7 +166,9 @@ const stored = load<Saved>("berth.prefs", {});
 // has nothing to catch up on (lib/whats-new.ts).
 export const firstRun = !stored || !Object.keys(stored).length;
 const saved = migratePrefs(stored ?? {});
-const { version: _version, ...savedPrefs } = saved;
+// structuredClaude was the Labs switch for agents in chat, which are now
+// simply how agents run: a saved one is dropped.
+const { version: _version, structuredClaude: _structured, ...savedPrefs } = saved as Saved & { structuredClaude?: boolean };
 
 export const usePrefs = create<Prefs>()(() => ({
   ...DEFAULTS,
@@ -142,7 +177,12 @@ export const usePrefs = create<Prefs>()(() => ({
   notify: { ...DEFAULTS.notify, ...saved.notify },
   systemThemes: { ...DEFAULTS.systemThemes, ...saved.systemThemes },
   chatBackground: normalizeChatBackground(saved.chatBackground),
-  sidebarWidth: clampWidth(saved.sidebarWidth ?? SIDEBAR_DEFAULT),
+  headerPicture: normalizeHeaderPicture(saved.headerPicture),
+  // 240px was the default before the task sidebar: a saved 240 is a sidebar
+  // never dragged, so it starts at today's default for this window.
+  sidebarLayout: saved.sidebarLayout === "columns" || saved.sidebarLayout === "list" ? saved.sidebarLayout : "rail",
+  tasksWidth: clampTasks(saved.tasksWidth),
+  sidebarWidth: saved.sidebarWidth === undefined || saved.sidebarWidth === SIDEBAR_NARROW_DEFAULT ? defaultWidth(typeof window === "undefined" ? Infinity : window.innerWidth) : clampWidth(saved.sidebarWidth),
 }));
 
 usePrefs.subscribe((p) => save("berth.prefs", { ...p, version: PREFS_VERSION }));
@@ -155,6 +195,10 @@ save("berth.prefs", { ...usePrefs.getState(), version: PREFS_VERSION });
   const q = new URLSearchParams(location.search);
   if (q.has("labs")) usePrefs.setState({ labs: q.get("labs") !== "0" });
   if (q.has("zen")) usePrefs.setState({ zen: q.get("zen") !== "0" });
+  // ?sidebar=rail, list or columns picks the sidebar's layout (the browser
+  // tests pin the list unless they test another).
+  const side = q.get("sidebar");
+  if (side === "rail" || side === "list" || side === "columns") usePrefs.setState({ sidebarLayout: side });
   const v = q.get("view");
   if (v === "terminal" || v === "conversation") usePrefs.setState({ agentView: v });
 }
@@ -170,10 +214,12 @@ function applyUiPrefs(p: Prefs) {
   // The sidebar reads its width from here; a drag sets it as it goes
   // (components/sidebar/resize-handle.tsx) and saves it here at the end.
   root.style.setProperty("--sidebar-w", `${p.sidebarWidth}px`);
+  // And the two-column sidebar's tasks column, the same way.
+  root.style.setProperty("--tasks-w", `${p.tasksWidth}px`);
 }
 applyUiPrefs(usePrefs.getState());
 usePrefs.subscribe((p, prev) => {
-  if (p.uiFontSize !== prev.uiFontSize || p.density !== prev.density || p.chatWidth !== prev.chatWidth || p.sidebarWidth !== prev.sidebarWidth) applyUiPrefs(p);
+  if (p.uiFontSize !== prev.uiFontSize || p.density !== prev.density || p.chatWidth !== prev.chatWidth || p.sidebarWidth !== prev.sidebarWidth || p.tasksWidth !== prev.tasksWidth) applyUiPrefs(p);
 });
 
 // useTerminalPrefs is what a terminal needs to draw itself; it changes only
@@ -188,6 +234,10 @@ export function setPrefs(patch: Partial<Prefs>) {
 
 export function setChatBackground(patch: Partial<ChatBackground>) {
   usePrefs.setState((p) => ({ chatBackground: { ...p.chatBackground, ...patch } }));
+}
+
+export function setHeaderPicture(patch: Partial<HeaderPicture>) {
+  usePrefs.setState((p) => ({ headerPicture: { ...p.headerPicture, ...patch } }));
 }
 
 export function setTerminalPrefs(patch: Partial<TerminalPrefs>) {

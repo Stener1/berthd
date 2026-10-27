@@ -34,6 +34,30 @@ of them in one step. On by default; it sits under **More** in the sidebar
 Keys: `J`/`K` move, `X` ticks, `S` starts (the ticked issues, or the one
 open), `O` opens it on GitHub, `/` searches, `Esc` clears the ticks.
 
+## Linear
+
+The switch at the top right turns the screen to Linear, once a personal API
+key is in **Settings → Integrations** (`docs/guides/linear.mdx`):
+
+- **Assigned to me, or a team.** Up to 100 issues that are not done or
+  cancelled; search, All / Mine / Unassigned within a team, label chips,
+  and sort by recently updated, newest or priority.
+- **The issue.** State, priority, labels, assignee, what Linear linked to
+  it, the description and its last 50 comments.
+- **Start an agent.** A Linear issue names no repository, so the first
+  start asks which project; the choice is kept. The worktree is named for
+  the issue (`web-412-…`) and takes the branch Linear suggests, so Linear
+  links the pull request by itself. Any worktree whose branch or name
+  carries the identifier counts as the issue's.
+- **Home widget.** "Linear": what is assigned to you, the most urgent first.
+
+The plugin never holds the key. It reads through `berth.linear`, which the
+laptop agent answers (`internal/agent/linear.go`): the key is in a file
+only the person can read, and the app's window may only talk to the agent.
+`src/linear.ts` is the part with no React in it (names, the prompt, which
+worktrees are an issue's) and is tested in
+`app/src/lib/linear-issues.test.ts`.
+
 ## Where the issues come from
 
 Nothing here talks to GitHub from the laptop. The plugin runs `gh` on a box

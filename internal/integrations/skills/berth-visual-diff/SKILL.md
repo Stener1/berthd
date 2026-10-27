@@ -88,10 +88,12 @@ look: before|after crops of each shot's largest change, in /…/diffs/vd-8f4c600
   change is near one.
 - `--color-scheme both` shoots every page in light and dark (twice the
   shots); `dark` only dark. Use it when you touch colours or theme tokens.
-- Pages that need a login: the compare runs its own browser, without the
-  agent browser's cookies, so give it public pages (or a dev-only page that
-  renders the component), and tell the user which pages you couldn't
-  compare.
+- Pages that need a login: when the project lists dev users (`login.users`
+  in its kit or `.berth/config.json`), `--as pro@acme.test` logs both sides
+  in first, each with its own login against its own dev server. Without
+  one, the compare's browser has no cookies: give it public pages (or a
+  dev-only page that renders the component), and tell the user which pages
+  you couldn't compare.
 - Put the defaults in `.berth/config.json` so every compare is the same:
 
 ```json

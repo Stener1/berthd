@@ -9,7 +9,7 @@ import { type SyncMode, worktreesApi } from "@/lib/worktrees";
 import type { Row } from "@/views/worktrees/use-worktrees";
 
 // A sync leaves paused worktrees alone unless paused is set.
-export type BulkAction = { kind: "sync"; mode: SyncMode; paused?: boolean } | { kind: "pause" } | { kind: "resume" } | { kind: "stop" } | { kind: "delete"; force: boolean; branch: boolean } | { kind: "archive" };
+export type BulkAction = { kind: "sync"; mode: SyncMode; paused?: boolean } | { kind: "pause" } | { kind: "resume" } | { kind: "stop" } | { kind: "archive" };
 
 export interface RowProgress {
   state: "queued" | "running" | "ok" | "conflict" | "failed" | "skipped";
@@ -25,11 +25,11 @@ export interface BulkSummary {
 }
 
 export const actionLabel = (a: BulkAction) =>
-  a.kind === "sync" ? (a.mode === "rebase" ? "Rebase" : a.mode === "merge" ? "Merge" : "Fast-forward") : a.kind === "pause" ? "Pause" : a.kind === "resume" ? "Resume" : a.kind === "stop" ? "Stop sessions" : a.kind === "archive" ? "Archive" : "Delete";
+  a.kind === "sync" ? (a.mode === "rebase" ? "Rebase" : a.mode === "merge" ? "Merge" : "Fast-forward") : a.kind === "pause" ? "Pause" : a.kind === "resume" ? "Resume" : a.kind === "stop" ? "Stop sessions" : "Archive";
 
 // skipReason says why an action doesn't apply to a row, or nothing.
 export function skipReason(a: BulkAction, r: Row): string | undefined {
-  if (r.main && (a.kind === "pause" || a.kind === "resume" || a.kind === "delete" || a.kind === "archive")) return "the main checkout";
+  if (r.main && (a.kind === "pause" || a.kind === "resume" || a.kind === "archive")) return "the main checkout";
   if (a.kind === "sync" && r.paused && !a.paused) return "paused";
   if (a.kind === "pause" && r.paused) return "already paused";
   if (a.kind === "resume" && !r.paused) return "not paused";
@@ -91,17 +91,6 @@ export function useBulk(onRowDone: (r: Row, patch: Partial<Row>) => void) {
               set(r.key, { state: "ok", message: `Stopped ${sessions.length}` });
               onRowDone(r, { sessions: 0 });
               scheduleRefresh(r.box, ["sessions"]);
-              break;
-            }
-            case "delete": {
-              try {
-                const res = await removeWorktreeOnBox(client, r.box, r.location, { name: r.name, path: r.path }, "remove", { force: action.force, branch: action.branch });
-                set(r.key, { state: "ok", message: res.archive ? "Removing: its archive script runs, then it goes" : "Removed" });
-              } catch (err) {
-                const m = errorMessage(err);
-                if (/modified|untracked|uncommitted|contains/i.test(m) && !action.force) throw new Error("Has uncommitted changes; tick “even with uncommitted changes”");
-                throw err;
-              }
               break;
             }
             case "archive": {

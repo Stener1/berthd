@@ -27,6 +27,8 @@ that gives `activate` its types.
 | `api` | [`BerthApi`](#api): a typed client for the laptop agent and every box |
 | `orchestrate` | [`BerthOrchestrate`](#orchestrate): agents driving agents |
 | `prompts` | [`BerthPrompts`](#prompts): the saved prompt library |
+| `linear` | [`BerthLinear`](#linear): the person's Linear issues, once they added a key |
+| `helper` | [`BerthHelper`](#helper): the plugin's own program on a box, for a plugin whose manifest carries one |
 | `storage` | `get<T>(key, fallback)`, `set(key, value)`: small JSON values kept on this computer, apart from other plugins' |
 
 ### Adding things
@@ -36,7 +38,7 @@ Each returns a `Dispose`. Everything is also removed when the plugin unloads.
 | Call | What it does |
 | --- | --- |
 | `addScreen({ id, title, description?, layout?, Component })` | A screen under the app's header strip. `layout: "fill"` hands it the whole area. `Component` gets `{ berth }`. |
-| `addSidebarItem({ id, title, icon?, screen })` | A place that opens one of its screens, under the sidebar's **More** menu until the person pins it. `icon` is a [lucide](https://lucide.dev/icons) name. |
+| `addSidebarItem({ id, title, icon?, screen, useCount? })` | A place that opens one of its screens, under the sidebar's **More** menu until the person pins it. `icon` is a [lucide](https://lucide.dev/icons) name. `useCount` puts a [count on its row](#sidebar-counts). |
 | `addWorktreePanel({ id, title, icon?, Component })` | A view about one worktree, opened as a tab or split. `Component` gets `{ berth, box, location, worktree, path, main? }`. |
 | `addWorktreeSection({ id, title?, Component })` | A [section under the composer](#worktree-sections) where work starts in a worktree. `Component` gets `{ berth, box, location, worktree, path, main? }`. |
 | `addHomeWidget({ id, title, icon?, sizes, Component, … })` | A [widget for Home's grid](#home-widgets), in its **Add widget** picker under your plugin's name. `Component` gets `{ berth, size, visible, preview? }`. |
@@ -51,6 +53,7 @@ Each returns a `Dispose`. Everything is also removed when the plugin unloads.
 | --- | --- |
 | `notify(title, body?)` | A toast in the app, and a system notification when it is not focused (by default: Settings → Notifications decides, under messages from plugins) |
 | `openScreen(id)` | One of the plugin's screens |
+| `openSettings(section?)` | The app's Settings, on a section when given one (`"integrations"`, `"plugins"`) |
 | `openTerminal(box, session)` | A session's terminal |
 | `openUrl(url)` | A URL in the system browser |
 | `openWorktree({ box, location, worktree, path, main? })` | Brings a worktree's workspace to the front |
@@ -85,6 +88,30 @@ export default definePlugin((berth) => {
 ```
 
 The `hello-ports` example plugin adds one too: the ports open in the worktree, as buttons.
+
+### Sidebar counts
+
+A sidebar item's `useCount` is a hook for the count on its row, shaped like a [Home widget's](#home-widgets): a number, or `{ n, urgent }`. Use it for something waiting on the person, such as sessions waiting for a reply, which Home's own count doesn't see.
+
+- A count shows in amber, like Home's agents waiting. `urgent: false` shows it quiet instead, like Review's.
+- 0 or `undefined` shows no count.
+- While the item is under **More**, an amber count shows on More's row too.
+- The app calls it on every render, under your plugin's context like your components, so the SDK's hooks work in it. Keep it cheap: read a value you keep up to date, don't fetch in it.
+- A `useCount` that throws shows no count and is logged in the console. The rest of the sidebar carries on.
+
+```tsx
+import { definePlugin, useStorage } from "@berth/plugin";
+
+export default definePlugin((berth) => {
+  berth.addSidebarItem({
+    id: "intake",
+    title: "Intake",
+    icon: "Inbox",
+    screen: "intake",
+    useCount: () => useStorage<number>("waiting", 0)[0],
+  });
+});
+```
 
 ### Home widgets
 
@@ -147,7 +174,7 @@ export default definePlugin((berth) => {
 });
 ```
 
-That is how a Linear plugin would add its issues to Home (Shipyard has no Linear integration yet). The built-in widgets from plugins are worth reading: Pull requests and CI failures in `plugins/pull-request/src/home.tsx`, Agent usage in `plugins/usage/src/home.tsx`, Notes in `plugins/notes/src/home.tsx`, and the smallest, Hello ports, in `plugins/hello-ports`.
+The built-in Linear widget (`plugins/issues/src/home.tsx`) is this, reading through [`berth.linear`](#linear) so it never holds a key. The other built-in widgets from plugins are worth reading: Pull requests and CI failures in `plugins/pull-request/src/home.tsx`, Agent usage in `plugins/usage/src/home.tsx`, Notes in `plugins/notes/src/home.tsx`, and the smallest, Hello ports, in `plugins/hello-ports`.
 
 A built-in plugin that is off until turned on can list its widgets' titles in `berth-plugin.json` (`"homeWidgets": ["Agent usage"]`), so the picker offers to turn it on.
 
@@ -166,6 +193,8 @@ A built-in plugin that is off until turned on can list its widgets' titles in `b
 | `createTask(box, task)` | `TaskResult`: a worktree with an agent in it (`title?` names the work) |
 | `renameSession(box, session, title)` | `Session`: names a session's work, as the app shows it; `""` clears it |
 | `serviceUrl(box, port)` | The private URL of a port on a box |
+| `attach(box, target, file, opts?)` | `Attachment` (`{ path, name, type, size }`): uploads a file for an agent the way the composer does, as raw bytes, into `.berth/attachments` (which git ignores) of a running session's worktree (`target: { session }`) or a worktree an agent is about to start in (`{ location, worktree }`). `file` is a `File`, or a path on this computer as a string (from `localPaths`): the laptop agent reads and uploads it, and on a box that runs on this computer it is the box's own file, so `attach` resolves to the path as it is, unread (`size` 0). A pasted `image.png` goes up as `pasted-HHMMSS.png`, and the box puts the time before every name it saves (`20261022-101502-notes.md`): use the `path` and `name` it resolves with. Up to 20 MB; a larger file is refused before anything is sent. `opts` takes `onProgress(sent, total)`, an abort `signal`, and `pasted: true` for a pasted screenshot, which shrinks first (at most 2000 px, as WebP) as the composer's does; a dropped file goes as it is. Put `path` in the prompt you send. An older Shipyard has no `attach`: check `typeof berth.api.attach === "function"` |
+| `localPaths(text)` | `string[]`: the paths to files on this computer that pasted text is made of (a file copied in Finder, a screenshot's `/var/folders/…` path, a `file://` URL), or `[]` for any other text. Pass each to `attach`. An older Shipyard has no `localPaths` either |
 
 ## orchestrate
 
@@ -209,6 +238,72 @@ sending.
 | `openPicker({ box?, session?, promptId? })` | The app's picker: choose a prompt, fill it in, send it |
 | `openBroadcast({ promptId?, text?, targets? })` | The app's broadcast: one prompt to several agents |
 
+## linear
+
+[Linear](/guides/linear) through the laptop agent, which holds the person's
+API key and makes the calls. A plugin never sees the key, and can't reach
+`api.linear.app` itself: the app's window only talks to the agent.
+
+| Call | Returns |
+| --- | --- |
+| `status()` | `LinearStatus`: `{ connected, viewer?, workspace? }`. Not connected is an answer, not an error |
+| `teams()` | `LinearTeam[]`: `{ id, key, name }` |
+| `issues({ team?, mine? })` | `LinearIssue[]`: up to 100 that are not done or cancelled, the most recently updated first; a team's (by its key), the person's own, or both |
+| `issue(id)` | `LinearIssueDetail` by id or identifier (`"WEB-12"`): the issue with `description`, `comments` and `links` |
+| `comment(id, body)` | Comments as the person. `id` is the issue's id, not its identifier |
+
+Without a key the calls other than `status()` reject with `code:
+"linear_off"`; with a key Linear refuses, `"linear_auth"`. Send the person
+to the key with `berth.openSettings("integrations")`.
+
+## helper
+
+A plugin can carry a program of its own that runs on a box: a **helper**.
+The plugin's `berth-plugin.json` names it under `box.helper`, with a build
+for each platform and each build's checksum; the laptop agent downloads the
+one for a box, checks it, and hands it to the box, which keeps it running,
+gives it a folder for its data and passes requests through to its HTTP API.
+[Leadline](/guides/leadline) is built this way.
+
+`berth.helper` is always the calling plugin's own helper: there is no
+plugin id to pass, and no way to reach another plugin's.
+
+| Call | What it does |
+| --- | --- |
+| `status(box)` | `HelperStatus`: `{ plugin, box, state, platform, version?, latest?, update?, error? }`. `state` is `off` (not on this box: never installed, or turned off; a box doesn't say which), `installing`, `starting`, `running`, `failed` (with `error`), `unsupported` (the box's `berthd` is from before helpers, or there is no build for its `platform`), or `none`: the plugin as installed names no helper. `update` is true when the box runs another helper than the plugin carries (`latest` is its version). A box that is offline rejects |
+| `install(box)` | Installs the helper on the box, or updates it, and turns it on. Resolves with the `HelperStatus` it reached, which can still be `installing` or `starting`: read `status` until it settles |
+| `remove(box, { purge? })` | Stops the helper and removes it. What it recorded stays in its folder for the next install, unless `purge`. Resolves with the `HelperStatus` it left; its `attached` lists the running services (`{ location, worktree, service }`) that were started while the helper was on and still point at it. Nothing restarts them: tell the person which to restart |
+| `request(box, method, path, body?)` | The helper's own API through the box. `path` is written from the helper's `/api/`: `request("devl", "GET", "queries?limit=50")` asks the helper for `/api/queries?limit=50` (the box path `helpers/<id>/api/api/queries?limit=50`). Rejects with `code: "helper_off"` (status 409) when the helper isn't running there, and with the helper's own `code` and `message` when it refuses |
+| `attachEnv(box, { location, worktree, env? })` | Has the box look in a worktree's own `.env` files for the variables your manifest's `attach_env` names, and tell your helper what it found: the same call to its `attach` path as before a service starts, with `.env` as `command`. For a project whose dev servers Shipyard does not start. `worktree` is its name; `""` is the location's main checkout. Resolves with a `HelperEnvLook`: `{ files, skipped, variables, answer, … }`, where `files` are the dotenv files that were read (of `.env`, `.env.development`, `.env.local`, `.env.development.local`, a later one winning), `skipped` the ones that were there and were not read (`{ file, reason }`), `variables` the matching ones as `{ name, file, sent, reason? }`, and `answer` your helper's own answer without its `env`. Never a value. Nothing found is an answer, not an error, and looking again replaces what the last look found. Rejects with `code: "box_outdated"` (a 404) on a box whose `berthd` is from before this, `helper_off` (409), `helper_no_attach` (409, the manifest names no `attach`), `helper_unreachable` (502) and `refused` (403, a hook on the box said no). With `env` (`{ DATABASE_URL: "…" }`), no file is read: your helper is told those variables, which the person gave, with `.manual` as `command`, in place of what it was told that way before; `env: {}` takes it back. Each name must be one `attach_env` names (400 `bad_request`). What is given is a secret: send it, and keep and show none of it. An older Shipyard has no `attachEnv`: check `typeof berth.helper.attachEnv === "function"`. See [a look in the worktree's .env](/guides/plugins#attachenv-a-look-in-the-worktrees-env-on-request) |
+
+Installing puts a program on someone's machine, so **ask first**, saying
+which program and which box: Shipyard doesn't ask for you. The consent
+dialog and the plugin's row in Settings already say the plugin can do
+this, by the program's name, and because the manifest is part of what is
+allowed, a plugin can't gain a helper or change it without being asked
+about again.
+
+```json title="berth-plugin.json"
+{
+  "box": {
+    "helper": {
+      "name": "berth-leadline",
+      "version": "0.1.0",
+      "args": ["serve", "--dir", "{dir}", "--addr", "127.0.0.1:0"],
+      "ready": "helper.json",
+      "assets": {
+        "linux-amd64": { "url": "https://…", "sha256": "…", "size": 123 }
+      }
+    }
+  }
+}
+```
+
+`{dir}` is the folder the box gives the helper, and `ready` a file the
+helper writes there once it is listening. A request goes through the box
+as JSON, one answer for one request, so a helper's event stream can't be
+followed this way: read again on a timer while your view is on screen.
+
 ## React hooks
 
 From `@berth/plugin`, backed by the app's live state:
@@ -246,6 +341,9 @@ the same props as in the app:
 | Display | `Badge`, `Kbd`, `Spinner`, `Skeleton`, `Icon` (any lucide icon by name), `AgentIcon`, `Alert`, `AlertTitle`, `AlertDescription`, `Meter`, `MeterLabel`, `MeterTrack`, `MeterIndicator`, `MeterValue`, `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableHead`, `TableCell`, `Empty`, `EmptyHeader`, `EmptyTitle`, `EmptyDescription` |
 | Overlays | `Tip`, `Tooltip`, `TooltipTrigger`, `TooltipPopup`, `AlertDialog` and its parts, `Sheet`, `SheetPopup`, `SheetHeader`, `SheetTitle`, `SheetDescription`, `SheetPanel`, `SheetFooter`, `SheetClose` |
 | Home widgets | `WidgetRow` (one 36px line, a button with `onClick`), `WidgetEmpty` (`scene`, `title`, `hint`, `action`, `onAction`), `WidgetSkeleton` (`rows`) |
+| Charts | `Chart`: bars, lines or areas drawn by the app's own chart components, in the theme's colours. `<Chart spec={{ type: "area", x: "x", y: [{ key: "calls", label: "Calls", color: "1" }], data: rows }} />`, where `spec` is a [chart artifact](/guides/artifacts)'s `type`, `data`, `x`, `y`, `units` and `stacked`. It fills its box, 16rem high unless `className` says otherwise. Give a time series' `x` as short labels (`"14:05"`) |
+| SQL | `SqlEditor`: the File tab's editor for a statement or a few, with SQL highlighting, completion and a key to run, loaded on first use. `<SqlEditor value={sql} onChange={setSql} onRun={(selection) => run(selection)} schema={{ orders: ["id", "status"] }} dialect="postgresql" />`. `onRun` is ⌘↵ and gets the selection as offsets into `value` (`from === to` for a cursor); `onSelect` reports it as it moves, for a Run button of your own; `schema` is each table (or `schema.table`) with its columns and `defaultSchema` the one whose tables complete bare; `error={{ from, to? }}` underlines where a statement failed until the text changes. It fills its box, 10rem high unless `className` says otherwise |
+| Helpers | For a plugin that [carries a program for boxes](#helper). `HelperBox`: one box's state (Off, Installing…, Running, Failed, Can't run it, Offline) with **Turn on…** behind a confirm that names the program, **Update**, **Turn off** and **Remove data…**. `<HelperBox berth={berth} box={name} online={online} copy={copy} />` is a row (an `<li>`) of your screen's list of boxes, with `children` shown under a running helper; `variant="panel"` is a worktree panel's body on a box where the helper isn't running, and draws nothing once it is. `copy` (a `HelperCopy`) is what only your plugin can say: its `name`, its `program`, what the program `does`, and what removing its data deletes. `useHelperState(berth, box, active)` is the same state for your own code: `{ status?, fault?, old?, refresh() }`, read again while `active` |
 | Utility | `cn(...classes)` |
 | Diffs | `loadDiffs()`: the app's diff renderer ([@pierre/diffs](https://diffs.com), highlighted in workers, themed like the app), loaded on first call and shared with the app. `parse(patch)` reads a git patch; `<default>` draws its files as a scrolling list, split or unified. The built-in Diff panel uses it. |
 
@@ -261,7 +359,7 @@ Go structs have them, in `packages/plugin-sdk/src/types.ts`:
 | `BoxStatus` | `name`, `address`, `network?`, `fingerprint`, `state` (`connecting`, `online`, `offline`, `untrusted`), `error?`, `latency_ms?`, `since`, `link?` (`slow?`, `reason?`, `max_ms?`, `jitter_ms?`, `path?`) |
 | `Location` | `name`, `path`, `repo`, `worktrees?`, `scripts`, `agents?`, `remote?`, `slug?`, `default_branch?`, `repo_trust?` (`none`, `trusted`, `untrusted` or `changed`) |
 | `Worktree` | `name`, `path`, `branch?`, `head?`, `main?`, `setting_up?`, `port?`, `title?`, `parent?` (the path of the worktree whose agent handed this one off) |
-| `Session` | `name`, `location?`, `dir`, `command?`, `created`, `attached`, `exited`, `agent?`, `agent_state?`, `state_since?`, `preset?`, `turn?`, `state_seq?`, `fidelity?`, `queued?`, `ask?`, `title?` (what the work is called: the first line of its first prompt, or a rename) |
+| `Session` | `name`, `location?`, `dir`, `command?`, `created`, `attached`, `exited`, `agent?`, `agent_state?`, `state_since?`, `preset?`, `turn?`, `state_seq?`, `fidelity?`, `queued?`, `ask?`, `unfinished?`, `parked?` (turn check's reading of a finished turn: still running, or waiting on a reply or a later time), `soft_wait?` (turn check's wait: the agent's last message asks you something), `title?` (what the work is called: the first line of its first prompt, or a rename), `driver?` (`terminal`) |
 | `Turn` | `id` (`"<session>#<n>"`), `session`, `agent?`, `n`, `origin?`, `sent_seq?`, `end_seq?`, `state` (`queued`, `pending`, `running`, `waiting`, `finished`, `exited`, `lost`), `queued?`, `started?`, `ended?`, `waits?` (each `{ start, end?, reason?, ask? }`), `fidelity?`, `idem_key?`, `status?` |
 | `Ask` | `tool?`, `input?` (the command or file path, at most 300 characters), `why?`, `message?` |
 | `QueuedPrompt` | `turn`, `preview` (the first 280 characters), `length`, `origin?`, `at` |

@@ -1,9 +1,9 @@
 import { create } from "zustand";
 
 import type { Client, PluginInfo } from "@/lib/api";
-import { hashPluginFiles, mainOf } from "@/plugins/consent-core";
+import { hashPluginFiles, helperOf, mainOf, type PluginHelper } from "@/plugins/consent-core";
 
-export { mayLoad, PLUGIN_POWERS } from "@/plugins/consent-core";
+export { helperPower, mayLoad, PLUGIN_POWERS, type PluginHelper } from "@/plugins/consent-core";
 
 // PluginFiles is what the app would import for a plugin, read once: the
 // bytes that are hashed are the bytes that are reviewed and then imported.
@@ -15,6 +15,8 @@ export interface PluginFiles {
   hash: string;
   // The hooks the manifest lists, to show before allowing it.
   hooks: { on: string; run: string }[];
+  // The program it carries for boxes ("box.helper"), if it has one.
+  helper?: PluginHelper;
 }
 
 const MANIFEST = "berth-plugin.json";
@@ -30,7 +32,14 @@ export async function readPluginFiles(client: Client, p: PluginInfo): Promise<Pl
   } catch {
     // mainOf already parsed it; a manifest it could read has no other shape to fail on.
   }
-  return { manifest, mainPath, main, hash: await hashPluginFiles(manifest, main), hooks };
+  return { manifest, mainPath, main, hash: await hashPluginFiles(manifest, main), hooks, helper: helperOf(manifest) };
+}
+
+// readPluginHelper is the program a plugin carries for boxes, read from its
+// manifest: what its row in Settings says it can install. None, or a
+// manifest that can't be read, is undefined.
+export async function readPluginHelper(client: Client, p: PluginInfo): Promise<PluginHelper | undefined> {
+  return client.pluginFile(p, MANIFEST).then(helperOf, () => undefined);
 }
 
 // The consent dialog is opened from anywhere (Settings, a plugin's missing

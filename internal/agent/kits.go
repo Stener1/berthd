@@ -38,6 +38,9 @@ type KitSource struct {
 	Src     string    `json:"src"`
 	Commit  string    `json:"commit,omitempty"`
 	Fetched time.Time `json:"fetched"`
+	// Team is set for a team setup's kit taken on its own (teamkit.go): it
+	// is read again from that team setup's newer commits.
+	Team *box.KitTeam `json:"team,omitempty"`
 }
 
 // KitInfo describes a kit for listing and review.
@@ -240,17 +243,8 @@ func fetchKit(ctx context.Context, src, tmpRoot string) (dir, commit string, err
 			}
 		}
 	}
-	args := []string{"clone", "--depth", "1", "--quiet"}
-	if ref != "" {
-		args = append(args, "--branch", ref)
-	}
-	args = append(args, "--", repo, filepath.Join(work, "repo"))
-	cmd := exec.CommandContext(ctx, "git", args...)
-	// ext:: runs a command and file:: reads this computer: a kit link gets
-	// network transports only.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+box.GitProtocols)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("could not fetch %s: %s", repo, strings.TrimSpace(string(out)))
+	if err := cloneAt(ctx, repo, ref, filepath.Join(work, "repo")); err != nil {
+		return "", "", err
 	}
 	if out, err := exec.CommandContext(ctx, "git", "-C", filepath.Join(work, "repo"), "rev-parse", "HEAD").Output(); err == nil {
 		commit = strings.TrimSpace(string(out))
@@ -260,6 +254,49 @@ func fetchKit(ctx context.Context, src, tmpRoot string) (dir, commit string, err
 		return "", "", fmt.Errorf("no %s in %s", kitManifest, src)
 	}
 	return dir, commit, nil
+}
+
+// commitRef is a ref that names a commit by its hash, as a GitHub link
+// copied from a commit's page does (…/tree/308bc75…/projects/cal).
+var commitRef = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+// cloneAt clones repo into dir at ref: a branch or tag, a commit, or the
+// default branch when ref is empty. git clone --branch takes only branches
+// and tags, so a commit is fetched on its own, or, where the server won't
+// hand out a commit by its hash (or the hash is shortened), cloned in full
+// and checked out.
+func cloneAt(ctx context.Context, repo, ref, dir string) error {
+	git := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		// ext:: runs a command and file:: reads this computer: a kit link
+		// gets network transports only.
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+box.GitProtocols)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("could not fetch %s: %s", repo, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if !commitRef.MatchString(ref) {
+		args := []string{"clone", "--depth", "1", "--quiet"}
+		if ref != "" {
+			args = append(args, "--branch", ref)
+		}
+		return git(append(args, "--", repo, dir)...)
+	}
+	if err := git("init", "--quiet", dir); err != nil {
+		return err
+	}
+	if git("-C", dir, "fetch", "--depth", "1", "--quiet", "--", repo, ref) == nil {
+		return git("-C", dir, "checkout", "--quiet", "--detach", "FETCH_HEAD")
+	}
+	os.RemoveAll(dir)
+	if err := git("clone", "--quiet", "--no-checkout", "--", repo, dir); err != nil {
+		return err
+	}
+	if err := git("-C", dir, "checkout", "--quiet", "--detach", ref+"^{commit}"); err != nil {
+		return fmt.Errorf("%s has no commit %s", repo, ref)
+	}
+	return nil
 }
 
 func expandHome(p string) string {
@@ -336,7 +373,7 @@ func copyTree(src, dst string) error {
 func kitInstall(k KitInfo) (box.KitInstall, error) {
 	in := box.KitInstall{Kit: k.Kit, Files: map[string]string{}, Hash: k.Hash}
 	if k.Source != nil {
-		in.Source = k.Source.Src
+		in.Source, in.Team = k.Source.Src, k.Source.Team
 	} else {
 		in.Source = k.Origin
 	}
@@ -387,25 +424,31 @@ func (a *Agent) installedKits(ctx context.Context) []InstalledKitOn {
 	for _, k := range a.kits() {
 		kept[k.ID] = k.Hash
 	}
-	out := []InstalledKitOn{}
+	var online []string
 	for _, b := range a.status().Boxes {
-		if b.State != StateOnline {
-			continue
+		if b.State == StateOnline {
+			online = append(online, b.Name)
 		}
-		c, ok := a.client(b.Name)
+	}
+	// Every box at once; the answers keep the boxes' order.
+	each := make([][]box.InstalledKitAt, len(online))
+	fanOut(len(online), func(i int) {
+		c, ok := a.client(online[i])
 		if !ok {
-			continue
+			return
 		}
-		var at []box.InstalledKitAt
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := box.NewClient(c).Call(cctx, http.MethodGet, "/v1/kits", nil, &at)
-		cancel()
-		if err != nil {
-			continue
+		defer cancel()
+		var at []box.InstalledKitAt
+		if box.NewClient(c).Call(cctx, http.MethodGet, "/v1/kits", nil, &at) == nil {
+			each[i] = at
 		}
+	})
+	out := []InstalledKitOn{}
+	for n, at := range each {
 		for _, i := range at {
 			h, ok := kept[i.Kit.ID]
-			out = append(out, InstalledKitOn{Box: b.Name, InstalledKitAt: i, Outdated: ok && h != i.Kit.Hash})
+			out = append(out, InstalledKitOn{Box: online[n], InstalledKitAt: i, Outdated: ok && h != i.Kit.Hash})
 		}
 	}
 	return out
@@ -498,6 +541,21 @@ func (a *Agent) kitRoutes(mux *http.ServeMux) {
 		k, ok := a.kit(r.PathValue("id"))
 		if !ok || k.Source == nil || k.Origin != "user" {
 			writeError(w, http.StatusBadRequest, "only kits added from a link can be updated from it")
+			return
+		}
+		// A team setup's kit is read again from the setup's newest commit.
+		if k.Source.Team != nil {
+			g, err := newGH()
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			nk, changed, err := a.updateTeamKit(r.Context(), g, k)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"kit": nk, "changed": changed})
 			return
 		}
 		tmp := filepath.Join(a.cfg.Dir, "kit-fetch")

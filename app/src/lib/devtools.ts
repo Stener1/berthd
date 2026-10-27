@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 
+import { agentBrowserDevtools } from "@/lib/agent-browser";
 import { type AgentDevtools, appendConsole, appendNetwork, type ConsoleEntry, errorCount, fromAgent, type NetEntry, parseReport, type Report } from "@/lib/devtools-model";
 import { poll, type Poller } from "@/lib/poll";
 import { useStore } from "@/lib/store";
@@ -217,8 +218,9 @@ export function useDevtoolsFeed({ key, mode, url, visible, proxyPort }: FeedOpti
 
 // useAgentDevtoolsFeed keeps the agent's own browser's console lines and
 // failed requests (from its box, GET …/browser/devtools) under key, every
-// two seconds while on: while its view shows and the drawer is open.
-export function useAgentDevtoolsFeed(key: string, ref: { box: string; location: string; worktree: string } | undefined, on: boolean) {
+// two seconds while on: while its view shows and the drawer is open. tab is
+// the one the view watches (lib/browser-tabs), main when empty.
+export function useAgentDevtoolsFeed(key: string, ref: { box: string; location: string; worktree: string } | undefined, on: boolean, tab = "") {
   const box = ref?.box;
   const location = ref?.location;
   const worktree = ref?.worktree;
@@ -231,9 +233,8 @@ export function useAgentDevtoolsFeed(key: string, ref: { box: string; location: 
     // the window is hidden.
     const p = poll(
       async () => {
-        const client = useStore.getState().client;
         try {
-          const d = await client?.box<AgentDevtools>(box, "GET", `worktrees/${encodeURIComponent(location)}/${encodeURIComponent(worktree)}/browser/devtools`);
+          const d = await agentBrowserDevtools<AgentDevtools>(box, location, worktree, tab);
           if (!live || !d) return false;
           const sig = JSON.stringify(d);
           if (sig === last) return false;
@@ -251,7 +252,7 @@ export function useAgentDevtoolsFeed(key: string, ref: { box: string; location: 
       live = false;
       p.stop();
     };
-  }, [key, on, capable, box, location, worktree]);
+  }, [key, on, capable, box, location, worktree, tab]);
   return capable;
 }
 

@@ -1,0 +1,23 @@
+{
+  "id": "leadline",
+  "name": "Leadline",
+  "version": "0.1.1",
+  "description": "What your code did in development, as tabs on a worktree: database queries with their N+1s, request traces, logs and endpoints. Installs berth-leadline on the boxes you turn it on for.",
+  "main": "dist/index.js",
+  "defaultEnabled": false,
+  "author": "Shipyard",
+  "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/leadline",
+  "marketplace": true,
+  "box": {
+    "helper": {
+      "name": "berth-leadline",
+      "version": "0.1.1",
+      "args": ["serve", "--dir", "{dir}", "--addr", "127.0.0.1:0"],
+      "ready": "helper.json",
+      "attach": "/api/attach",
+      "attach_env": ["DATABASE_URL", "POSTGRES_URL", "OTEL_*"],
+      "detach": "/api/detach",
+      "assets": {}
+    }
+  }
+}

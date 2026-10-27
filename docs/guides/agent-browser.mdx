@@ -66,6 +66,8 @@ the error when it doesn't start ends with what Chromium itself said.
 
 Inside a Shipyard session, commands act on the session's worktree; elsewhere,
 name it as `LOC/WT` (and from a laptop, `berth browser open BOX/LOC/WT`).
+Every command takes `--tab NAME` for a [tab](#tabs-several-agents-in-one-worktree)
+of its own.
 
 | Command | Prints |
 | --- | --- |
@@ -80,7 +82,8 @@ name it as `LOC/WT` (and from a laptop, `berth browser open BOX/LOC/WT`).
 | `berthd browser console [--all]` | Errors and warnings since the last look (`--all`: every level) |
 | `berthd browser network` | Failed requests since the last look |
 | `berthd browser eval JS` | Its value, at most 2 KB |
-| `berthd browser status\|close`, `berthd browser list` | Whether it runs, its size, its memory |
+| `berthd browser status\|close`, `berthd browser list` | Whether it runs, its size, its memory; `close --tab NAME` closes just that tab |
+| `berthd browser tabs` | Its tabs, what each shows and its size, and which one a command runs on now |
 | `berthd browser allow ORIGIN` | Lets agents' browsers on the box load a public origin |
 | `berthd browser reap [--dry-run]` | Closes [agent-browser](#agent-browser) sessions left by Shipyard sessions that ended |
 
@@ -125,6 +128,45 @@ Screenshots are of the page at its size: `shot` is at most 800 pixels wide
 by default (about 530 tokens), and `shot --native` is the page's own pixels,
 its size times its scale (a 390×844 page at 3x is 1170×2532). The live view
 is cast at the page's pixels, at most 2560 on a side.
+
+## Tabs: several agents in one worktree
+
+Without tabs, every agent in a worktree drives the same page. When a lead
+agent has several subagents or teammates checking pages at once, each
+one's `open` takes the page from the others: their refs stop working, a
+shot can be of another agent's page, and the live view jumps from one
+agent's page to the next. A tab gives each agent a page of its own:
+
+```sh
+berthd browser open /signup --tab signup-a   # opens the tab on first use
+berthd browser click @e3 --tab signup-a
+berthd browser tabs                          # every tab and what it shows
+berthd browser close --tab signup-a
+```
+
+`--tab` goes on any command, anywhere on the line, and `$BERTH_BROWSER_TAB`
+sets it for a shell. A name is letters, digits, dots, dashes and
+underscores, up to 48. Without one, a command uses the main tab, the page
+the browser has always had.
+
+Each tab has its own page, refs, console, failed requests and
+[size](#size) (a tab without a size of its own opens at the worktree's), and
+its own cookies and storage: logging in with `--as` in one tab doesn't log
+the others in or out. Every tab is a window of its own, so its page counts as
+visible and renders at full speed whether or not anyone watches it: its
+timers, animations and shots are real. Only a tab someone watches is cast to
+the app.
+
+A named tab closes after 5 idle minutes, and the browser closes when all of
+its tabs are idle. A worktree's browser has at most 2 tabs on a box under
+4 GB of memory, 4 up to 8 GB, 6 up to 16 GB and 8 above, counting the main
+tab once an agent uses it. At the cap, a tab nobody has used for a minute
+makes room. If every tab is in use, `open` is refused, so no agent loses a
+page it is on. Each tab costs about 100 MB with a small page.
+
+The `berth-browser` skill tells an agent working beside others to use a tab
+named after itself, and an agent that hands browser work to others to give
+each one its tab's name.
 
 ## What it costs an agent
 
@@ -177,9 +219,13 @@ its background services off, and downloads go to the worktree's
 so there is no debugging port another process (an agent included) could
 attach to.
 
-Signing in: seed a test user and log in with it, or add a dev credentials
-provider. A third-party sign-in page needs its origin allowed. Never give
-an agent your own accounts.
+Signing in: when the project's kit or config lists
+[dev users](/guides/kits#personas-logging-in-as-a-dev-user),
+`berthd browser open --as pro@acme.test --path /orders` logs the browser in
+as one in a step: the worktree's login script runs and its cookies go in for
+the worktree's address. Otherwise seed a test user and log in with it, or
+add a dev credentials provider. A third-party sign-in page needs its origin
+allowed. Never give an agent your own accounts.
 
 Page content is untrusted: the skill tells agents to treat what a page says
 as data, never as instructions.
@@ -275,6 +321,22 @@ page is fitted to the pane but never enlarged past its own size, so it
 stays sharp. When the agent's browser closes, the pane goes back to
 your view by itself. The phone does not show it.
 
+When agents use [tabs](#tabs-several-agents-in-one-worktree), a strip under
+the bar lists them, the main tab as **Main**, with a green dot on each tab an
+agent is using now. Hover over a tab to see its title, URL and size. The view
+opens on the tab used last and stays on the tab you pick: agents opening
+pages in other tabs never move it. The address, the size, and the Console and
+Network drawer are the watched tab's. If the tab you're watching closes, the
+view moves to the tab used last and says so.
+
+You don't have to open it yourself. When an agent opens its browser in the
+worktree you're looking at, its live view opens to the right of the agent's
+pane, so you see the chat and the page side by side, and the keyboard stays
+with the agent. If the tab already has a browser pane for that worktree,
+that pane switches to the agent's view instead. Nothing opens while you're
+looking at another worktree. To turn this off, use **Settings → General →
+Show an agent's browser beside it**.
+
 <Shot name="agent-browser" alt="A browser pane in Agent's view, live: a green bar with the agent's URL, Open in your view and Your view, over the agent's page, a cart" />
 
 ## Pointing at something: the element picker
@@ -306,14 +368,16 @@ none). It also keeps a browser to two renderer processes, whatever a page
 opens. At most
 1 runs on a box under 2 GB of memory, 2 up to 4 GB, 3 up to 8 GB and 4 above
 (`max_browsers` in `~/.berth/runs.json`); one more closes the least recently
-used. When the box runs low on memory, the [resource guard](/guides/resource-guard)
+used. Each [tab](#tabs-several-agents-in-one-worktree) adds a renderer of its
+own. When the box runs low on memory, the [resource guard](/guides/resource-guard)
 closes agents' browsers before it stops services or pauses agents.
 
 ## Events and gates
 
 `browser.opened`, `browser.navigated`, `browser.shot`, `browser.closed`
 (with a reason: idle, the guard, another worktree needing one, its worktree
-removed) and `browser.failed` (with a reason: `sandbox` or `error`) are
-[events](/reference/events). The gates `before:browser.open`
+removed), `browser.tab.opened`, `browser.tab.closed` and `browser.failed`
+(with a reason: `sandbox` or `error`) are [events](/reference/events);
+`browser.navigated` and `browser.shot` name the tab. The gates `before:browser.open`
 (with the URL), `before:browser.eval`, `before:browser.watch` and
 `before:browser.allow` decide who may open, script, watch or widen it.

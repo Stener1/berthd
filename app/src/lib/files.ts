@@ -129,16 +129,36 @@ interface State {
   // Long lines wrap in File tabs (else they scroll sideways). Unset, they
   // wrap only in a narrow pane, where a long line would hide past its edge.
   wrap?: boolean;
+  // A line to show once its File tab is up (a path named in a chat): the
+  // tab takes it, and it goes.
+  goto?: Goto;
+  // How a Markdown File tab shows its file: the rendered page, the source
+  // in the editor, or both side by side.
+  mdView: MdView;
 }
+
+export interface Goto {
+  key: string;
+  line: number;
+  end?: number;
+}
+
+export type MdView = "preview" | "source" | "split";
 
 const RECENT_KEY = "berth.files.recent";
 const WRAP_KEY = "berth.files.wrap";
+const MD_VIEW_KEY = "berth.files.mdView";
 
-export const useFiles = create<State>()(() => ({ docs: {}, pickerOpen: false, recent: load<Record<string, string[]>>(RECENT_KEY, {}), touched: {}, wrap: load<boolean | undefined>(WRAP_KEY, undefined) }));
+export const useFiles = create<State>()(() => ({ docs: {}, pickerOpen: false, recent: load<Record<string, string[]>>(RECENT_KEY, {}), touched: {}, wrap: load<boolean | undefined>(WRAP_KEY, undefined), mdView: load<MdView>(MD_VIEW_KEY, "preview") }));
 
 export function setWrap(wrap: boolean) {
   store(WRAP_KEY, wrap);
   useFiles.setState({ wrap });
+}
+
+export function setMdView(mdView: MdView) {
+  store(MD_VIEW_KEY, mdView);
+  useFiles.setState({ mdView });
 }
 
 // Mock mode starts with a few files "opened before" in checkout-fix.
@@ -311,8 +331,9 @@ function remember(ws: string, path: string) {
 
 // openFile opens a file of the worktree you are acting in (here): as a File
 // tab (↵), beside the focused pane (⌥↵), or in your editor (⌘↵). A file
-// already open in a tab is brought to the front instead.
-export function openFile(path: string, how: How = "tab", line?: number) {
+// already open in a tab is brought to the front instead. Given a line (and
+// the last of a range), the tab shows it.
+export function openFile(path: string, how: How = "tab", line?: number, end?: number) {
   const ws = here();
   const ref = refFor(ws);
   if (!ws || !ref) return;
@@ -321,6 +342,7 @@ export function openFile(path: string, how: How = "tab", line?: number) {
     void openEditor({ box: ref.box, path: ref.path, file: path, line });
     return;
   }
+  if (line) useFiles.setState({ goto: { key: docKey(ws, path), line, end } });
   if (how === "tab") {
     const s = useWorkspaces.getState();
     for (const key of new Set([ws, s.current ?? ws])) {

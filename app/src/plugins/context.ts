@@ -2,6 +2,9 @@ import type { BerthApi, BerthPluginContext } from "@berth/plugin";
 import { createContext } from "react";
 
 import { boxApi, type Client } from "@/lib/api";
+import { attachApi, localPaths } from "@/lib/attachments";
+import { makeHelperApi } from "@/lib/helper";
+import { makeLinearApi } from "@/lib/linear";
 import { notify } from "@/lib/notify";
 import * as orchestrate from "@/lib/orchestrate";
 import { makePromptsApi } from "@/lib/prompts-api";
@@ -10,6 +13,7 @@ import { useStore } from "@/lib/store";
 import { hostSuffix, portUrl } from "@/lib/browser-url";
 import { focusSession, openBrowser, openPanel, selectWorktree } from "@/lib/workspaces";
 import { useRegistry } from "@/plugins/registry";
+import { openSettings, type SettingsSectionId } from "@/views/settings/open";
 import { contribute, rememberScreenOwner } from "@/plugins/registry";
 
 // The context a plugin's components render under, so useBerth() finds it.
@@ -35,6 +39,8 @@ export function makeApi(client: Client): BerthApi {
       const ref = svc && { box, location: svc.location, worktree: svc.worktree, path: svc.path, main: svc.main };
       return (ref && portUrl(port, { ref, services, urlPort })) ?? `http://${port}.${box}.localhost${hostSuffix(urlPort)}/`;
     },
+    attach: attachApi(client, (box) => useStore.getState().status?.boxes.find((b) => b.name === box)?.address),
+    localPaths,
   };
 }
 
@@ -82,6 +88,7 @@ export function makeContext(id: string, client: Client): BerthPluginContext {
     on: (type, handler) => contribute("handlers", tag({ type, handler })),
     notify: (title, body) => notify(title, body),
     openScreen: (screen) => useStore.getState().setView({ kind: "plugin", screen }),
+    openSettings: (section) => openSettings(section as SettingsSectionId | undefined),
     openTerminal: (box, session) => void focusSession(box, session),
     openUrl: (url) => void openUrl(url),
     openWorktree: (w) => selectWorktree(w),
@@ -92,6 +99,8 @@ export function makeContext(id: string, client: Client): BerthPluginContext {
     },
     storage: pluginStorage(id),
     prompts: makePromptsApi(),
+    linear: makeLinearApi(client),
+    helper: makeHelperApi(client, id),
     orchestrate: {
       send: orchestrate.send,
       wait: orchestrate.wait,

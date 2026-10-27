@@ -1,6 +1,7 @@
 import type { Session } from "@/lib/api";
 import { agentPresets, worktreeRef } from "@/lib/actions";
 import { startLoop } from "@/lib/loops";
+import { structuredLaunch } from "@/lib/structured";
 import { boxHasRuns, refreshRuns, runs as runsApi } from "@/lib/runs";
 import * as core from "@/lib/orchestrate-core";
 import { scheduleRefresh, useStore } from "@/lib/store";
@@ -103,7 +104,10 @@ export async function handoff(o: HandoffOptions): Promise<Session> {
     if (!location) throw err;
   }
   const agent = o.worktree ? { id: o.agent, command: "" } : preset(o.box, location, o.agent);
-  const s = await core.handoff(call, { box: o.box, fromSession: o.from, location, agent, prompt: o.prompt, worktree: o.worktree });
+  // The next agent runs as Labs runs a new one: structured, or in its terminal.
+  const known = agentPresets(o.box, location.split("/")[0]).find((x) => x.id === o.agent);
+  const launch = structuredLaunch(o.box, o.agent, known);
+  const s = await core.handoff(call, { box: o.box, fromSession: o.from, location, agent, prompt: o.prompt, worktree: o.worktree, launch });
   o.onStarted?.(s);
   scheduleRefresh(o.box, o.worktree ? ["locations", "sessions"] : ["sessions"]);
   return s;

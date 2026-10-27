@@ -24,10 +24,12 @@ func (a *Agent) api(stop context.CancelFunc) http.Handler {
 	mux := http.NewServeMux()
 	a.kitRoutes(mux)
 	a.teamRoutes(mux)
+	a.prReviewRoutes(mux)
 	a.appStateRoutes(mux)
 	a.doctorRoutes(mux)
 	a.editorRoutes(mux)
 	a.imageGenRoutes(mux)
+	a.linearRoutes(mux)
 	a.queueRoutes(mux)
 	a.boxRouteAPI(mux)
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,53 @@
+{
+  "id": "leadline",
+  "name": "Leadline",
+  "version": "0.1.1",
+  "description": "What your code did in development, as tabs on a worktree: database queries with their N+1s, request traces, logs and endpoints. Installs berth-leadline on the boxes you turn it on for.",
+  "main": "dist/index.js",
+  "defaultEnabled": false,
+  "author": "Shipyard",
+  "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/leadline",
+  "box": {
+    "helper": {
+      "name": "berth-leadline",
+      "version": "0.1.1",
+      "args": [
+        "serve",
+        "--dir",
+        "{dir}",
+        "--addr",
+        "127.0.0.1:0"
+      ],
+      "ready": "helper.json",
+      "attach": "/api/attach",
+      "attach_env": [
+        "DATABASE_URL",
+        "POSTGRES_URL",
+        "OTEL_*"
+      ],
+      "detach": "/api/detach",
+      "assets": {
+        "linux-amd64": {
+          "url": "https://github.com/cosscom/shipyard/releases/download/leadline-helper-v0.1.1/berth-leadline-linux-amd64",
+          "sha256": "223620d7ee0f1a5463507097fc019506b3047108c3409aa216fbd197b49f5d26",
+          "size": 15306912
+        },
+        "linux-arm64": {
+          "url": "https://github.com/cosscom/shipyard/releases/download/leadline-helper-v0.1.1/berth-leadline-linux-arm64",
+          "sha256": "d0d40cd03e05d2849fca5088860ce6950e4448671207b958d2f3071b86292bf4",
+          "size": 14483616
+        },
+        "darwin-arm64": {
+          "url": "https://github.com/cosscom/shipyard/releases/download/leadline-helper-v0.1.1/berth-leadline-darwin-arm64",
+          "sha256": "fdca11e4d5958e680c202f9c9ef5e4eb28d0c7ad21c7ccc5a5b927c4db1e0fb0",
+          "size": 14654178
+        },
+        "darwin-amd64": {
+          "url": "https://github.com/cosscom/shipyard/releases/download/leadline-helper-v0.1.1/berth-leadline-darwin-amd64",
+          "sha256": "489125f0172ae3b969972a580e8a5b9238679f0f4513637613723b180d1c114e",
+          "size": 15418000
+        }
+      }
+    }
+  }
+}

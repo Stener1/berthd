@@ -623,8 +623,14 @@ func (b *Box) createSession(ctx context.Context, name, location, dir, command st
 // createAgentSession starts a session for the agent preset agent ("" for
 // a plain command).
 func (b *Box) createAgentSession(ctx context.Context, name, location, dir, command, agent string) (Session, error) {
+	return b.createAgentSessionWith(ctx, name, location, dir, command, agent, nil, nil)
+}
+
+// createAgentSessionWith is createAgentSession with more environment and
+// tmux options (a structured agent's: claudedriver.go).
+func (b *Box) createAgentSessionWith(ctx context.Context, name, location, dir, command, agent string, extraEnv []string, labels map[string]string) (Session, error) {
 	env, wrap := b.sessionEnv(ctx, dir)
-	return b.Sessions.create(ctx, name, location, dir, command, agent, env, wrap)
+	return b.Sessions.create(ctx, name, location, dir, command, agent, append(env, extraEnv...), wrap, labels)
 }
 
 func (b *Box) sessionEnv(ctx context.Context, dir string) (env, wrap []string) {

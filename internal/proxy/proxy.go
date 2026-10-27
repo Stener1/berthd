@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cosscom/shipyard/internal/copybuf"
 )
 
 // DialFunc opens a stream to a port on a box.
@@ -39,6 +41,10 @@ type Proxy struct {
 	// art-<id>.<box>.localhost (artifact.go). Optional: without it those
 	// hosts answer 404.
 	Artifact ArtifactFunc
+	// Login runs a worktree's login script for the login route
+	// (login.go). Optional: without it the route answers 404, and it is
+	// never forwarded either way.
+	Login LoginFunc
 	// LibFetch fetches a pinned library for artifact pages; nil uses the
 	// network (tests set it).
 	LibFetch func(ctx context.Context, url string) ([]byte, error)
@@ -61,6 +67,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// (requestlog.go).
 	lw := p.logRequest(w, r)
 	defer lw.finish()
+	// The login route is the proxy's own on every host: answered here,
+	// never passed to a dev server or a router (login.go).
+	if isLoginRoute(r) {
+		p.serveLogin(lw, r)
+		return
+	}
 	p.serve(lw, r)
 }
 
@@ -97,7 +109,8 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	// (devtools.go).
 	devtools := preview == "" && devtoolsPage(r)
 	rp := &httputil.ReverseProxy{
-		Transport: p.transport(target.Box),
+		Transport:  p.transport(target.Box),
+		BufferPool: copybuf.Pool{},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetXForwarded()
 			pr.Out.URL.Scheme = "http"
@@ -155,7 +168,8 @@ func (p *Proxy) passThrough(w http.ResponseWriter, r *http.Request, box string, 
 		return
 	}
 	rp := &httputil.ReverseProxy{
-		Transport: p.transport(box),
+		Transport:  p.transport(box),
+		BufferPool: copybuf.Pool{},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetXForwarded()
 			pr.Out.URL.Scheme = "http"

@@ -32,6 +32,13 @@ type Kit struct {
 	// the box user's login shell finds them (logintools.go).
 	Requires []KitRequirement `json:"requires,omitempty"`
 	Config   RepoConfig       `json:"config"`
+	// Watch are the repository's files that change how the kit sets a
+	// worktree up (globs, ** for any folders: "prisma/**",
+	// "scripts/setup/*"), so a pull request changing them says so on its
+	// review sheet.
+	Watch []string `json:"watch,omitempty"`
+	// Login may sit at the top of kit.json too; it is config.login.
+	Login *LoginConfig `json:"login,omitempty"`
 	// Files are small files carried in kit.json itself, path → content, so
 	// a kit can be one file (a gist).
 	Files map[string]string `json:"files,omitempty"`
@@ -56,7 +63,19 @@ type InstalledKit struct {
 	Hash        string     `json:"hash,omitempty"`
 	Dir         string     `json:"dir"`
 	Config      RepoConfig `json:"config"`
+	Watch       []string   `json:"watch,omitempty"`
 	InstalledAt time.Time  `json:"installed_at"`
+	// Team says the kit is a team setup's, for one of its projects: it
+	// follows that setup's newer commits (team-kit.go).
+	Team *KitTeam `json:"team,omitempty"`
+}
+
+// KitTeam is the team setup a kit comes from: the org, the commit of
+// <org>/.berth it was read at, and the project in team.json it is for.
+type KitTeam struct {
+	Org     string `json:"org"`
+	Commit  string `json:"commit"`
+	Project string `json:"project"`
 }
 
 var kitID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
@@ -68,6 +87,7 @@ type KitInstall struct {
 	Files  map[string]string `json:"files,omitempty"`
 	Source string            `json:"source,omitempty"`
 	Hash   string            `json:"hash,omitempty"`
+	Team   *KitTeam          `json:"team,omitempty"`
 }
 
 // KitResult reports an install.
@@ -94,6 +114,12 @@ func (b *Box) InstallKit(ctx context.Context, location string, in KitInstall) (K
 	}
 	if strings.TrimSpace(k.Name) == "" {
 		k.Name = k.ID
+	}
+	if k.Login != nil {
+		if k.Config.Login != nil {
+			return KitResult{}, badRequest("kit %s: login is set twice, at the top and in config; keep one", k.ID)
+		}
+		k.Config.Login, k.Login = k.Login, nil
 	}
 	if err := k.Config.validate(); err != nil {
 		return KitResult{}, badRequest("kit %s: %v", k.ID, err)
@@ -146,7 +172,7 @@ func (b *Box) InstallKit(ctx context.Context, location string, in KitInstall) (K
 		return KitResult{}, err
 	}
 
-	installed := InstalledKit{ID: k.ID, Name: k.Name, Version: k.Version, Source: in.Source, Hash: in.Hash, Dir: dir, Config: k.Config, InstalledAt: time.Now().UTC()}
+	installed := InstalledKit{ID: k.ID, Name: k.Name, Version: k.Version, Source: in.Source, Hash: in.Hash, Dir: dir, Config: k.Config, Watch: k.Watch, InstalledAt: time.Now().UTC(), Team: in.Team}
 	if err := b.Locations.setKit(location, &installed); err != nil {
 		return KitResult{}, err
 	}

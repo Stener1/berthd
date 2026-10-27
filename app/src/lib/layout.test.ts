@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { adopt, bounds, leaf, leaves, mixed, moveBetween, movePane, type PaneNode, paneWorktree, place, remove, sessionsShown, sideAt, split, swap, worktreesOf } from "./layout.ts";
+import { adopt, bounds, leaf, leaves, mixed, moveBetween, movePane, type PaneNode, paneWorktree, place, placeAgentBrowser, remove, sessionsShown, sideAt, split, swap, worktreesOf } from "./layout.ts";
 
 const term = (s: string) => leaf({ kind: "terminal", box: "b", session: s });
 const names = (n: PaneNode) => leaves(n).map((l) => (l.content.kind === "terminal" ? l.content.session : "?"));
@@ -161,4 +161,30 @@ test("moveBetween takes one pane out and leaves the rest of its tab", () => {
   assert.equal(got[A].active, "t2");
   // Into its own tab, or onto itself, makes no sense.
   assert.equal(moveBetween(spaces, { key: A, tab: "t1", pane: b.id }, { key: A, tab: "t1", pane: a.id, side: "left" }), undefined);
+});
+
+test("an agent's browser opens beside the worktree's agent, the focused one first", () => {
+  const agent = (l: ReturnType<typeof leaf>) => l.content.kind === "terminal" && l.content.session.startsWith("claude");
+  const shell = term("shell");
+  const one = term("claude-1");
+  const two = term("claude-2");
+  const tab = split(split(shell, shell.id, "row", one), one.id, "row", two);
+  assert.deepEqual(placeAgentBrowser(tab, shell.id, "A", "A", agent), { kind: "split", beside: one.id });
+  assert.deepEqual(placeAgentBrowser(tab, two.id, "A", "A", agent), { kind: "split", beside: two.id });
+  // No agent of that worktree in the tab: nothing opens.
+  assert.equal(placeAgentBrowser(shell, shell.id, "A", "A", agent), undefined);
+  assert.equal(placeAgentBrowser(tab, one.id, "A", "B", agent), undefined);
+});
+
+test("an agent's browser takes over the worktree's browser pane rather than opening another", () => {
+  const agent = (l: ReturnType<typeof leaf>) => l.content.kind === "terminal";
+  const a = term("claude");
+  const page = leaf({ kind: "browser", url: "http://localhost:3000/" });
+  const tab = split(a, a.id, "row", page);
+  assert.deepEqual(placeAgentBrowser(tab, a.id, "A", "A", agent), { kind: "watch", pane: page.id });
+  // Another worktree's page in the tab is left alone; its own agent is
+  // a guest here, and the view opens beside it.
+  const guest = leaf({ kind: "terminal", box: "b", session: "claude-b" }, "B");
+  const mixedTab = split(tab, page.id, "row", guest);
+  assert.deepEqual(placeAgentBrowser(mixedTab, a.id, "A", "B", agent), { kind: "split", beside: guest.id });
 });

@@ -259,6 +259,7 @@ type Flows struct {
 	recent    map[string][]time.Time // flow scope/id → start times this hour
 	lastFired map[string]time.Time   // scheduled flow → minute it last fired
 	lastPoll  map[string]time.Time   // GitHub flow → when it last looked
+	cursor    map[string]int         // GitHub flow → the target its next look starts at
 	gh        map[string]*ghState    // GitHub flow + PR → what it has seen
 }
 

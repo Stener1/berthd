@@ -6,6 +6,8 @@ description: Newer ideas in the app, on by default; Settings → Labs turns them
 Labs holds ideas that are still being tried: the harbour home, agents as
 conversations, zen, and worktrees side by side. They are on by default since v0.3.1, and may change
 or go away. Settings → Labs turns them off, and that choice is kept.
+[Agents in chat](/guides/structured-agents) aren't one of them: agents
+run in chat wherever the box can, whether Labs is on or off.
 
 ## Harbour home
 
@@ -17,7 +19,8 @@ whatever you put there.
 An empty worktree has a composer that starts an agent right there. Labs
 adds the harbour above them: a painting of the harbour dissolving into the
 page, in a halftone grain, at night in a dark theme, smaller in an empty
-worktree.
+worktree. [Settings → Appearance → Header picture](/guides/themes#header-picture)
+swaps it for another painting or a picture of your own, or turns it off.
 
 The harbour is **Home**, the first place in the sidebar. Without Labs that
 place is the Agent Dashboard; with Labs the dashboard moves under **More**
@@ -109,7 +112,9 @@ Claude finishes") until the box types it in, with **Send now** (it asks
 first if the agent is waiting on you) and **Cancel**. Shipyard reads Claude Code's and Codex's transcripts on the box
 (`GET /v1/sessions/{name}/transcript`); for other agents, or on an older
 box, the pane says so and offers the terminal. Settings → Labs chooses
-which view agent panes open in.
+which view the panes of agents in their terminals open in; an
+[agent in chat](/guides/structured-agents) always opens as its
+conversation, Labs or not.
 
 ### Chat controls
 

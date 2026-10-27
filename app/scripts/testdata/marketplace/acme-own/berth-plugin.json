@@ -1,0 +1,22 @@
+{
+  "name": "Acme own",
+  "description": "A plugin for the listing build's tests: its helper is built somewhere else, and its builds are its own to name.",
+  "version": "2.0.0",
+  "author": "Acme",
+  "marketplace": true,
+  "box": {
+    "helper": {
+      "name": "acme-helper",
+      "version": "2.0.0",
+      "args": ["--data", "{dir}"],
+      "ready": "ready.json",
+      "assets": {
+        "linux-amd64": {
+          "url": "https://downloads.acme.example/acme-helper-2.0.0-linux-amd64",
+          "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "size": 1048576
+        }
+      }
+    }
+  }
+}

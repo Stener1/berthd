@@ -210,7 +210,9 @@ export function CommandItem({
 }: React.ComponentProps<typeof AutocompleteItem>): React.ReactElement {
   return (
     <AutocompleteItem
-      className={cn("py-1.5", className)}
+      // In dark themes the accent (4% white) barely shows on the panel: the
+      // highlighted row gets a little more, so it reads as selected.
+      className={cn("py-1.5 dark:data-highlighted:bg-foreground/9", className)}
       data-slot="command-item"
       {...props}
     />

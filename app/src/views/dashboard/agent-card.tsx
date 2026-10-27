@@ -1,4 +1,4 @@
-import { SquareIcon } from "lucide-react";
+import { HourglassIcon, SquareIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
@@ -9,13 +9,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toastManager } from "@/components/ui/toast";
 import type { SessionEntry } from "@/hooks/use-agent-counts";
 import { boxApi } from "@/lib/api";
-import { agentOf } from "@/lib/derive";
+import { asksIn, chatCard, shownPrompt } from "@/lib/chat-card";
+import { agentOf, atQuestion, ON_ITS_WORK } from "@/lib/derive";
 import { errorMessage } from "@/lib/format";
 import { useStore } from "@/lib/store";
+import { isStructured } from "@/lib/structured";
 import { cn } from "@/lib/utils";
 import { focusSession } from "@/lib/workspaces";
 import { describeAgent, startedAt } from "@/views/dashboard/names";
 import { confirmStop, StopMenuItems } from "@/views/dashboard/stop";
+import { useChatTail, useOpeningPrompt } from "@/views/dashboard/use-chat-tail";
 import { type Choice, useScreenTail } from "@/views/dashboard/use-screen-tail";
 
 // One clock for every card, so a board of them re-renders once a second at
@@ -59,8 +62,17 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
   // A titled agent leads with its work, its place below; otherwise its place.
   const title = work ?? place;
   const now = useNow();
+  // In chat, its pane shows only the host that runs it: the card reads its
+  // ask and conversation instead of that screen (lib/chat-card).
+  const chat = isStructured(session.driver);
+  const waiting = atQuestion(session, state);
   // A ready agent has said nothing yet: its screen is only a banner.
-  const { tail, choices } = useScreenTail(box, session, 3, state === "running", state !== "ready");
+  const screen = useScreenTail(box, session, 3, state === "running", state !== "ready" && !chat);
+  // What it asks needs nothing of its conversation.
+  const items = useChatTail(box, session, state === "running", state !== "ready" && chat && !asksIn(session.ask, waiting));
+  const opening = useOpeningPrompt(box, session.name, session.state_since, chat);
+  const { tail, choices } = chat ? (chatCard(session.ask, waiting, items) ?? { choices: [] }) : screen;
+  const quote = shownPrompt(opening ?? prompt, work);
   const since = session.state_since ?? session.created;
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -69,9 +81,9 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
   }, []);
 
   const open = () => void focusSession(box, session.name);
-  const asking = state === "waiting" && choices.length > 0;
+  const asking = waiting && choices.length > 0;
   // The question, without the options the chips below already show.
-  const lines = asking ? (tail ?? []).filter((l) => !/^\s*(?:[❯›>]\s*)?\d[.)]\s/.test(l)) : tail;
+  const lines = asking && !chat ? (tail ?? []).filter((l) => !/^\s*(?:[❯›>]\s*)?\d[.)]\s/.test(l)) : tail;
 
   return (
     <article
@@ -93,32 +105,50 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
           {selecting && <Checkbox checked={!!selected} tabIndex={-1} aria-hidden className="pointer-events-none" />}
           <AgentIcon agent={agentOf(session)} />
           <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-            <span className="min-w-0 truncate font-medium text-[13px]">{title}</span>
+            <span className="min-w-0 truncate text-row">{title}</span>
             {/* Several agents in one worktree: which one this is. */}
             {!work && crowded && (
               <Tip label={`Session ${session.name}`}>
-                <span className="shrink-0 text-[11px] text-muted-foreground">{name}</span>
+                <span className="shrink-0 text-meta text-muted-foreground">{name}</span>
               </Tip>
             )}
           </span>
           <Tip label={`Since ${new Date(since).toLocaleString()}`}>
-            <span className={cn("shrink-0 font-mono text-[11px] tabular-nums", state === "waiting" ? "text-warning-foreground" : "text-muted-foreground")}>{duration(now - new Date(since).getTime())}</span>
+            <span className={cn("shrink-0 font-mono text-meta tabular-nums", state === "waiting" ? "text-warning-foreground" : "text-muted-foreground")}>{duration(now - new Date(since).getTime())}</span>
           </Tip>
         </div>
-        <div className="mt-0.5 truncate pl-5.5 text-[11px] text-muted-foreground">
+        <div className="mt-0.5 truncate pl-5.5 text-meta text-muted-foreground">
           {work && `${agent} · ${place} · `}
           {box}
           {where && !(work && where.worktree.main) && ` · ${where.location.name}`}
           {crowded && ` · started ${startedAt(session.created)}`}
           {where?.worktree.branch && where.worktree.branch !== place && <span className="opacity-70"> · {where.worktree.branch}</span>}
         </div>
-        {prompt && (!work || !prompt.startsWith(work.replace(/…$/, ""))) && (
-          <div className="mt-1 truncate pl-5.5 text-[11px] text-foreground/70 italic" title={prompt}>
-            “{prompt}”
+        {/* Its turn ended, but turn check read the work as still going on. */}
+        {state === "running" && session.unfinished && (
+          <Tip label={ON_ITS_WORK}>
+            <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-meta text-muted-foreground">
+              <HourglassIcon className="size-3" aria-hidden />
+              Waiting on its work
+            </div>
+          </Tip>
+        )}
+        {/* Turn check read the work as parked: nothing runs, nothing needs you. */}
+        {state === "ready" && session.parked && (
+          <Tip label="Its work is paused until someone else replies or a later time. Nothing runs and nothing needs you; it picks up by itself.">
+            <div className="mt-1 flex w-fit items-center gap-1 pl-5.5 text-meta text-muted-foreground">
+              <HourglassIcon className="size-3" aria-hidden />
+              Parked: waiting on a reply or a later time
+            </div>
+          </Tip>
+        )}
+        {quote && (
+          <div className="mt-1 truncate pl-5.5 text-meta text-foreground/70 italic" title={quote}>
+            “{quote}”
           </div>
         )}
         {lines && lines.length > 0 && state !== "ready" && (
-          <div className={cn("mt-2 space-y-px rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] leading-snug", state === "waiting" ? "text-foreground/85" : "text-muted-foreground")}>
+          <div className={cn("mt-2 space-y-px rounded-md bg-muted/50 px-2 py-1.5 font-mono text-tag", state === "waiting" ? "text-foreground/85" : "text-muted-foreground")}>
             {lines.map((l, i) => (
               <div key={i} className="truncate whitespace-pre" title={l}>
                 {l}
@@ -145,10 +175,10 @@ export function AgentCard({ entry, selecting, selected, onSelect }: { entry: Ses
           </span>
         )}
         <span className="ml-auto flex items-center gap-0.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <Button size="xs" variant="ghost" className="h-6 text-[11px]" onClick={open}>
+          <Button size="xs" variant="ghost" className="h-6 text-tag" onClick={open}>
             Open
           </Button>
-          <Button size="xs" variant="ghost" className="h-6 text-[11px]" onClick={() => openOrchestrate("send", box, session.name)}>
+          <Button size="xs" variant="ghost" className="h-6 text-tag" onClick={() => openOrchestrate("send", box, session.name)}>
             {state === "ready" ? "Prompt…" : "Reply…"}
           </Button>
           <SessionActions box={box} session={session.name}>
@@ -187,7 +217,7 @@ function Answers({ box, session, choices }: { box: string; session: string; choi
             disabled={!!sent}
             onClick={() => void answer(c)}
             className={cn(
-              "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border bg-background px-2 text-[11px] transition-colors hover:border-ring/50 disabled:opacity-50",
+              "inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border bg-background px-2 text-tag transition-colors hover:border-ring/50 disabled:opacity-50",
               sent === c.key && "border-success/50 text-success",
             )}
           >

@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 
 import { openBrowser } from "./a11y-scenes";
-import { type App, agentWorktree, expect, mockOnly, test } from "./fixtures";
+import { type App, agentWorktree, expect, live, mockOnly, test } from "./fixtures";
 
 // The core flows with the keyboard alone: Tab and Shift-Tab, arrows, Enter,
 // Esc and the documented shortcuts (lib/shortcuts.json). After every step
@@ -259,12 +259,13 @@ test("the sidebar's edge resizes from the keyboard, and shows it has it", async 
   await app.open();
   const page = app.page;
   const handle = page.getByRole("separator", { name: "Resize the sidebar" });
-  // Reached with the keyboard: the sidebar's first stop, before Home.
+  // Reached with the keyboard: the sidebar's first stop, before its top
+  // row's buttons, New task, Search and Home.
   await page.getByTestId("nav-home").focus();
-  await pressTo(page, handle, "Shift+Tab", 5);
+  await pressTo(page, handle, "Shift+Tab", 8);
   expect(await shows(page)).toBe(true);
   await page.keyboard.press("ArrowRight");
-  await expect(handle).toHaveAttribute("aria-valuenow", "256");
+  await expect(handle).toHaveAttribute("aria-valuenow", "320");
 });
 
 test("⌘K reaches Settings and a theme is chosen with the keyboard", async ({ app }) => {
@@ -304,7 +305,8 @@ test("⌘K lists what the menus and shortcuts do", async ({ app }) => {
     ["sidebar", "Show or hide the sidebar"],
     ["review", "Review"],
     ["preview", "New Preview tab"],
-    ["rename", "Rename this worktree…"],
+    // Not for a main checkout, which a real fleet's first agent may be in.
+    ...(live ? [] : [["rename", "Rename this worktree…"]]),
     ["settings: terminal", "Settings: Terminal"],
     ["do not disturb", "Turn on Do not disturb"],
   ]) {

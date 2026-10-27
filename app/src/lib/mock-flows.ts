@@ -1,6 +1,6 @@
 import { mockTerminalService, mockWorktreePath } from "@/lib/mock-services";
 import type { BerthEvent } from "@/lib/api";
-import type { Flow, FlowRun, LocationConfig, RepoConfig, ScopedFlow, ServiceStatus, Step, StepRun } from "@/lib/flows";
+import type { Flow, FlowRun, LocationConfig, RepoConfig, ScopedFlow, ServiceStatus, Step, StepKind, StepRun } from "@/lib/flows";
 import type { GuardStatus } from "@/components/guard-dialog";
 import { triggerType } from "@/lib/flows";
 import { mergeConfig } from "@/lib/kits";
@@ -174,7 +174,7 @@ function validate(flows: Flow[]): string | undefined {
     if (f.trigger.schedule && f.trigger.schedule.trim().split(/\s+/).length !== 5 && !f.trigger.schedule.startsWith("@")) return `flow ${f.id}: "${f.trigger.schedule}" needs five fields (minute hour day month weekday) or a shortcut like @daily`;
     if (!f.steps.length) return `flow ${f.id} has no steps`;
     for (const [i, s] of f.steps.entries()) {
-      const need = { run: s.command, prompt: s.text, start_agent: s.agent, notify: s.title, webhook: s.url, wait: "x" }[s.kind];
+      const need = { run: s.command, prompt: s.text, start_agent: s.agent, notify: s.title, webhook: s.url, wait: "x" }[s.kind as StepKind];
       if (!need?.trim()) return `flow ${f.id}, step ${i + 1} (${s.kind}) is missing what to do`;
     }
   }

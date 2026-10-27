@@ -57,8 +57,26 @@ const shopKit: KitInfo = {
           { kind: "prompt", when: "failure", text: "Lint failed:\n\n{{prev.output}}\n\nFix it." },
         ],
       },
+      // A run step (pr) the flow editor shows but does not edit.
+      {
+        id: "pr-when-green",
+        name: "Open a PR when the checks pass",
+        enabled: true,
+        trigger: { event: "agent.finished", where: { agent: "claude" } },
+        steps: [{ kind: "run", command: "pnpm test" }, { kind: "pr" }],
+      },
     ],
     hooks: [{ on: "before:worktree.create", run: "test \"$BERTH_BRANCH\" != main || { echo 'Make a branch, not main'; exit 1; }" }],
+
+    // Seeded users a worktree's pages can be opened logged in as.
+    login: {
+      script: "scripts/login.sh",
+      users: [
+        { email: "pro@acme.test", label: "Pro user" },
+        { email: "admin@acme.test", label: "Team admin" },
+        { email: "free@acme.test" },
+      ],
+    },
   },
   origin: "user",
   source: { src: "https://github.com/acme/kits/tree/main/shop-dev", commit: "4f2a9c1e8b7d3a6f5e4c2b1a0d9e8f7c6b5a4d3e", fetched: daysAgo(2) },

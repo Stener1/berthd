@@ -778,3 +778,171 @@ func TestAttemptsPickNoneArchivesAll(t *testing.T) {
 		}
 	}
 }
+
+// stepAt is the step at path in a run's step tree.
+func stepAt(steps []StepRun, path string) *StepRun {
+	for i := range steps {
+		if steps[i].Path == path {
+			return &steps[i]
+		}
+		if s := stepAt(steps[i].Children, path); s != nil {
+			return s
+		}
+	}
+	return nil
+}
+
+// prAttempts starts an attempts run of two whose pr step does what pr
+// says, and picks attempt 2 at its gate.
+func prAttempts(t *testing.T, dir string, pr func(n int) Result) (*Engine, func(), *fakeHost, string) {
+	t.Helper()
+	h := attemptsHost(`{"winner": 2, "ranking": [2, 1]}`)
+	inner := h.leaf
+	var mu sync.Mutex
+	n := 0
+	h.leaf = func(ctx context.Context, x *StepCtx) Result {
+		if x.Step.Kind == "pr" {
+			mu.Lock()
+			n++
+			k := n
+			mu.Unlock()
+			return pr(k)
+		}
+		return inner(ctx, x)
+	}
+	e, stop := newEngine(t, dir, h)
+	s, _, err := e.Start(Request{Template: "attempts", Params: map[string]any{"location": "shop", "name": "refunds", "prompt": "p",
+		"attempts": []any{"claude", "codex"}, "then": map[string]any{"pr": map[string]any{"draft": true}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, e, s.ID, WaitingGate)
+	one := 1
+	if err := e.Decide(s.ID, "", Decision{Approve: true, Pick: &one}); err != nil {
+		t.Fatal(err)
+	}
+	return e, stop, h, s.ID
+}
+
+const prPath = "3.t.0" // the attempts template's pr → open
+
+// waitGate waits for the run to wait at the gate at path.
+func waitGate(t *testing.T, e *Engine, id, path string) Run {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var r Run
+	for time.Now().Before(deadline) {
+		r, _ = e.Get(id)
+		if r.Status == WaitingGate && r.Gate != nil && r.Gate.Path == path {
+			return r
+		}
+		if Terminal(r.Status) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("run %s is %s (%s), gate %+v; want the gate at %s", id, r.Status, r.Error, r.Gate, path)
+	return r
+}
+
+// On a host gh can't open pull requests on (Gitea), the pr step is a skip
+// with its reason: the run still archives the other attempts and succeeds,
+// with the pick kept.
+func TestAttemptsPRSkippedOnAnotherForgeStillCleansUp(t *testing.T) {
+	why := "This repository is on gitea.acme.test, not GitHub, so Shipyard didn't open a pull request. The branch refunds-a2 is pushed to origin."
+	e, stop, h, id := prAttempts(t, t.TempDir(), func(int) Result {
+		return Result{Status: Skipped, Out: why, Set: map[string]string{"pr.skipped": "1"}}
+	})
+	defer stop()
+	r := waitStatus(t, e, id, Succeeded, Failed)
+	if r.Status != Succeeded || r.Error != "" {
+		t.Fatalf("%s: %s", r.Status, r.Error)
+	}
+	if h.count("pr:") != 1 || h.count("cleanup:") != 1 {
+		t.Fatalf("pr/cleanup: %v", h.calls)
+	}
+	if !r.Candidates[1].Picked || r.Candidates[0].Picked {
+		t.Fatalf("picked %+v", r.Candidates)
+	}
+	st := stepAt(r.Steps, prPath)
+	if st == nil || st.Status != Skipped || st.Output != why {
+		t.Fatalf("pr step %+v", st)
+	}
+	t.Logf("pr step: %s: %s", st.Status, st.Output)
+}
+
+// A pull request that doesn't open on GitHub is a publishing failure, not
+// the agents' work failing: the run waits with the pick kept and nothing
+// archived, survives a restart without trying again by itself, and
+// "Retry publishing" tries again and goes on.
+func TestAttemptsPRFailureWaitsThenRetries(t *testing.T) {
+	dir := t.TempDir()
+	ghSays := "none of the git remotes configured for this repository point to a known GitHub host."
+	pr := func(n int) Result {
+		if n == 1 {
+			return Result{Status: Failed, Code: 1, Out: ghSays, Err: "gh pr create failed"}
+		}
+		return Result{Status: Succeeded, Out: "https://github.com/acme/shop/pull/7", Set: map[string]string{"pr.url": "https://github.com/acme/shop/pull/7"}}
+	}
+	e, stop, h, id := prAttempts(t, dir, pr)
+	r := waitGate(t, e, id, prPath+".publish1")
+	if r.Status != WaitingGate || r.Gate.Path != prPath+".publish1" || r.Gate.ApproveLabel != "Retry publishing" || r.Gate.RejectLabel != "Finish without a pull request" {
+		t.Fatalf("%s, gate %+v", r.Status, r.Gate)
+	}
+	if !strings.Contains(r.Gate.Text, "only publishing failed: gh pr create failed") || !strings.Contains(r.Gate.Text, ghSays) {
+		t.Fatalf("gate text %q", r.Gate.Text)
+	}
+	if !r.Candidates[1].Picked || h.count("cleanup:") != 0 {
+		t.Fatalf("pick lost or archived early: %+v %v", r.Candidates, h.calls)
+	}
+	if st := stepAt(r.Steps, prPath); st == nil || st.Status != Failed || st.Error != "gh pr create failed" {
+		t.Fatalf("pr step %+v", st)
+	}
+	t.Logf("waiting at %q: %s / %s", r.Gate.Title, r.Gate.ApproveLabel, r.Gate.RejectLabel)
+
+	// berthd restarts: the same question, and gh is not run again.
+	stop()
+	e, stop = newEngine(t, dir, h)
+	defer stop()
+	r = waitStatus(t, e, id, WaitingGate)
+	if r.Gate.Path != prPath+".publish1" || h.count("pr:") != 1 {
+		t.Fatalf("after a restart: gate %+v, calls %v", r.Gate, h.calls)
+	}
+	if err := e.Decide(id, "", Decision{Approve: true, By: "cli"}); err != nil {
+		t.Fatal(err)
+	}
+	r = waitStatus(t, e, id, Succeeded, Failed)
+	if r.Status != Succeeded || h.count("pr:") != 2 || h.count("cleanup:") != 1 {
+		t.Fatalf("%s %s: %v", r.Status, r.Error, h.calls)
+	}
+	st := stepAt(r.Steps, prPath)
+	if st == nil || st.Status != Succeeded || st.Attempt != 2 || st.Output != "https://github.com/acme/shop/pull/7" {
+		t.Fatalf("pr step %+v", st)
+	}
+	t.Logf("retried: pr step %s (attempt %d): %s", st.Status, st.Attempt, st.Output)
+}
+
+// "Finish without a pull request" ends the run as a success: the pr step
+// is a skip that says so, and the other attempts are archived.
+func TestAttemptsPRFailureFinishesWithoutOne(t *testing.T) {
+	e, stop, h, id := prAttempts(t, t.TempDir(), func(int) Result {
+		return Result{Status: Failed, Code: 1, Out: "HTTP 401: Bad credentials", Err: "gh pr create failed"}
+	})
+	defer stop()
+	waitGate(t, e, id, prPath+".publish1")
+	if err := e.Decide(id, "", Decision{Approve: false, By: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	r := waitStatus(t, e, id, Succeeded, Failed)
+	if r.Status != Succeeded || r.Error != "" {
+		t.Fatalf("%s: %s", r.Status, r.Error)
+	}
+	if h.count("pr:") != 1 || h.count("cleanup:") != 1 || !r.Candidates[1].Picked {
+		t.Fatalf("calls %v, candidates %+v", h.calls, r.Candidates)
+	}
+	st := stepAt(r.Steps, prPath)
+	if st == nil || st.Status != Skipped || st.Output != "Finished without a pull request (gh pr create failed)." {
+		t.Fatalf("pr step %+v", st)
+	}
+	t.Logf("finished: pr step %s: %s", st.Status, st.Output)
+}

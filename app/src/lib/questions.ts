@@ -45,3 +45,10 @@ export function complete(q: Question, a: QuestionAnswer | undefined): boolean {
   const n = a.picks.length + ((a.other ?? "").trim() ? 1 : 0);
   return q.multi ? n > 0 : n === 1;
 }
+
+// answersText is every answer as plain text, one line each under its
+// question's name, for the person to paste into the agent's own screen
+// when the box couldn't fill in its form.
+export function answersText(questions: Question[], answers: (QuestionAnswer | undefined)[]): string {
+  return questions.map((q, i) => `${q.header || q.question.split("\n")[0]}: ${shownAnswer(q, answers[i]) || "—"}`).join("\n");
+}

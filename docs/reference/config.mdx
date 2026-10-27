@@ -21,6 +21,9 @@ guide is in [project config](/guides/project-config).
 | `hooks` | array | [Hooks](#hooks) for this repository's events only, run in the worktree. |
 | `flows` | array | [Flows](#flows) for this repository's worktrees. |
 | `shots` | object | What `berthd shots compare` [shoots and diffs](#shots) by default. Read from the worktree's own file, trusted or not: it names pages and selectors and runs nothing. |
+| `login` | object | [Dev users](#login) a worktree can be logged in as, and the script that logs one in. |
+| `review_button` | boolean | Add a [Review in Shipyard button](/guides/review-a-pr#the-review-in-shipyard-button) to the description of each PR opened from the project's worktrees. Off by default; from the repository's file it applies once the box trusts it. |
+| `keep_main` | boolean | Keep the default branch current: before a new branch is made from it, fetch it and fast-forward the local one, never past uncommitted changes or local commits ([how](/concepts/projects-and-worktrees)). On by default; `false` turns it off. |
 
 ### `services`
 
@@ -40,10 +43,11 @@ guide is in [project config](/guides/project-config).
 | `name` | string | Shown in the app. |
 | `command` | string | What to run. |
 | `prompt_flag` | string | How the agent takes a first prompt, when it needs a flag (`--prompt`). Empty: the prompt is the last argument. |
+| `acp` | string | What follows `command` to start the agent's Agent Client Protocol server (`acp`, `--acp`). With it the agent can [run in chat](/guides/structured-agents). Given with an `id` and no `command`, it adds that to a built-in agent. |
 
 The built-ins are offered when their command is installed on the box:
-`claude`, `codex`, `opencode` (`--prompt`), `gemini` (`-i`) and `cursor`
-(`cursor-agent`).
+`claude`, `codex`, `opencode` (`--prompt`), `gemini` (`-i`), `omp` (oh-my-pi) and
+`cursor` (`cursor-agent`).
 
 ### `hooks`
 
@@ -127,6 +131,24 @@ Defaults for [visual diffs](/guides/visual-diffs). Flags on
 | `seed_random` | boolean | `Math.random` repeats the same numbers on every load. |
 | `parallel` | number | Browser tabs shooting at once. Default: the box's CPUs, from 2 to 8. |
 
+### `login`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `script` | string | Required. A path inside the config's folder: the kit's own folder for a kit, the main checkout's `.berth/` for the repository's file and the box's own config. No `..`, no absolute path; a symlink that leads outside is refused when it runs. Run in the worktree, with its environment and `BERTH_LOGIN_EMAIL`, for up to 30 seconds. |
+| `users` | array | Emails, or `{ "email", "label" }`, at most 50. An email is a plain address: letters, digits and `. _ + -` before the `@`, starting with a letter or digit, at most 254 characters. A label is one line of at most 48 characters, shown in place of the email. |
+| `any` | boolean | Any valid email may log in, not only `users`. Default `false`. |
+
+The script prints one JSON object on stdout, at most 64 KB:
+`{"cookies": [{"name", "value", "path"?, "httpOnly"?, "secure"?, "sameSite"?, "maxAge"?}], "redirect"?: "/path"}`.
+One to 32 cookies; no `domain` (a cookie is set for the worktree's own
+address); `sameSite` is `Lax`, `Strict` or `None`; `maxAge` is 1 second to
+400 days; `redirect` is a path on the worktree. Anything else, a non-zero
+exit or a timeout is an error that never quotes the output. A login comes
+from the kit, the box's own config, or the repository's trusted file in the
+main checkout, never from a worktree's own checkout. See
+[personas](/guides/kits#personas-logging-in-as-a-dev-user).
+
 ## How layers merge
 
 A location's effective config is the repository's file, then its kit's
@@ -139,6 +161,9 @@ A location's effective config is the repository's file, then its kit's
 | `env` | Key by key; the later one wins |
 | `services`, `agents`, `flows` | By `name` or `id`: a later one replaces, new ones are added |
 | `hooks` | Added up: the file's, the kit's, then the box's |
+| `login` | Whole: the later one's script and users replace the earlier one's |
+| `review_button` | The later one wins if set (`false` too); with none set, the team's `team.json` decides |
+| `keep_main` | The later one wins if set (`false` too) |
 
 Only the effective flows run: a flow replaced by `id` never does, and a
 replacement with `enabled: false` switches the flow off on that box.
@@ -170,7 +195,9 @@ as shown, `--untrust` stops running it.
 | `match` | object | `slug`: the `owner/repo` it is for. Selects matching projects in the app; nothing enforces it. |
 | `requires` | array | `{ "tool": "psql", "hint": "how to install it" }`. A missing tool is a warning when the kit is applied. |
 | `config` | object | A `.berth/config.json`, validated by the same rules. |
+| `login` | object | The same as `config.login`, at the top for short kits; set one or the other. |
 | `files` | object | Small files inline, `{ "scripts/setup.sh": "…" }`. Paths stay inside the kit. |
+| `watch` | array | The repository's files that change how the kit sets a worktree up, as globs (`*` within a folder, `**` any folders): `["prisma/**", "scripts/setup/*"]`. A pull request that changes one says so on its [review sheet](/guides/review-a-pr). |
 
 A kit's files are copied to each box it is applied to, and
 `$BERTH_KIT_DIR` points at them. Files starting with `#!` are made
@@ -203,6 +230,7 @@ In `~/.berth/` on a box:
 | `flows.json` | `{ "flows": [Flow] }` | Flows for any project on the box |
 | `env.json` | `{ "env": { "KEY": "value" } }` | Environment for every worktree on the box, under each project's own; values may be secret references. `OP_*` keys reach `op`. |
 | `guard.json` | `{ "enabled", "memory_percent", "sustain", "stop_services", "pause_agents" }` | The [resource guard](/guides/resource-guard) |
+| `turncheck.json` | `{ "enabled", "provider", "key", "url"?, "model"? }` | [Turn check](/concepts/sessions-and-agents#agent-state): off by default. `provider` is `gateway`, `openai` or `laya`, with no default; `key` is a secret reference to that provider's key (`op://…` or `env://NAME`), never the key; a key pasted in Settings is kept in the state directory instead ([files](/reference/files)). `model` is the model that checks turns, with no default; `url` is a Laya server of your own, which never gets a key. Set from Settings → Agents, on a paired laptop |
 | `network.json` | `{ "allow_outbound": ["10.0.0.0/8", "192.168.1.20", "ntfy.home.lan"] }` | Private addresses flow webhooks and phone notifications may reach: IP addresses, CIDR prefixes or host names ([outbound requests](/guides/automations#outbound-requests)). Nothing in the API changes it |
 | `plugins/<id>/berth-plugin.json` | A plugin manifest | Its hooks run on the box too, once allowed in `plugins.json` |
 | `plugins.json` | `{ "plugins": { "<id>": { "hash"? } } }` | The plugins whose hooks may run on the box; an entry without a `hash` trusts whatever the folder holds ([trust and consent](/guides/plugins#trust-and-consent)) |

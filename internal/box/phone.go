@@ -297,14 +297,14 @@ func (p *Phone) Handler(b *Box, listenAddr string) http.Handler {
 			writeError(w, statusFor(err), err.Error())
 			return
 		}
-		if err := b.Sessions.Send(r.Context(), name, req.Text, req.Enter == nil || *req.Enter); err != nil {
+		if err := b.sendText(r.Context(), name, req.Text, req.Enter == nil || *req.Enter); err != nil {
 			writeError(w, statusFor(err), err.Error())
 			return
 		}
 		data := map[string]any{"name": name, "from": "phone"}
 		if b.Turns != nil {
 			// The phone may answer an agent's question: that is not a turn.
-			if st, ok := b.Turns.State(name); ok && st.State == "waiting" {
+			if st, ok := b.Turns.State(name); ok && st.State == "waiting" && !st.SoftWait {
 				data["answer"], data["turn"] = true, st.Turn
 			}
 		}

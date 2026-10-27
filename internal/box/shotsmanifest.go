@@ -56,6 +56,8 @@ type vdSettings struct {
 	ReducedMotion bool     `json:"reduced_motion"`
 	Mask          []string `json:"mask,omitempty"`
 	Chromium      string   `json:"chromium,omitempty"`
+	// Login is the email both sides were logged in as (--as).
+	Login string `json:"login,omitempty"`
 }
 
 type vdSummary struct {
@@ -363,6 +365,9 @@ func agentText(vd VisualDiff, a Artifact, imgDir string) string {
 	fmt.Fprintf(&b, "visual diff %s v%d: %s vs %s, %d pages × %d sizes%s in %.1fs\n", id, n, vd.Head.Label, vd.Base.Label, len(vd.Pages), len(vd.Settings.Sizes), schemes, float64(vd.Timing.TotalMS)/1000)
 	if vd.Notice != "" {
 		fmt.Fprintf(&b, "note: %s\n", vd.Notice)
+	}
+	if vd.Settings.Login != "" {
+		fmt.Fprintf(&b, "logged in as %s\n", vd.Settings.Login)
 	}
 	fmt.Fprintf(&b, "%s\n", vd.Summary.Text)
 	both := len(vd.Settings.ColorSchemes) > 1

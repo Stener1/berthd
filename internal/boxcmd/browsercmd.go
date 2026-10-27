@@ -33,11 +33,45 @@ func browserWorktree(pos []string) (loc, wt string, rest []string, err error) {
 	return loc, wt, pos, nil
 }
 
-func browserCall(ctx context.Context, c *box.Client, loc, wt, method, action string, in any, out io.Writer) error {
+// browserTab takes --tab NAME (or --tab=NAME) out of a command's arguments,
+// wherever it is: the tab the command is for, else $BERTH_BROWSER_TAB, else
+// the main tab (""). Agents that share a worktree each pass their own.
+func browserTab(args []string) ([]string, string, error) {
+	tab := os.Getenv("BERTH_BROWSER_TAB")
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--tab" || a == "-tab":
+			if i+1 >= len(args) {
+				return nil, "", errors.New("--tab needs a name")
+			}
+			tab = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--tab=") || strings.HasPrefix(a, "-tab="):
+			_, tab, _ = strings.Cut(a, "=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if err := box.CheckTabName(tab); err != nil {
+		return nil, "", err
+	}
+	return rest, tab, nil
+}
+
+func browserCall(ctx context.Context, c *box.Client, loc, wt, tab, method, action string, in any, out io.Writer) error {
 	var res struct {
 		Text string `json:"text"`
 	}
 	path := "/v1/worktrees/" + url.PathEscape(loc) + "/" + url.PathEscape(wt) + "/browser/" + action
+	if tab != "" {
+		sep := "?"
+		if strings.Contains(action, "?") {
+			sep = "&"
+		}
+		path += sep + "tab=" + url.QueryEscape(tab)
+	}
 	if err := c.Call(ctx, method, path, in, &res); err != nil {
 		return err
 	}
@@ -56,27 +90,43 @@ func checkSize(size, scale string) error {
 }
 
 func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, out io.Writer) error {
+	args, tab, err := browserTab(args)
+	if err != nil {
+		return err
+	}
 	switch sub {
 	case "open":
 		fs, _ := flags(args)
 		size := fs.String("size", "", "the page's size first: WIDTHxHEIGHT or a preset (phone, phone-max, tablet, laptop, desktop)")
 		scale := fs.String("scale", "", "the device scale factor first, 1 to 3")
+		as := fs.String("as", "", "log in as this user first (an email the project's login lists)")
+		path := fs.String("path", "", "the page to open, such as /settings (the same as PATH)")
+		usage := "browser open [LOC/WT] [PATH|URL] [--as EMAIL] [--path /x] [--size WxH|PRESET] [--scale N]"
 		pos, err := parse(fs, args)
 		if err != nil || len(pos) > 2 {
-			return usageErr("browser open [LOC/WT] [PATH|URL] [--size WxH|PRESET] [--scale N]")
+			return usageErr(usage)
 		}
 		loc, wt, rest, err := browserWorktree(pos)
 		if err != nil {
 			return err
 		}
-		target := ""
+		target := *path
 		if len(rest) > 0 {
+			if target != "" {
+				return usageErr(usage)
+			}
 			target = rest[0]
+		}
+		if *path != "" && !strings.HasPrefix(*path, "/") {
+			return errors.New("--path is a path on the worktree, such as /settings")
+		}
+		if *as != "" && !box.ValidLoginEmail(*as) {
+			return fmt.Errorf("--as takes an email, such as pro@acme.test; %q isn't one", *as)
 		}
 		if err := checkSize(*size, *scale); err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "open", map[string]string{"url": target, "size": *size, "scale": *scale}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "open", map[string]string{"url": target, "size": *size, "scale": *scale, "as": *as}, out)
 	case "resize":
 		fs, _ := flags(args)
 		scale := fs.String("scale", "", "the device scale factor, 1 to 3 (2 for a Retina screen)")
@@ -96,7 +146,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if _, err := box.DefaultViewport.Resolve(size, *scale); err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "resize", map[string]string{"size": size, "scale": *scale}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "resize", map[string]string{"size": size, "scale": *scale}, out)
 	case "snapshot":
 		fs, _ := flags(args)
 		full := fs.Bool("full", false, "every element, not just what you can act on")
@@ -111,7 +161,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "snapshot", map[string]any{"full": *full, "delta": *delta, "selector": *sel, "depth": *depth}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "snapshot", map[string]any{"full": *full, "delta": *delta, "selector": *sel, "depth": *depth}, out)
 	case "click", "fill", "press", "select", "hover", "check":
 		fs, _ := flags(args)
 		pos, err := parse(fs, args)
@@ -136,7 +186,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		default:
 			return usageErr(usage)
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "act", req, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "act", req, out)
 	case "wait":
 		fs, _ := flags(args)
 		text := fs.String("text", "", "until the page shows this text")
@@ -151,7 +201,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "wait", map[string]any{"text": *text, "url": *u, "idle": *idle, "timeout": *timeout}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "wait", map[string]any{"text": *text, "url": *u, "idle": *idle, "timeout": *timeout}, out)
 	case "shot":
 		fs, _ := flags(args)
 		el := fs.String("el", "", "only this element (@REF or a CSS selector)")
@@ -166,7 +216,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if err != nil {
 			return err
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "shot", map[string]any{"el": *el, "full": *full, "width": *width, "native": *native}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "shot", map[string]any{"el": *el, "full": *full, "width": *width, "native": *native}, out)
 	case "console":
 		fs, _ := flags(args)
 		all := fs.Bool("all", false, "every level, not just errors and warnings")
@@ -182,12 +232,12 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if *all {
 			q = "?all=1"
 		}
-		return browserCall(ctx, c, loc, wt, "GET", "console"+q, nil, out)
-	case "network", "status", "close":
+		return browserCall(ctx, c, loc, wt, tab, "GET", "console"+q, nil, out)
+	case "network", "status", "close", "tabs":
 		fs, _ := flags(args)
 		pos, err := parse(fs, args)
 		if err != nil || len(pos) > 1 {
-			return usageErr("browser network|status|close [LOC/WT]")
+			return usageErr("browser network|status|close|tabs [LOC/WT] [--tab NAME]")
 		}
 		loc, wt, _, err := browserWorktree(pos)
 		if err != nil {
@@ -197,7 +247,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if sub == "close" {
 			method = "POST"
 		}
-		return browserCall(ctx, c, loc, wt, method, sub, nil, out)
+		return browserCall(ctx, c, loc, wt, tab, method, sub, nil, out)
 	case "eval":
 		fs, _ := flags(args)
 		pos, err := parse(fs, args)
@@ -208,7 +258,7 @@ func browserCmd(ctx context.Context, c *box.Client, sub string, args []string, o
 		if err != nil || len(rest) != 1 {
 			return usageErr("browser eval [LOC/WT] JS")
 		}
-		return browserCall(ctx, c, loc, wt, "POST", "eval", map[string]string{"js": rest[0]}, out)
+		return browserCall(ctx, c, loc, wt, tab, "POST", "eval", map[string]string{"js": rest[0]}, out)
 	case "allow":
 		fs, _ := flags(args)
 		pos, err := parse(fs, args)

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import App from "@/App";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { showingTabRescues } from "@/components/workspace/pane-guard";
 // Error toasts in plain English, with the box's own words behind Details.
 import "@/components/error-note";
 import { isTauri } from "@/lib/api";
@@ -27,7 +28,9 @@ if (isTauri()) {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <ErrorBoundary>
+    {/* The last guard: what broke was most likely the tab showing, so its
+        ways out are offered here too, rather than a window with no way on. */}
+    <ErrorBoundary window rescues={showingTabRescues}>
       <App />
     </ErrorBoundary>
   </React.StrictMode>,

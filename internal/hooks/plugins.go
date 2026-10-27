@@ -212,3 +212,19 @@ func pluginStatusWith(dir string, manifest []byte) PluginState {
 
 // PluginEnabled says whether the plugin in dir may run: see PluginStatus.
 func PluginEnabled(dir string) bool { return PluginStatus(dir).Enabled }
+
+// AllowedPluginManifest reads the manifest of the plugin in dir and says
+// whether the plugin may run, judged on those very bytes: what the caller
+// then takes from the manifest (the helper a plugin runs on a box, say) is
+// what the user allowed, and not what the file became a moment later.
+func AllowedPluginManifest(dir string) (manifest []byte, state PluginState, err error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, PluginState{}, err
+	}
+	defer root.Close()
+	if manifest, err = readIn(root, PluginManifest); err != nil {
+		return nil, PluginState{}, err
+	}
+	return manifest, pluginStatusWith(dir, manifest), nil
+}

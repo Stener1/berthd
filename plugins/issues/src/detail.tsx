@@ -141,7 +141,7 @@ export function Detail({ berth, row, runs, viewer, onStart }: { berth: BerthPlug
   );
 }
 
-function Runs({ berth, runs }: { berth: BerthPluginContext; runs: Run[] }) {
+export function Runs({ berth, runs }: { berth: BerthPluginContext; runs: Run[] }) {
   return (
     <section className="flex flex-col rounded-lg border">
       <h3 className="border-b px-3 py-1.5 font-medium text-[11px] text-muted-foreground">Agents on this issue</h3>
@@ -188,7 +188,7 @@ export function StatePill({ run, compact }: { run: Run; compact?: boolean }) {
   );
 }
 
-function Post({ author, at, viewer, badge, children }: { author?: string; at: string; viewer?: string; badge?: string; children: React.ReactNode }) {
+export function Post({ author, at, viewer, badge, children }: { author?: string; at: string; viewer?: string; badge?: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
       <Avatar login={author} className="mt-0.5 size-6 text-[10px]" />

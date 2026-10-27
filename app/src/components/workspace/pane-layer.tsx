@@ -2,7 +2,10 @@ import { useRef } from "react";
 
 import { COMPARE_BAR, CompareBar, useSideStates } from "@/components/workspace/compare-view";
 import { useTiny } from "@/components/workspace/worktree-tone";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Pane } from "@/components/workspace/pane";
+import { PaneGuard } from "@/components/workspace/pane-guard";
+import { closeCompare } from "@/lib/compare-actions";
 import { DragGhost, DropOverlay } from "@/components/workspace/tab-drag";
 import { shownSides, sides } from "@/lib/compare";
 import { type Divider, layout, mixed } from "@/lib/layout";
@@ -46,7 +49,13 @@ export function PaneLayer({ showing }: { showing: boolean }) {
         const halves = tiny ? [{ ...whole, h: 0.5 }, { ...whole, y: 0.5, h: 0.5 }] : [{ ...whole, w: ratio }, { ...whole, x: ratio, w: 1 - ratio }];
         const rects = show[0] && show[1] ? halves : show[0] ? [whole, undefined] : [undefined, whole];
         return [
-          ...(visible ? [<CompareBar key={`bar:${tab.id}`} wsKey={key} tab={tab} />] : []),
+          ...(visible
+            ? [
+                <ErrorBoundary key={`bar:${tab.id}`} compact scope="the Compare bar" className="absolute inset-x-0 top-0 z-10 h-bar border-b bg-sidebar" rescues={() => [{ label: "Close tab", run: () => closeCompare(key, tab.id) }]}>
+                  <CompareBar wsKey={key} tab={tab} />
+                </ErrorBoundary>,
+              ]
+            : []),
           ...pair.map((leaf, i) => {
             const r = rects[i];
             const on = visible && !!r;
@@ -60,13 +69,17 @@ export function PaneLayer({ showing }: { showing: boolean }) {
                 className={cn("absolute overflow-hidden", r && r.x > 0 && "border-l", r && r.y > 0 && "border-t")}
                 style={{ left: pct(r?.x ?? 0), width: pct(r?.w ?? 1), top: `calc(${COMPARE_BAR}px + (100% - ${COMPARE_BAR}px) * ${r?.y ?? 0})`, height: `calc((100% - ${COMPARE_BAR}px) * ${r?.h ?? 1})`, display: on ? "block" : "none" }}
               >
-                <Pane wsKey={key} tab={tab.id} pane={leaf} visible={on} focused={tab.focus === leaf.id} split={false} mixed compare={{ tab: tab.id, pane: leaf.id, side: i as 0 | 1, sync: c.sync }} />
+                <PaneGuard wsKey={key} tab={tab.id} pane={leaf.id}>
+                  <Pane wsKey={key} tab={tab.id} pane={leaf} visible={on} focused={tab.focus === leaf.id} split={false} mixed compare={{ tab: tab.id, pane: leaf.id, side: i as 0 | 1, sync: c.sync }} />
+                </PaneGuard>
               </div>
             );
           }),
           ...(c.parked ?? []).map((leaf) => (
             <div key={leaf.id} className="absolute inset-0 overflow-hidden" style={{ display: "none" }}>
-              <Pane wsKey={key} tab={tab.id} pane={leaf} visible={false} focused={false} split={false} mixed />
+              <PaneGuard wsKey={key} tab={tab.id} pane={leaf.id}>
+                <Pane wsKey={key} tab={tab.id} pane={leaf} visible={false} focused={false} split={false} mixed />
+              </PaneGuard>
             </div>
           )),
         ];
@@ -85,7 +98,9 @@ export function PaneLayer({ showing }: { showing: boolean }) {
             className={cn("absolute overflow-hidden", rect.x > 0 && "border-l", rect.y > 0 && "border-t")}
             style={{ left: pct(rect.x), top: pct(rect.y), width: pct(rect.w), height: pct(rect.h), display: visible ? "block" : "none" }}
           >
-            <Pane wsKey={key} tab={tab.id} pane={leaf} visible={visible} focused={tab.focus === leaf.id} split={split} mixed={several} />
+            <PaneGuard wsKey={key} tab={tab.id} pane={leaf.id}>
+              <Pane wsKey={key} tab={tab.id} pane={leaf} visible={visible} focused={tab.focus === leaf.id} split={split} mixed={several} />
+            </PaneGuard>
           </div>
         )),
         ...(visible ? dividers.map((d) => <DividerHandle key={d.id} d={d} area={area} onRatio={(r) => resizeSplit(key, tab.id, d.id, r)} />) : []),

@@ -28,8 +28,15 @@ const (
 )
 
 func parserFor(source string) parser {
-	if source == "codex" {
+	switch source {
+	case "codex":
 		return &codexParser{}
+	case SourceClaudeHost:
+		return &hostParser{}
+	case SourceCodexHost:
+		return &codexHostParser{}
+	case SourceACPHost:
+		return &acpHostParser{}
 	}
 	return &claudeParser{}
 }
@@ -74,7 +81,7 @@ func Before(source, path, dir string, before int64, limit int) (Result, error) {
 					items[i].Done, items[i].pending = true, nil
 				}
 			}
-			return Result{Source: source, Items: append([]Item{}, items...), Crew: []CrewMember{}, More: more}, nil
+			return Result{Source: shownSource(source), Items: append([]Item{}, items...), Crew: []CrewMember{}, More: more}, nil
 		}
 	}
 }

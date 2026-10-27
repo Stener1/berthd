@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cosscom/shipyard/internal/version"
 )
 
 // daemonScript is a stand-in build that answers `id` with a fingerprint.
@@ -69,5 +71,9 @@ func TestInfoNamesTheAccountToLogInAs(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	if i.User != me.Username || i.Home != home {
 		t.Fatalf("info = %+v, want user %s home %s", i, me.Username, home)
+	}
+	// Its release, so an older laptop can tell it isn't outdated.
+	if i.Version != version.Version {
+		t.Fatalf("info says version %q, want %q", i.Version, version.Version)
 	}
 }

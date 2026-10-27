@@ -1,0 +1,20 @@
+{
+  "name": "Acme traces",
+  "description": "A plugin for the listing build's tests: its helper is one this repository builds.",
+  "version": "1.2.0",
+  "author": "Acme",
+  "marketplace": true,
+  "box": {
+    "helper": {
+      "name": "berth-leadline",
+      "version": "0.3.0",
+      "args": ["serve", "--dir", "{dir}", "--addr", "127.0.0.1:0"],
+      "ready": "helper.json",
+      "attach": "/api/attach",
+      "attach_env": ["DATABASE_URL", "POSTGRES_URL", "OTEL_*"],
+      "assets": {
+        "linux-amd64": { "url": "https://example.com/a-placeholder", "sha256": "written by hand, and dropped by the build", "size": 1 }
+      }
+    }
+  }
+}

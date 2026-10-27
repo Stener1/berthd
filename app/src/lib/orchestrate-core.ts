@@ -131,6 +131,9 @@ export interface HandoffRequest {
   // A new worktree for the next agent; without it, it works beside the
   // first one, in the same worktree.
   worktree?: { name: string; branch?: string; base?: string };
+  // How the next agent runs, when not in its terminal: its structured
+  // driver and permission mode (the app's lib/structured.ts).
+  launch?: { driver?: string; mode?: string };
 }
 
 // handoff starts another agent on the work, with the prompt as its first
@@ -144,8 +147,13 @@ export async function handoff(call: BoxCaller, r: HandoffRequest): Promise<Sessi
       agent: r.agent.id,
       prompt: r.prompt,
       from_session: r.fromSession,
+      ...r.launch,
     });
     return task.session;
+  }
+  if (r.launch?.driver) {
+    // A structured agent is started by its preset, its prompt sent once it runs.
+    return call<Session>(r.box, "POST", "sessions", { location: r.location, agent: r.agent.id, prompt: r.prompt, ...r.launch });
   }
   return call<Session>(r.box, "POST", "sessions", { location: r.location, command: agentCommand(r.agent, r.prompt) });
 }
@@ -347,6 +355,9 @@ export interface RunCompare {
   run: RunSummary;
   gate?: Run["gate"];
   judge?: string;
+  // The pull request step: opened, skipped (a host without them, or
+  // finished without one) or failed, with what it said.
+  pr?: Run["steps"][number];
   candidates: (NonNullable<Run["candidates"]>[number] & { review?: { files?: { path: string; added?: number; removed?: number; status?: string }[]; commits?: { sha: string; subject: string }[] } })[];
 }
 

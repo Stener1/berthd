@@ -1,7 +1,7 @@
 // A worktree an agent handed off nests under the worktree that agent worked
 // in (Worktree.parent, from the box), so a chain of handoffs reads as a tree
 // in the sidebar. These are the pure parts: building the tree from a flat
-// list and choosing what of it shows.
+// list and reading it.
 
 export interface TreeNode<T> {
   row: T;
@@ -39,22 +39,6 @@ export function nest<T>(rows: T[], key: (r: T) => string, parent: (r: T) => stri
     else roots.push(node);
   }
   return roots;
-}
-
-// prune keeps the nodes keep() wants and every node on the way down to one,
-// so an active worktree is never hidden inside an idle parent.
-export function prune<T>(nodes: TreeNode<T>[], keep: (r: T) => boolean): TreeNode<T>[] {
-  const out: TreeNode<T>[] = [];
-  for (const n of nodes) {
-    const children = prune(n.children, keep);
-    if (keep(n.row) || children.length) out.push({ ...n, children });
-  }
-  return out;
-}
-
-// size is how many nodes a forest holds.
-export function size<T>(nodes: TreeNode<T>[]): number {
-  return nodes.reduce((n, c) => n + 1 + size(c.children), 0);
 }
 
 // below is every row under a node, at any depth.

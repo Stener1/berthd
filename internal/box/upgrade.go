@@ -28,6 +28,9 @@ type Info struct {
 	OS    string `json:"os"`
 	Arch  string `json:"arch"`
 	Build string `json:"build"`
+	// Version is the release it is ("v0.3.22"), or "dev": a laptop on an
+	// older release must not take it for outdated (berth upgrade).
+	Version string `json:"version,omitempty"`
 	// User and Home are the account berthd runs as, which is the one to
 	// log in as over SSH, for editors.
 	User  string   `json:"user,omitempty"`
@@ -43,6 +46,9 @@ type Info struct {
 	Capabilities []string `json:"capabilities"`
 	// Adapters say what each agent can report, for the app.
 	Adapters map[string]adapters.Caps `json:"adapters,omitempty"`
+	// AgentDefaults is how agents start when what starts them names no
+	// driver, on a box with "agents.defaults".
+	AgentDefaults *AgentDefaults `json:"agent_defaults,omitempty"`
 }
 
 // BuildID identifies a daemon build by its bytes.
@@ -70,7 +76,7 @@ func (u *SelfUpdate) info() (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	return Info{OS: runtime.GOOS, Arch: runtime.GOARCH, Build: BuildID(b), Tools: Tools()}, nil
+	return Info{OS: runtime.GOOS, Arch: runtime.GOARCH, Build: BuildID(b), Version: version.Version, Tools: Tools()}, nil
 }
 
 // Install verifies binary and swaps it in for the running executable. The old
@@ -117,6 +123,10 @@ func (b *Box) handleInfo(w http.ResponseWriter, r *http.Request) error {
 		i.Agents = []AgentPreset{}
 	}
 	i.Capabilities = b.Capabilities()
+	if b.AgentDefaults != nil {
+		d := b.AgentDefaults.Get()
+		i.AgentDefaults = &d
+	}
 	i.Adapters = map[string]adapters.Caps{}
 	for _, a := range adapters.All() {
 		i.Adapters[a.Name] = a.Caps
@@ -147,7 +157,9 @@ func (b *Box) Capabilities() []string {
 	// /v1/locations/{name}/worktrees/{worktree} names one, worktreetitles.go).
 	// agents.paths: info says where each agent CLI was found
 	// (agent_paths), and POST /v1/agents/refresh looks again (agentpaths.go).
-	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths"}
+	// driver: agent sessions say how berthd reaches their agent ("driver",
+	// driver.go).
+	caps := []string{"transcript", "diff", "titles", "sample", "history", "commands", "service.terminal", "answer", "session.home", "files", "files.dir", "agents.install", "worktree.titles", "agents.paths", "login", "driver"}
 	if b.Turns != nil {
 		// controls: POST .../keys, .../interrupt and .../mode, GET
 		// .../controls (controls.go).
@@ -159,6 +171,26 @@ func (b *Box) Capabilities() []string {
 	caps = append(caps, "draft")
 	if b.Runs != nil {
 		caps = append(caps, "runs", "exec.detach")
+	}
+	if b.ConversationsDir != "" {
+		// driver.claude: sessions and tasks take "driver": "claude", Claude
+		// Code driven through its stream (claudedriver.go).
+		// driver.switch: POST .../switch takes a structured session to
+		// Claude Code's terminal and back (switch.go).
+		// conversations: GET /v1/conversations, POST .../{id}/resume and
+		// POST /v1/sessions/{name}/resume (conversations.go).
+		// driver.codex: "driver": "codex", Codex's app server (codexdriver.go).
+		// driver.acp: "driver": "acp", an agent whose preset says how it
+		// speaks ACP (acpdriver.go).
+		// sessions.past: GET /v1/sessions/{name}/past, and .../resume
+		// {agent_session_id}: a structured chat's /resume (pastsessions.go).
+		caps = append(caps, "driver.claude", "driver.codex", "driver.acp", "driver.switch", "conversations", "sessions.past")
+		if b.AgentDefaults != nil {
+			// agents.defaults: GET and PUT /v1/agents/defaults, how agents
+			// start when what starts them names no driver
+			// (agentdefaults.go), also in info as agent_defaults.
+			caps = append(caps, "agents.defaults")
+		}
 	}
 	if b.Artifacts != nil {
 		// artifacts: berthd artifact add, a worktree's artifacts and their
@@ -182,7 +214,7 @@ func (b *Box) Capabilities() []string {
 		// browser.health: GET /v1/browser/health, PUT /v1/browser/settings
 		// and POST /v1/browser/check (browsersandbox.go).
 		// browser.devtools: GET …/browser/devtools (browserdevtools.go).
-		caps = append(caps, "browser", "browser.health", "browser.devtools")
+		caps = append(caps, "browser", "browser.health", "browser.devtools", "browser.tabs")
 	}
 	if b.Events.Journal != nil {
 		caps = append(caps, "journal")
@@ -191,6 +223,11 @@ func (b *Box) Capabilities() []string {
 		// processes: GET /v1/processes and POST /v1/processes/{id}/stop,
 		// sessions' usage, and guard's session_memory_gb (boxprocs.go).
 		caps = append(caps, "processes")
+	}
+	if b.Helpers != nil {
+		// helpers: plugins' helper programs, installed, run and relayed
+		// (/v1/helpers, helpers.go).
+		caps = append(caps, "helpers")
 	}
 	return caps
 }

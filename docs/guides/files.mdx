@@ -117,6 +117,31 @@ diff view uses, so a file looks alike in its tab and in a diff.
 
 **⌘S** saves. **⌘F** searches in the file.
 
+### Markdown files
+
+A Markdown file (`.md`, `.markdown`) opens as a page: headings, tables,
+task lists, code blocks and pictures, as GitHub shows it. Three buttons in
+its header switch between:
+
+- **Preview**: the page;
+- **Source**: the file in the editor, with the agent's changes in the
+  margin and the change stepper;
+- **Source and preview side by side**: the editor and the page together,
+  the page redrawing as you type, before you save.
+
+The choice sticks for every Markdown file. A narrow pane has no room for
+both, so it shows the page.
+
+In the page, a link to another file of the worktree (`docs/setup.md`,
+`../README.md`) opens it in a File tab, a `#heading` link scrolls to that
+heading, and a web link opens in your browser. Pictures in the worktree
+come from the box; pictures from the web, such as badges, load from the
+web. HTML in the file shows as text, and `.mdx` files open as source only.
+
+⌘-click a Markdown file's path in a terminal (an agent's reply naming
+`docs/setup.md`, say) to open it here as a page. ⌘⇧-click sends it to your
+editor, as ⌘-click does with any other file.
+
 ### When the agent writes the file
 
 An open File tab notices when the file changes on the box (it checks every

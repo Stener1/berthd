@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 
 import type { BrowserHealth } from "@/lib/browser-sandbox";
+import { type AgentBrowserTab, tabQuery } from "@/lib/browser-tabs";
 import { useStore } from "@/lib/store";
 
 // The agent's browser on a box: a headless Chromium per worktree that the
 // agent drives (berthd browser …). The app only watches it: its status, a
 // live screencast while a pane shows it, and the shots it left for Review.
+// On a box with "browser.tabs" each agent may have a tab of its own in it
+// (lib/browser-tabs); every route takes the tab, and none is the main one.
+
+export type { AgentBrowserTab };
 
 // The agent's browser's page size: CSS pixels at a device scale, which the
 // agent chooses (berthd browser resize); 1920×1080 at 1x by default.
@@ -18,10 +23,13 @@ export interface Viewport {
 export interface AgentBrowserStatus {
   running: boolean;
   text: string;
-  status?: { url?: string; rss_bytes?: number; watchers?: number; viewport?: Viewport; size?: string };
+  status?: { url?: string; rss_bytes?: number; watchers?: number; viewport?: Viewport; size?: string; tabs?: AgentBrowserTab[] };
   // The size it has, or opens at ("1920×1080", "390×844 @3x").
   viewport?: Viewport;
   size?: string;
+  // Its tabs, main first then by when they opened; absent on a box without
+  // tabs.
+  tabs?: AgentBrowserTab[];
   // Why one can't start, while none runs and it couldn't.
   health?: BrowserHealth;
 }
@@ -86,11 +94,17 @@ export function fitFrame(w: number, h: number, availW: number, availH: number): 
 }
 
 // watchAgentBrowser streams the page as JPEG frames while signal is live:
-// the box casts only while someone watches.
-export function watchAgentBrowser(box: string, location: string, worktree: string, onFrame: (f: Frame) => void, signal: AbortSignal): Promise<void> {
+// the box casts only while someone watches, and only the tab asked for.
+export function watchAgentBrowser(box: string, location: string, worktree: string, onFrame: (f: Frame) => void, signal: AbortSignal, tab?: string): Promise<void> {
   const c = useStore.getState().client;
   if (!c) return Promise.reject(new Error("not connected"));
-  return c.stream("GET", `/v1/boxes/${encodeURIComponent(box)}/api/${base(location, worktree)}/screencast`, undefined, (v) => onFrame(v as Frame), signal);
+  return c.stream("GET", `/v1/boxes/${encodeURIComponent(box)}/api/${base(location, worktree)}/screencast${tabQuery(tab)}`, undefined, (v) => onFrame(v as Frame), signal);
+}
+
+// agentBrowserDevtools is a tab's console lines and failed requests, as its
+// box keeps them.
+export function agentBrowserDevtools<T>(box: string, location: string, worktree: string, tab?: string): Promise<T> {
+  return client().box<T>(box, "GET", `${base(location, worktree)}/devtools${tabQuery(tab)}`);
 }
 
 const shotCache = new Map<string, Promise<string>>();

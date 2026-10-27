@@ -210,7 +210,7 @@ func locationConfig(ctx context.Context, c *box.Client, args []string, out io.Wr
 		}
 		fmt.Fprintf(out, "%s (from %s, plus this box's own config)\n", pos[0], from)
 		fmt.Fprintf(out, "  setup     %s\n  archive   %s\n  ports     %d per worktree\n", orNone(e.Setup), orNone(e.Archive), max(e.Ports, 1))
-		printRepoConfig(out, box.RepoConfig{Env: e.Env, Services: e.Services, Hooks: e.Hooks, Agents: e.Agents})
+		printRepoConfig(out, box.RepoConfig{Env: e.Env, Services: e.Services, Hooks: e.Hooks, Agents: e.Agents, Login: e.Login})
 	})
 }
 
@@ -246,6 +246,20 @@ func printRepoConfig(out io.Writer, e box.RepoConfig) {
 	}
 	for _, a := range e.Agents {
 		fmt.Fprintf(out, "  agent     %s: %s\n", a.ID, a.Command)
+	}
+	if l := e.Login; l != nil {
+		who := "only these users"
+		if l.Any {
+			who = "any email"
+		}
+		fmt.Fprintf(out, "  login     %s (%s)\n", l.Script, who)
+		for _, u := range l.Users {
+			if u.Label != "" {
+				fmt.Fprintf(out, "  user      %s (%s)\n", u.Email, u.Label)
+			} else {
+				fmt.Fprintf(out, "  user      %s\n", u.Email)
+			}
+		}
 	}
 }
 

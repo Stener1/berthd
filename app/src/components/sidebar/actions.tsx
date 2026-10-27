@@ -1,49 +1,14 @@
-import {
-  ActivityIcon,
-  ListPlusIcon,
-  PaletteIcon,
-  ArchiveIcon,
-  ArrowUpCircleIcon,
-  ArrowUpRightIcon,
-  BotIcon,
-  CheckIcon,
-  FolderInputIcon,
-  MergeIcon,
-  PackageIcon,
-  PencilIcon,
-  PinIcon,
-  PinOffIcon,
-  PlusIcon,
-  ServerIcon,
-  SplitIcon,
-  CodeXmlIcon,
-  CopyIcon,
-  EllipsisIcon,
-  ExternalLinkIcon,
-  FolderOpenIcon,
-  GitBranchIcon,
-  GitCompareArrowsIcon,
-  GitBranchPlusIcon,
-  GlobeIcon,
-  HomeIcon,
-  LinkIcon,
-  PlayIcon,
-  RotateCwIcon,
-  Settings2Icon,
-  SquareIcon,
-  SquareTerminalIcon,
-  StethoscopeIcon,
-  Trash2Icon,
-  UnplugIcon,
-  WorkflowIcon,
-  WrenchIcon,
-} from "lucide-react";
+import { ActivityIcon, ListPlusIcon, PaletteIcon, ArchiveIcon, ArrowUpCircleIcon, ArrowUpRightIcon, BotIcon, CheckIcon, FolderInputIcon, MergeIcon, PackageIcon, PencilIcon, PinIcon, PinOffIcon, PlusIcon, ServerIcon, SplitIcon, CodeXmlIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, FolderOpenIcon, GitBranchIcon, GitCompareArrowsIcon, GitBranchPlusIcon, GitPullRequestIcon, GlobeIcon, HomeIcon, LinkIcon, PlayIcon, RotateCwIcon, Settings2Icon, SquareIcon, SquareTerminalIcon, StethoscopeIcon, Trash2Icon, UnplugIcon, WorkflowIcon, WrenchIcon, BellOffIcon, UsersRoundIcon, HistoryIcon } from "lucide-react";
 import { type ComponentProps, createContext, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
 import { EditorMenuItems } from "@/components/editors/editor-menu";
 import { AutoFixItems } from "@/components/sidebar/autofix-items";
 import { boxHasRuns } from "@/lib/runs";
+import { openUpdate, reviewOf } from "@/lib/pr-review";
+import { copyReviewLink } from "@/views/pr-review/copy-link";
+import { loginUserLabel, useLoginConfig } from "@/lib/login-users";
+import { entryKey, useReview } from "@/views/review/review-store";
 import { SessionActionItems } from "@/components/orchestrate/session-actions";
 import { confirm, copy } from "@/components/sidebar/confirm";
 import { Tip } from "@/components/tip";
@@ -52,16 +17,16 @@ import { Kbd } from "@/components/ui/kbd";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuSub, MenuSubPopup, MenuSubTrigger, MenuTrigger } from "@/components/ui/menu";
 import { Spinner } from "@/components/ui/spinner";
 import { toastManager } from "@/components/ui/toast";
-import { agentPresets, openBrowserAt, startSession, stopSession } from "@/lib/actions";
-import { boxApi, type BoxStatus, laptopApi, type Location, type Worktree, type WorktreeService } from "@/lib/api";
+import { agentPresets, openBrowserAt, resumeConversation, startAgent, startSession, stopSession } from "@/lib/actions";
+import { boxApi, type BoxStatus, type Conversation, laptopApi, type Location, type Worktree, type WorktreeService } from "@/lib/api";
 import { portUrl } from "@/lib/browser-url";
 import { agentOf, worktreeSessions } from "@/lib/derive";
-import { errorMessage } from "@/lib/format";
+import { ago, errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isPinned, pinWorktree, unpinWorktree } from "@/lib/pinned-worktrees";
-import { removeWorktreeOnBox } from "@/lib/remove-worktree";
+import { queueRemoval, removeWorktreeOnBox } from "@/lib/remove-worktree";
 import { addGroup, isShown, refOf, selectWorktree, useWorkspaces, wsKey } from "@/lib/workspaces";
 import { ToneItems } from "@/components/workspace/tab-group";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
@@ -72,9 +37,14 @@ import { openRenameWorktree } from "@/components/sidebar/rename-worktree";
 import { renameWorktree, shortLabel, worktreeLabel } from "@/lib/worktree-names";
 import { openHomeTerminal } from "@/components/box-picker";
 import { boxLoad } from "@/components/sidebar/box-load";
+import { ink } from "@/components/sidebar/ink";
 import { kitsApi } from "@/lib/kits";
 import { deriveProjects, type Member, type Project, projectActions as groupActions, useProjectsDoc } from "@/lib/project-groups";
 import { reloadKits, useKits } from "@/views/kits/kits-store";
+import { useTeam } from "@/lib/team";
+import { copyTeamLink, dismissSuggestion, projectSuggestion, reviewSuggestion } from "@/lib/team-suggest";
+import { orgName } from "@/lib/team-suggest-model";
+import { openTeamKit } from "@/views/team/team-kit-sheet";
 
 // The sidebar's actions are defined once and drawn into either menu: the
 // ⋯ button on a row, or the row's right-click menu. Both show the same
@@ -127,7 +97,7 @@ export function ActionItems({ items: from }: { items: Action[] | (() => Action[]
               <MenuItem key={i} variant={a.destructive ? "destructive" : "default"} disabled={a.disabled} onClick={a.run}>
                 {a.icon}
                 <span className="flex-1">{a.label}</span>
-                {a.hint && <span className="text-muted-foreground text-xs">{a.hint}</span>}
+                {a.hint && <span className="text-meta text-muted-foreground">{a.hint}</span>}
                 {a.shortcut && <Kbd className="ml-2">{a.shortcut}</Kbd>}
               </MenuItem>
             );
@@ -147,7 +117,7 @@ export function DotsMenu({ label, items }: { label: string; items: () => Action[
             <button
               type="button"
               aria-label={label}
-              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground data-popup-open:bg-sidebar-accent [&_svg]:size-3.5"
+              className={cn("inline-flex size-6 items-center justify-center rounded-md hover:bg-sidebar-accent hover:text-foreground data-popup-open:bg-sidebar-accent [&_svg]:size-3.5", ink.glyph)}
             />
           }
         >
@@ -330,7 +300,10 @@ function urlFor(box: string, loc: Location, wt: Worktree) {
   return port ? portUrl(port, { ref: refOf(box, loc, wt), services, urlPort: st.status?.proxy.url_port }) : undefined;
 }
 
-// worktreeActions is everything a worktree row offers.
+// worktreeActions is everything a worktree row offers, in four short
+// groups: what to start in it; where else to open it and what to run on it;
+// what it is called and looks like, and what to copy; then what ends it.
+// The rarer ones (resuming, comparing, each thing to copy) sit one step in.
 export function worktreeActions(box: string, loc: Location, wt: Worktree): Action[] {
   const st = useStore.getState();
   const sessions = worktreeSessions(st.boxes[box]?.sessions, wt).filter((s) => !s.exited);
@@ -346,49 +319,79 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
   const ws = useWorkspaces.getState();
   const front = ws.current && ws.current !== key ? ws.spaces[ws.current]?.ref : undefined;
   const grouping = usePrefs.getState().labs;
+
+  const agents: Action[] = presets.map((p) =>
+    item(p.name, slot(<AgentIcon agent={p.id} />), () => {
+      select();
+      void startAgent(p, { kind: "tab" }, p.name, key);
+    }),
+  );
+  if (st.boxes[box]?.info?.capabilities?.includes("conversations")) agents.push(sep, { type: "sub", label: "Resume a conversation", icon: <HistoryIcon />, items: () => <ResumeItems box={box} loc={loc} wt={wt} /> });
+
   const items: Action[] = [
     item("Open", wt.main ? <HomeIcon /> : <GitBranchIcon />, select),
-    ...(grouping && front && !isShown(key) ? [item(`Add to tabs beside ${shortLabel(front)}`, <ListPlusIcon />, () => void addGroup(key), { shortcut: "⌥ Click" })] : []),
-    ...(grouping ? [item("Compare with…", <GitCompareArrowsIcon />, () => openWorktreePicker({ kind: "compare", from: key }))] : []),
+    { type: "sub", label: "New agent", icon: <BotIcon />, items: agents },
     item("New terminal", <SquareTerminalIcon />, () => {
       select();
       void startSession("", { kind: "tab" }, "Terminal", key);
     }),
-    {
-      type: "sub",
-      label: "New agent",
-      icon: <BotIcon />,
-      items: presets.map((p) =>
-        item(p.name, slot(<AgentIcon agent={p.id} />), () => {
-          select();
-          void startSession(p.command, { kind: "tab" }, p.name, key);
-        }),
-      ),
-    },
-    { type: "sub", label: "Run", icon: <PlayIcon />, items: () => <RunItems box={box} loc={loc} wt={wt} /> },
-    item(url ? "Open dev server in browser tab" : "New browser tab", <GlobeIcon />, () => {
+    item(url ? "Open dev server" : "New browser tab", <GlobeIcon />, () => {
       select();
       openBrowserAt(url ?? "", { kind: "tab" }, key);
     }),
-    { type: "sub", label: "Open in", icon: <CodeXmlIcon />, items: () => <EditorMenuItems box={box} path={wt.path} /> },
-    ...(grouping ? [{ type: "sub" as const, label: "Colour", icon: <PaletteIcon />, items: () => <ToneItems wsKey={key} /> }] : []),
+    sep,
+    {
+      type: "sub",
+      label: "Open in",
+      icon: <CodeXmlIcon />,
+      items: () => (
+        <>
+          <EditorMenuItems box={box} path={wt.path} />
+          {grouping && (
+            <>
+              <MenuSeparator />
+              <ActionItems
+                items={[
+                  ...(front && !isShown(key) ? [item(`Tabs beside ${shortLabel(front)}`, <ListPlusIcon />, () => void addGroup(key), { shortcut: "⌥ Click" })] : []),
+                  item("Compare with…", <GitCompareArrowsIcon />, () => openWorktreePicker({ kind: "compare", from: key })),
+                ]}
+              />
+            </>
+          )}
+        </>
+      ),
+    },
+    { type: "sub", label: "Run", icon: <PlayIcon />, items: () => <RunItems box={box} loc={loc} wt={wt} /> },
   ];
-  if (agentSession) items.push({ type: "sub", label: "Orchestrate", icon: <WorkflowIcon />, items: () => <SessionActionItems box={box} session={agentSession.name} /> });
   // A branch's pull request can fix its own CI and review comments.
   if (!wt.main && wt.branch && boxHasRuns(box)) items.push({ type: "sub", label: "Auto-fix this PR", icon: <WrenchIcon />, items: () => <AutoFixItems box={box} path={wt.path} /> });
+  if (agentSession) items.push({ type: "sub", label: "Orchestrate", icon: <WorkflowIcon />, items: () => <SessionActionItems box={box} session={agentSession.name} /> });
+  // The berth://review link for its PR, for a teammate to review it on
+  // their own box: a review's PR, or the PR its branch has, if any.
+  const review = reviewOf(wt);
+  const knownPr = useReview.getState().prs[entryKey(box, wt.path)];
+  if (review) items.push(item("Update review to latest…", <RotateCwIcon />, () => openUpdate(box, loc, wt)));
+
+  items.push(sep);
   // A display name for it; the branch and folder keep theirs. Pinned, it
   // sits at the top of the sidebar (lib/pinned-worktrees).
   if (!wt.main) {
     items.push(
-      sep,
       isPinned(box, wt.path) ? item("Unpin", <PinOffIcon />, () => unpinWorktree(box, wt.path)) : item("Pin to top", <PinIcon />, () => pinWorktree(box, wt.path)),
       item("Rename…", <PencilIcon />, () => openRenameWorktree(box, loc, wt), { shortcut: "F2" }),
     );
     if (wt.title) items.push(item(`Show as ${wt.name}`, <span className="size-4" />, () => void renameWorktree(box, loc, wt, "")));
   }
-  items.push(sep, item("Copy path", <CopyIcon />, () => copy(wt.path, "path")));
-  if (wt.branch) items.push(item("Copy branch", <GitBranchIcon />, () => copy(wt.branch!, "branch name")));
-  if (url) items.push(item("Copy URL", <LinkIcon />, () => copy(url, "URL")));
+  if (grouping) items.push({ type: "sub", label: "Colour", icon: <PaletteIcon />, items: () => <ToneItems wsKey={key} /> });
+  const copies: Action[] = [item("Path", <FolderOpenIcon />, () => copy(wt.path, "path"))];
+  if (wt.branch) copies.push(item("Branch", <GitBranchIcon />, () => copy(wt.branch!, "branch name")));
+  if (url) copies.push(item("URL", <LinkIcon />, () => copy(url, "URL")));
+  if (review || (!wt.main && wt.branch && knownPr !== null)) {
+    copies.push(item("Review link", <GitPullRequestIcon />, () => void copyReviewLink(box, loc, wt)));
+    // The same link, opening logged in as one of the project's dev users.
+    copies.push({ type: "sub", label: "Review link as…", icon: <span className="size-4" />, items: () => <ReviewLinkAsItems box={box} loc={loc} wt={wt} /> });
+  }
+  items.push({ type: "sub", label: "Copy", icon: <CopyIcon />, items: copies });
 
   const danger: Action[] = [];
   if (sessions.length > 0) {
@@ -410,7 +413,7 @@ export function worktreeActions(box: string, loc: Location, wt: Worktree): Actio
   }
   if (!wt.main) {
     danger.push(item("Archive…", <ArchiveIcon />, () => archiveWorktree(box, loc, wt)));
-    danger.push(item("Remove worktree…", <Trash2Icon />, () => removeWorktree(box, loc, wt), { destructive: true }));
+    danger.push(item("Remove worktree", <Trash2Icon />, () => removeWorktree(box, loc, wt), { destructive: true }));
   }
   if (danger.length) items.push(sep, ...danger);
   return items;
@@ -434,7 +437,7 @@ export function archiveWorktree(box: string, loc: Location, wt: Worktree) {
       try {
         res = await removeWorktreeOnBox(client, box, loc.name, wt, "archive");
       } catch (err) {
-        if (/modified|untracked|uncommitted|contains/i.test(errorMessage(err))) throw new Error(`${wt.name} has uncommitted changes, so it was left as it is. Commit them first, or use Remove worktree… to discard them.`);
+        if (/modified|untracked|uncommitted|contains/i.test(errorMessage(err))) throw new Error(`${wt.name} has uncommitted changes, so it was left as it is. Commit them first, or use Remove worktree to discard them.`);
         throw err;
       }
       if (res.archive) toastManager.add({ title: `Archiving ${wt.name}`, description: "Its archive script is running on the box; the worktree goes when it finishes.", type: "info" });
@@ -443,48 +446,52 @@ export function archiveWorktree(box: string, loc: Location, wt: Worktree) {
   });
 }
 
-// removeWorktree asks, then removes a worktree: the sidebar's "Remove
-// worktree…" and the dashboard's "Stop and remove worktree…".
+// removeWorktree removes a worktree without asking: the sidebar's "Remove
+// worktree" and the dashboard's "Stop and remove worktree".
 export function removeWorktree(box: string, loc: Location, wt: Worktree) {
-  confirm({
-    title: `Remove ${worktreeLabel(wt)}?`,
-    description: `Its folder on ${box} is deleted. The repository's teardown script runs first, and the worktree's services and sessions stop.`,
-    detail: (
-      <>
-        {wt.path}
-        {wt.branch && (
-          <>
-            <br />
-            branch {wt.branch}
-          </>
-        )}
-      </>
-    ),
-    confirm: "Remove worktree",
-    destructive: true,
-    options: [
-      ...(wt.branch ? [{ id: "branch", label: `Also delete branch ${wt.branch}` }] : []),
-      { id: "force", label: "Remove even with uncommitted changes", hint: "Without this, git refuses when there is work it would lose." },
-    ],
-    run: async (checked) => {
-      const client = useStore.getState().client;
-      if (!client) throw new Error("not connected");
-      let res: { archive?: string };
-      try {
-        res = await removeWorktreeOnBox(client, box, loc.name, wt, "remove", { force: checked.force, branch: checked.branch });
-      } catch (err) {
-        const m = errorMessage(err);
-        // git's own words for work it would lose.
-        if (/modified|untracked|uncommitted|contains/i.test(m) && !checked.force) throw new Error(`${wt.name} has uncommitted changes. Tick "Remove even with uncommitted changes" to remove it anyway.`);
-        throw err;
-      }
-      if (res.archive) toastManager.add({ title: `Removing ${wt.name}`, description: "The repo's archive script runs on the box first; the worktree goes when it finishes.", type: "info" });
-      else toastManager.add({ title: `Removed ${wt.name}`, description: box, type: "success" });
-    },
-  });
+  queueRemoval(box, loc.name, wt);
 }
 
 // RunItems are a worktree's services, loaded when the Run submenu opens.
+function ReviewLinkAsItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
+  const login = useLoginConfig(box, loc.name);
+  if (!login?.users?.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-meta">{loc.name} lists no dev users to log in as.</div>;
+  return <ActionItems items={login.users.map((u) => item(loginUserLabel(u), <span className="size-4" />, () => void copyReviewLink(box, loc, wt, { as: u.email })))} />;
+}
+
+// ResumeItems are the worktree's structured conversations whose agent isn't
+// running, newest first: each carries on where it left off.
+function ResumeItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
+  const [list, setList] = useState<Conversation[]>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    const client = useStore.getState().client;
+    if (!client) return;
+    boxApi.conversations(client, box, wt.path).then(
+      (all) => setList(all.filter((c) => !c.live)),
+      (e) => {
+        setList([]);
+        setError(plainError(e));
+      },
+    );
+  }, [box, wt.path]);
+  if (!list) {
+    return (
+      <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-meta">
+        <Spinner className="size-3" /> Loading…
+      </div>
+    );
+  }
+  if (!list.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-meta">{error ?? "No structured conversations to resume here."}</div>;
+  const items: Action[] = list.slice(0, 12).map((c) =>
+    item(`${c.title || "Untitled"} · ${ago(c.updated ?? c.created)}`, slot(<AgentIcon agent={c.agent} />), () => {
+      selectWorktree(refOf(box, loc, wt));
+      void resumeConversation(box, c, wsKey(box, wt.path));
+    }),
+  );
+  return <ActionItems items={items} />;
+}
+
 function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }) {
   const [list, setList] = useState<WorktreeService[]>();
   const [error, setError] = useState<string>();
@@ -498,12 +505,12 @@ function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }
   }, [box, loc.name, wt.name]);
   if (!list) {
     return (
-      <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-xs">
+      <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-meta">
         <Spinner className="size-3" /> Loading…
       </div>
     );
   }
-  if (!list.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-xs">{error ?? `${loc.name} defines no services.`}</div>;
+  if (!list.length) return <div className="max-w-56 px-2 py-1.5 text-muted-foreground text-meta">{error ?? `${loc.name} defines no services.`}</div>;
   const act = (svc: WorktreeService, action: "start" | "stop" | "restart") => {
     const client = useStore.getState().client;
     if (!client) return;
@@ -535,6 +542,35 @@ function RunItems({ box, loc, wt }: { box: string; loc: Location; wt: Worktree }
 
 const githubSlug = (loc: Location) => (loc.slug && loc.remote && /github\.com/i.test(loc.remote) ? loc.slug : undefined);
 
+// teamActions are a project's team setup: when the laptop noticed that its
+// org publishes one the person hasn't accepted, a quiet way to review it or
+// to never hear of it again; and, for any org whose setup exists, the link
+// that opens it, to send a teammate.
+function teamActions(members: { box: string; loc: Location }[]): Action[] {
+  const found = members.map((m) => projectSuggestion(m.box, m.loc.name)).find(Boolean);
+  const out: Action[] = [];
+  let org = found?.suggestion.org;
+  if (found) {
+    const s = found.suggestion;
+    out.push(item(`${orgName(s)} has a team setup`, <UsersRoundIcon />, () => reviewSuggestion(s, found.project.box), { hint: "Review…" }));
+    // Or just this project's kit from it, without the box steps.
+    if (found.project.kit && !found.project.kit_applied) {
+      const p = found.project;
+      out.push(item(`Use ${s.org}'s kit for this project…`, <PackageIcon />, () => openTeamKit({ org: s.org, name: orgName(s), box: p.box, location: p.location })));
+    }
+    out.push(item(`Don't suggest again for ${s.org}`, <BellOffIcon />, () => void dismissSuggestion(s)));
+  } else {
+    // Set up from its org's own .berth on this laptop.
+    const owners = new Set(members.map((m) => githubSlug(m.loc)?.split("/")[0]?.toLowerCase()).filter(Boolean));
+    org = useTeam.getState().accepted.find((a) => owners.has(a.org.toLowerCase()) && (a.key ?? a.org).toLowerCase() === a.org.toLowerCase())?.org;
+  }
+  if (org) {
+    const o = org;
+    out.push(item("Copy team setup link", <LinkIcon />, () => copyTeamLink(o)));
+  }
+  return out.length ? [sep, ...out] : [];
+}
+
 // projectActions is everything a repository row offers.
 export function projectActions(box: string, loc: Location): Action[] {
   const st = useStore.getState();
@@ -546,6 +582,7 @@ export function projectActions(box: string, loc: Location): Action[] {
   items.push(
     item("New task…", <GitBranchPlusIcon />, () => st.openNewWorktree({ box, location: loc.name }), { shortcut: "⌘N" }),
     item("Project settings", <Settings2Icon />, () => st.setView({ kind: "project", box, location: loc.name })),
+    ...teamActions([{ box, loc }]),
     sep,
     item("Copy path", <CopyIcon />, () => copy(loc.path, "path")),
   );
@@ -660,7 +697,7 @@ export function projectGroupActions(p: Project): Action[] {
       items: agentPresets(def.box.name, def.loc).map((pr) =>
         item(pr.name, slot(<AgentIcon agent={pr.id} />), () => {
           selectWorktree(refOf(def.box.name, def.loc, mm));
-          void startSession(pr.command, { kind: "tab" }, pr.name, wsKey(def.box.name, mm.path));
+          void startAgent(pr, { kind: "tab" }, pr.name, wsKey(def.box.name, mm.path));
         }),
       ),
     });
@@ -684,9 +721,14 @@ export function projectGroupActions(p: Project): Action[] {
       ...p.members.map((m) => item(m.box.name, slot(m.box.name === p.defaultBox ? <CheckIcon /> : null), () => void groupActions.setDefaultBox(p, m.box.name), { disabled: m.box.state !== "online" })),
     );
     if (addToBox) boxes.push(sep, item("Add to another box…", <PlusIcon />, () => openAddToBox(p)));
+    // Each box's own actions, as the sidebar's foot has them.
+    boxes.push(sep, ...p.members.map((m): Action => ({ type: "sub", label: m.box.name, icon: slot(<ServerIcon />), items: boxActions(m.box) })));
     items.push({ type: "sub", label: "Boxes", icon: <ServerIcon />, items: boxes });
-  } else if (addToBox) {
-    items.push(item("Add to box…", <ServerIcon />, () => openAddToBox(p)));
+  } else {
+    if (addToBox) items.push(item("Add to box…", <ServerIcon />, () => openAddToBox(p)));
+    // Its box's own actions (reconnect, a terminal there, Doctor…), named
+    // after it: boxes live in the sidebar's foot, not as rows of their own.
+    if (def) items.push({ type: "sub", label: def.box.name, icon: <ServerIcon />, items: boxActions(def.box) });
   }
 
   // Its kit, across its boxes.
@@ -725,6 +767,7 @@ export function projectGroupActions(p: Project): Action[] {
       items: p.members.map((m) => item(m.box.name, slot(<ServerIcon />), () => st.setView({ kind: "project", box: m.box.name, location: m.loc.name }))),
     });
   } else if (def) items.push(item("Project settings", <Settings2Icon />, () => st.setView({ kind: "project", box: def.box.name, location: def.loc.name })));
+  items.push(...teamActions(p.members.map((m) => ({ box: m.box.name, loc: m.loc }))));
 
   // How Shipyard shows it: its name, its section, and which projects it joins.
   const organise: Action[] = [

@@ -60,7 +60,7 @@ const NAMES: Record<string, string> = {
   go: "Go", golang: "Go", rs: "Rust", rust: "Rust", py: "Python", python: "Python", rb: "Ruby", ruby: "Ruby", swift: "Swift", kotlin: "Kotlin", java: "Java",
   c: "C", cpp: "C++", "c++": "C++", cs: "C#", csharp: "C#", php: "PHP", lua: "Lua", sql: "SQL", graphql: "GraphQL",
   json: "JSON", jsonc: "JSON", yaml: "YAML", yml: "YAML", toml: "TOML", xml: "XML", html: "HTML", css: "CSS", scss: "SCSS",
-  md: "Markdown", markdown: "Markdown", diff: "Diff", patch: "Diff", dockerfile: "Dockerfile", docker: "Dockerfile", makefile: "Makefile", nix: "Nix",
+  md: "Markdown", markdown: "Markdown", mermaid: "Mermaid", diff: "Diff", patch: "Diff", dockerfile: "Dockerfile", docker: "Dockerfile", makefile: "Makefile", nix: "Nix",
   text: "Text", txt: "Text", plaintext: "Text",
 };
 export function languageName(lang: string): string {

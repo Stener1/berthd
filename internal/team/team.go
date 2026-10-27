@@ -161,6 +161,9 @@ type Project struct {
 	InitDetail string `json:"init_detail,omitempty"`
 	// FirstTask is a task the team suggests to start with.
 	FirstTask string `json:"first_task,omitempty"`
+	// ReviewButton adds a "Review in Shipyard" button to the description of
+	// each PR opened from one of the project's worktrees.
+	ReviewButton bool `json:"review_button,omitempty"`
 }
 
 // Keys says where a project's keys come from. Values never live in git:
@@ -247,7 +250,7 @@ var known = map[string][]string{
 	"":        {"schema", "id", "name", "org", "description", "contact", "docs", "box", "agents", "projects", "keys", "onepassword", "updates"},
 	"box":     {"os", "script", "steps", "settings"},
 	"step":    {"id", "title", "detail", "sudo"},
-	"project": {"id", "repo", "path", "required", "kit", "init", "init_detail", "first_task"},
+	"project": {"id", "repo", "path", "required", "kit", "init", "init_detail", "first_task", "review_button"},
 	"keys":    {"from", "shared", "ask"},
 	"updates": {"notify"},
 }

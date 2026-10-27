@@ -1,0 +1,19 @@
+❯ Which of the flaky tests should move to the nightly suite?
+
+● Three of them fail only under load:
+
+  1. checkout retries the payment twice
+  2. the cart badge counts a removed item
+  3. search times out on the first query
+
+  Which ones do you want moved? I'd say 1 and 3.
+
+✻ Brewed for 1m 36s · done 9:10 PM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  devbox · ~/acme/shop-fix · me/fix · Opus 5.5 · ctx 14%/1.0M
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+                                           new task? /clear to save 143k tokens
+                                                                           /rc

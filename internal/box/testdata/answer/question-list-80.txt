@@ -1,0 +1,21 @@
+❯ Ask me about the acme checkout rollout with AskUserQuestion.
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Rollout  ☐ Owner  ☐ Notes  ✔ Submit  →                    
+
+│ How should acme roll out the new checkout?                                    
+│ 1. The old flow stays behind a flag for a week.
+│ 2. Support wants a heads-up before any change customers can see, and release  
+│ notes go out on Mondays.                                                    
+│ 3. Mobile ships on its own schedule.
+                                                                              
+❯ 1. Flag first (Recommended)
+     Ship behind the flag, turn it on for staff, then everyone.
+  2. All at once
+     Turn it on for everyone on release day.
+  3. Wait
+     Hold until mobile is ready too.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

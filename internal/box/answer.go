@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -58,41 +59,33 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 	if req.Tool == "" {
 		return badRequest("say which question to answer (tool)")
 	}
-	sess, path, err := b.claudeRecord(r)
+	sess, err := b.Sessions.Get(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return err
 	}
+	shown, err := b.answer(r.Context(), sess, req)
+	if err != nil {
+		// Every answer that didn't go says why in the box's log.
+		log.Printf("answer %s: %v", sess.Name, err)
+		return err
+	}
+	log.Printf("answer %s: answered %d questions", sess.Name, len(shown))
+	writeJSON(w, AnswerResult{Answered: shown})
+	return nil
+}
+
+func (b *Box) answer(ctx context.Context, sess Session, req AnswerRequest) ([]string, error) {
 	if b.Turns != nil {
 		if st, ok := b.Turns.State(sess.Name); ok && st.State != "waiting" {
-			return httpError{http.StatusConflict, "Claude isn't waiting for an answer"}
+			return nil, httpError{http.StatusConflict, "Claude isn't waiting for an answer"}
 		}
 	}
 	mu, _ := answering.LoadOrStore(sess.Name, &sync.Mutex{})
 	if !mu.(*sync.Mutex).TryLock() {
-		return httpError{http.StatusConflict, "already answering Claude's questions"}
+		return nil, httpError{http.StatusConflict, "already answering Claude's questions"}
 	}
 	defer mu.(*sync.Mutex).Unlock()
-
-	res, err := reader().Read("claude", path, sess.Dir, 0)
-	if err != nil {
-		return err
-	}
-	it, open := transcript.OpenQuestion(res, req.Tool)
-	switch {
-	case it.Kind == "":
-		return httpError{http.StatusNotFound, "that question isn't in Claude's conversation"}
-	case !open:
-		return httpError{http.StatusConflict, "those questions were already answered"}
-	}
-	shown, err := checkAnswers(it.Questions, req.Answers)
-	if err != nil {
-		return err
-	}
-	if err := driveAnswers(r.Context(), tmuxTerm{s: b.Sessions, target: "=" + sess.Name + ":"}, it.Questions, req.Answers); err != nil {
-		return err
-	}
-	writeJSON(w, AnswerResult{Answered: shown})
-	return nil
+	return b.driverFor(sess).Answer(ctx, sess, req)
 }
 
 // checkAnswers says the answers fit the questions, and returns each as
@@ -141,6 +134,9 @@ func checkAnswers(qs []transcript.Question, as []QuestionAnswer) ([]string, erro
 type keyTerm interface {
 	keys(k ...string) error
 	screen() string
+	// fit makes the screen tall enough to show a whole form, and gives
+	// back what puts it as it was.
+	fit() (restore func())
 }
 
 type tmuxTerm struct {
@@ -171,6 +167,64 @@ func (t tmuxTerm) screen() string {
 	return string(out)
 }
 
+// formRows is a screen tall enough for any form: four questions'
+// review, each with a long answer, at 80 columns.
+const formRows = 200
+
+// fit grows a short pane while it is answered. A form taller than its
+// screen scrolls its tabs and question off the top, where the screen
+// can't be read: what scrolls off is an old frame, not the one drawn
+// after it. An agent nobody has open sits at tmux's 80x24,
+// which a question with a list in it outgrows.
+func (t tmuxTerm) fit() func() {
+	ctx := context.Background()
+	out, err := t.s.tmux(ctx, "display-message", "-p", "-t", t.target, "#{window_width} #{window_height}")
+	if err != nil {
+		return func() {}
+	}
+	var w, h int
+	if _, err := fmt.Sscan(string(out), &w, &h); err != nil || h >= formRows {
+		return func() {}
+	}
+	// resize-window fixes the window's size (window-size manual): its own
+	// setting, if it had one, goes back after, else it inherits again.
+	own, _ := t.s.tmux(ctx, "show-options", "-w", "-q", "-v", "-t", t.target, "window-size")
+	if _, err := t.s.tmux(ctx, "resize-window", "-t", t.target, "-y", strconv.Itoa(formRows)); err != nil {
+		return func() {}
+	}
+	policy := []string{"set-option", "-w", "-u", "-t", t.target, "window-size"}
+	if v := strings.TrimSpace(string(own)); v != "" {
+		policy = []string{"set-option", "-w", "-t", t.target, "window-size", v}
+	}
+	return func() {
+		t.s.tmux(ctx, append([]string{"resize-window", "-t", t.target, "-x", strconv.Itoa(w), "-y", strconv.Itoa(h), ";"}, policy...)...)
+	}
+}
+
+// formTail is what the box's log keeps of a screen where an answer
+// stopped: the form, from its tabs down, or the foot of a screen without
+// one. Never the conversation above it. The form holds the person's own
+// words, as the agent's record does on the same box: without what the
+// screen showed, the next failure can't be told apart from this one.
+func formTail(sc string) string {
+	lines := strings.Split(strings.TrimRight(sc, " \n\t"), "\n")
+	from := max(len(lines)-8, 0)
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if (strings.HasPrefix(l, "←") || strings.HasPrefix(l, "☐") || strings.HasPrefix(l, "☒")) && strings.ContainsAny(l, "☐☒") {
+			from = i
+			break
+		}
+	}
+	var out []string
+	for _, l := range lines[from:] {
+		if l = strings.TrimRight(l, " \t"); l != "" {
+			out = append(out, "  | "+l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 // answerStep is how long one key's effect may take to show.
 var answerStep = 2500 * time.Millisecond
 
@@ -180,8 +234,17 @@ func stuck(format string, args ...any) error {
 }
 
 // driveAnswers fills in Claude Code's question form from the top, one
-// question at a time, checking the screen after each key.
-func driveAnswers(ctx context.Context, t keyTerm, qs []transcript.Question, as []QuestionAnswer) error {
+// question at a time, checking the screen after each key. Where it stops,
+// the box's log has the screen it stopped at.
+func driveAnswers(ctx context.Context, t keyTerm, qs []transcript.Question, as []QuestionAnswer) (err error) {
+	restore := t.fit()
+	defer func() {
+		if err != nil {
+			// answerSession logs why.
+			log.Printf("answer: Claude's form when it stopped:\n%s", formTail(t.screen()))
+		}
+		restore()
+	}()
 	until := func(ok func(formView) bool) (formView, bool) {
 		end := time.Now().Add(answerStep)
 		for {
@@ -242,23 +305,27 @@ func driveAnswers(ctx context.Context, t keyTerm, qs []transcript.Question, as [
 		}
 		r := f.row(row)
 		switch {
-		case flatText(r.text) == words && (!multi || r.checked):
+		case r.words() == words && (!multi || r.checked):
 			return nil
 		case !ownWordsEmpty(r.text):
-			return stuck("Claude's own-words answer already holds %q", r.text)
+			return stuck("Claude's own-words answer already holds %q", clip(r.words(), 60))
 		}
 		if err := press("-l", words); err != nil {
 			return err
 		}
-		if _, ok := until(func(g formView) bool {
+		// Long words wrap onto the lines under the row: read whole, they
+		// are exactly what was typed.
+		if g, ok := until(func(g formView) bool {
 			r := g.row(row)
-			return g.ok && strings.HasPrefix(words, flatText(r.text)) && len(r.text) >= min(len(words), 8) && (!multi || r.checked)
+			return g.ok && r.words() == words && (!multi || r.checked)
 		}); !ok {
-			return stuck("Claude's form didn't take your words")
+			return stuck("Claude's form didn't take your words: it shows %q", clip(g.row(row).words(), 60))
 		}
 		return nil
 	}
 
+	// More than one question, or several picks, end in a review.
+	reviews := len(qs) > 1 || qs[0].Multi
 	// The form opens on the first question; one the person moved on from
 	// goes back to it.
 	f, ok := until(func(f formView) bool { return f.ok && (f.review || questionIndex(qs, f.question) >= 0) })
@@ -342,30 +409,35 @@ func driveAnswers(ctx context.Context, t keyTerm, qs []transcript.Question, as [
 			return err
 		}
 		last := i == len(qs)-1
-		if _, ok := until(func(f formView) bool {
-			if last {
-				return !f.ok || f.review
+		var ok bool
+		if f, ok = until(func(f formView) bool {
+			switch {
+			case !last:
+				return f.ok && !f.review && questionIndex(qs, f.question) == i+1
+			case reviews:
+				return f.ok && f.review
 			}
-			return f.ok && !f.review && questionIndex(qs, f.question) == i+1
+			return !f.ok
 		}); !ok {
+			if last && reviews {
+				return stuck("Claude's form didn't show its review after question %d", i+1)
+			}
 			return stuck("Claude didn't take the answer to question %d", i+1)
 		}
+	}
+	if !reviews {
+		return nil
 	}
 
 	// More than one question, or several picks: Claude Code shows them all
 	// before they go. Submit only what it shows as wanted.
-	f = readForm(t.screen())
-	if !f.ok {
-		return nil
-	}
 	shown, _ := checkAnswers(qs, as)
 	for i, s := range shown {
 		if !strings.Contains(f.reviewText, "→ "+flatText(s)) {
 			return stuck("Claude's review doesn't show %q for question %d", s, i+1)
 		}
 	}
-	f, err := moveTo(1)
-	if err != nil {
+	if f, err = moveTo(1); err != nil {
 		return err
 	}
 	if r := f.row(1); r.text != "Submit answers" {
@@ -395,10 +467,18 @@ type formView struct {
 }
 
 type formRow struct {
-	num     int // 0 for the Next row
-	text    string
+	num  int // 0 for the Next row
+	text string
+	// more is the lines under it: an option's description, or the rest
+	// of long words of the person's own, wrapped.
+	more    []string
 	box     bool // a checkbox: "[ ]" or "[✔]"
 	checked bool
+}
+
+// words is the person's own words in the row, on one line.
+func (r formRow) words() string {
+	return flatText(r.text + " " + strings.Join(r.more, " "))
 }
 
 func (f formView) row(n int) formRow {
@@ -413,11 +493,15 @@ func (f formView) row(n int) formRow {
 func (f formView) has(n int) bool { return f.row(n).num == n }
 
 var (
-	formRule  = regexp.MustCompile(`^\s*[─━]{8,}\s*$`)
-	formRowRe = regexp.MustCompile(`^\s*(❯)?[\s\x{a0}]*(\d{1,2})\.[\s\x{a0}]+(.*?)\s*$`)
-	formNext  = regexp.MustCompile(`^\s*(❯)?[\s\x{a0}]*(Next|Submit)\s*$`)
-	formBox   = regexp.MustCompile(`^\[([^\]])\]\s*(.*)$`)
-	formEnd   = regexp.MustCompile(`^(❯\s*)?\d\.\s+Cancel$`)
+	formRule = regexp.MustCompile(`^\s*[─━]{8,}\s*$`)
+	// A row is "❯ 1." or "  1.": a question's own "1." lines start at the
+	// edge, or after its "│".
+	formRowRe = regexp.MustCompile(`^(?:(❯)|[\s\x{a0}])[\s\x{a0}](\d{1,2})\.[\s\x{a0}]+(.*?)\s*$`)
+	// A question of several lines is drawn behind a bar (Claude Code 2.1.3).
+	formGutter = regexp.MustCompile(`^\s*│\s?`)
+	formNext   = regexp.MustCompile(`^\s*(❯)?[\s\x{a0}]*(Next|Submit)\s*$`)
+	formBox    = regexp.MustCompile(`^\[([^\]])\]\s*(.*)$`)
+	formEnd    = regexp.MustCompile(`^(❯\s*)?\d\.\s+Cancel$`)
 )
 
 // readForm reads the form at the foot of a screen. It sits under its tab
@@ -445,7 +529,7 @@ func readForm(sc string) formView {
 		return f
 	}
 	tabs := -1
-	for i := end; i >= 0 && i > end-80; i-- {
+	for i := end; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
 		if (strings.HasPrefix(l, "←") || strings.HasPrefix(l, "☐") || strings.HasPrefix(l, "☒")) && strings.ContainsAny(l, "☐☒") {
 			tabs = i
@@ -475,6 +559,11 @@ func readForm(sc string) formView {
 	var words []string
 	for _, l := range region {
 		if formRule.MatchString(l) {
+			if len(f.rows) == 0 && !f.review {
+				// A rule before any option: these tabs are an older
+				// frame's, above something else.
+				return formView{cursor: -1}
+			}
 			break // what follows ("Chat about this") isn't an answer
 		}
 		if m := formNext.FindStringSubmatch(l); m != nil && !f.review {
@@ -486,8 +575,13 @@ func readForm(sc string) formView {
 		}
 		m := formRowRe.FindStringSubmatch(l)
 		if m == nil {
-			if len(f.rows) == 0 && !f.review {
-				words = append(words, l)
+			switch {
+			case len(f.rows) > 0:
+				if r := &f.rows[len(f.rows)-1]; r.num > 0 && strings.TrimSpace(l) != "" {
+					r.more = append(r.more, strings.TrimSpace(l))
+				}
+			case !f.review:
+				words = append(words, formGutter.ReplaceAllString(l, ""))
 			}
 			continue
 		}

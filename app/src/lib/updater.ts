@@ -59,45 +59,67 @@ export function checkForUpdate({ manual = false } = {}): Promise<void> {
 async function run(manual: boolean) {
   const set = useUpdater.setState;
   const before = useUpdater.getState();
-  // A downloaded update waits for its restart; checking again would only
-  // fetch the same bytes.
-  if (before.status === "ready" || before.status === "installing") return;
-  set({ status: "checking" }, true);
+  if (before.status === "installing") return;
+  // A downloaded update still waits for its restart, but the feed may have
+  // moved on since (releases a few hours apart): a newer one is fetched
+  // behind it and takes its place, so a restart always lands on the latest.
+  const waiting = before.status === "ready" ? before.version : undefined;
+  if (!waiting) set({ status: "checking" }, true);
   try {
     const update = await check({ timeout: 30_000 });
-    if (!update) {
-      set({ status: "current", checkedAt: Date.now() }, true);
+    if (!update || update.version === waiting) {
+      await update?.close().catch(() => {});
+      if (!waiting) set({ status: "current", checkedAt: Date.now() }, true);
       return;
     }
-    set({ status: "downloading", version: update.version, received: 0 }, true);
+    if (!waiting) set({ status: "downloading", version: update.version, received: 0 }, true);
     let received = 0;
     let total: number | undefined;
     await update.download(
       (e) => {
+        if (waiting) return;
         if (e.event === "Started") total = e.data.contentLength;
         if (e.event === "Progress") received += e.data.chunkLength;
         set({ status: "downloading", version: update.version, received, total }, true);
       },
       { timeout: 10 * 60_000 },
     );
+    // Restarting while it downloaded installed the one waiting.
+    if (useUpdater.getState().status === "installing") return void update.close().catch(() => {});
     await pending?.close().catch(() => {});
     pending = update;
     set({ status: "ready", version: update.version }, true);
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    console.warn("berth: update check failed:", error);
+    // The update already downloaded still installs.
+    if (waiting) return;
     if (manual) set({ status: "error", error, checkedAt: Date.now() }, true);
     else set(before.status === "checking" ? { status: "idle" } : before, true);
-    console.warn("berth: update check failed:", error);
   }
 }
 
 // restartToUpdate installs the downloaded update and relaunches Shipyard. Only
 // ever from a click.
 export async function restartToUpdate() {
-  const update = pending;
   const state = useUpdater.getState();
-  if (!update || state.status !== "ready") return;
+  if (!pending || state.status !== "ready") return;
   useUpdater.setState({ status: "installing", version: state.version }, true);
+  // One released since this one downloaded is the one to land on: fetched
+  // now, unless the feed is slow to say (the one waiting installs then).
+  const newer = await check({ timeout: 5_000 }).catch(() => null);
+  if (newer && newer.version !== state.version) {
+    useUpdater.setState({ status: "installing", version: newer.version }, true);
+    try {
+      await newer.download(undefined, { timeout: 10 * 60_000 });
+      await pending.close().catch(() => {});
+      pending = newer;
+    } catch {
+      await newer.close().catch(() => {});
+      useUpdater.setState({ status: "installing", version: state.version }, true);
+    }
+  } else await newer?.close().catch(() => {});
+  const update = pending;
   try {
     await update.install();
     await invoke("restart_app");

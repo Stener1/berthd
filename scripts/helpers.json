@@ -1,0 +1,16 @@
+{
+  "berth-leadline": {
+    "plugin": "leadline",
+    "command": "cmd/berth-leadline",
+    "make": "leadline",
+    "release": "leadline-helper",
+    "title": "Leadline helper"
+  },
+  "berth-database": {
+    "plugin": "database",
+    "command": "cmd/berth-database",
+    "make": "database",
+    "release": "database-helper",
+    "title": "Database helper"
+  }
+}

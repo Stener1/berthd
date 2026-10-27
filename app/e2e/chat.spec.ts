@@ -32,6 +32,83 @@ test("a reply's Markdown draws, with its code highlighted", async ({ app }) => {
   await expect(md.locator("pre code")).toContainText("orders.byIdempotencyKey(event.idempotencyKey)");
 });
 
+test("a reply shows a worktree picture and opens its file", async ({ app }) => {
+  mockOnly();
+  await app.open({ params: { view: "conversation", scene: "chat-image" } });
+  await app.openWorktree("gpu/shop");
+  const card = app.chat.getByTestId("chat-worktree-image");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-path", "screenshots/checkout-result.png");
+  const image = card.getByRole("img", { name: "Checkout result" });
+  await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(960);
+  if (process.env.BERTH_SHOTS) {
+    await card.scrollIntoViewIfNeeded();
+    await app.page.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-worktree-image.png` });
+    await card.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-worktree-image-detail.png` });
+  }
+  await card.getByRole("button", { name: "Source" }).click();
+  await expect(card).toContainText("![Checkout result](screenshots/checkout-result.png)");
+  await card.getByRole("button", { name: "Image" }).click();
+  await card.getByRole("button", { name: "Open Checkout result" }).click();
+  await expect(app.page.locator("[data-testid=file-pane][data-path='screenshots/checkout-result.png'] [data-testid=file-image] img")).toBeVisible();
+});
+
+test("Markdown tables can chart numbers and filter failed rows", async ({ app }) => {
+  mockOnly();
+  await app.open({ params: { view: "conversation", scene: "chat-tables" } });
+  await app.openWorktree("gpu/shop");
+  const speed = app.chat.locator(".cv-table").filter({ hasText: "Before (ms)" });
+  await expect(speed).toBeVisible();
+  await speed.getByRole("button", { name: "Chart" }).click();
+  const chart = speed.getByTestId("chat-table-chart");
+  await expect(chart).toBeVisible();
+  await expect(chart.locator("[data-chart-type=bar]")).toBeVisible();
+  await expect(chart.locator("[data-chart-type=bar] svg").first()).toBeVisible();
+  if (process.env.BERTH_SHOTS) {
+    // Let the chart's reveal finish before recording its final appearance.
+    await app.page.waitForTimeout(1200);
+    await chart.scrollIntoViewIfNeeded();
+    await app.page.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-table-chart.png` });
+    await speed.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-table-chart-detail.png` });
+  }
+  await speed.getByRole("button", { name: "Explore" }).click();
+  const explored = speed.getByTestId("chat-explored-table");
+  await explored.getByRole("button", { name: "After (ms)" }).click();
+  await expect(explored.locator("tbody tr").first()).toContainText("Cart");
+
+  const checks = app.chat.locator(".cv-table").filter({ hasText: "Retry webhook" });
+  await checks.getByRole("button", { name: "Explore" }).click();
+  await checks.getByRole("button", { name: "Failures only" }).click();
+  await expect(checks.getByTestId("chat-explored-table").locator("tbody tr")).toHaveCount(2);
+  await expect(checks.getByTestId("chat-explored-table")).not.toContainText("Search index");
+  if (process.env.BERTH_SHOTS) await checks.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-table-failures-detail.png` });
+  await checks.getByRole("button", { name: "Original" }).click();
+  await expect(checks.locator(":scope > table")).toBeVisible();
+  await expect(checks.locator(":scope > table")).toContainText("Search index");
+});
+
+test("a test report shows failures and opens the failed file", async ({ app }) => {
+  mockOnly();
+  await app.open({ params: { view: "conversation", scene: "chat-tests" } });
+  await app.openWorktree("gpu/shop");
+  const card = app.chat.getByTestId("chat-test-results");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("1 failed");
+  await expect(card).toContainText("8 passed");
+  await expect(card).toContainText("reuses an order when a webhook retries");
+  const block = card.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' cv-pre ')]").first();
+  if (process.env.BERTH_SHOTS) {
+    await block.scrollIntoViewIfNeeded();
+    await app.page.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-test-results.png` });
+    await block.screenshot({ path: `${process.env.BERTH_SHOTS}/chat-test-results-detail.png` });
+  }
+  await block.getByRole("button", { name: "Show test output" }).click();
+  await expect(block.locator("pre")).toBeVisible();
+  await block.getByRole("button", { name: "Show test results" }).click();
+  await card.getByRole("button", { name: /Open apps\/web\/lib\/checkout\/createOrder\.test\.ts line 42/ }).click();
+  await expect(app.page.locator("[data-testid=file-pane][data-path='apps/web/lib/checkout/createOrder.test.ts']")).toBeVisible();
+});
+
 test("an edit opens to its change, highlighted", async ({ app }) => {
   mockOnly();
   await app.openWorktree("devl/checkout-fix");
@@ -109,6 +186,45 @@ test("a form of questions steps through to a review and submits", async ({ app }
   await expect(app.chat.getByText("I'll plan it for Next minor")).toBeVisible();
 });
 
+test("answers the box couldn't deliver stay in the form, to retry or copy", async ({ app }) => {
+  mockOnly("answers a question on a box");
+  await app.open({ params: { view: "conversation", scene: "answer-stuck" } });
+  await app.openWorktree("gpu/shop");
+  const form = app.chat.getByTestId("question-form");
+  const next = form.getByRole("button", { name: /^(Next|Review|Submit answers)$/ }).last();
+  const words = "Ship it Thursday only if the payment provider's sandbox is green by Wednesday noon; otherwise hold it for QA and tell support before anything else.";
+  await form.getByRole("radio", { name: "Something else" }).click();
+  await form.getByRole("textbox", { name: "Your own answer" }).fill(words);
+  await next.click();
+  await form.getByRole("checkbox", { name: /Unit tests/ }).click();
+  await next.click();
+  await form.getByRole("radio", { name: /bailey/ }).click();
+  await next.click();
+  await expect(next).toHaveText(/Submit answers/);
+  await next.click();
+
+  // It didn't take: the form stays, with every answer and why.
+  const failed = form.getByTestId("question-form-failed");
+  await expect(failed).toBeVisible();
+  await expect(failed).toContainText("Your answers didn't reach Claude");
+  await expect(failed).toContainText("Claude's screen doesn't show its questions");
+  await expect(form).toContainText("Review your answers");
+  await expect(form).toContainText(words);
+  await expect(form).toContainText("Unit tests");
+
+  // Copy answers: each under its question's name, ready to paste.
+  await app.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await failed.getByRole("button", { name: "Copy answers" }).click();
+  await expect.poll(() => app.page.evaluate(() => navigator.clipboard.readText())).toBe(`Release: ${words}\nChecks: Unit tests\nReviewer: bailey`);
+
+  // Retry goes, and the form becomes what was answered.
+  await failed.getByRole("button", { name: "Retry" }).click();
+  await expect(form).toHaveCount(0);
+  const answered = app.chat.locator("[data-testid=chat-item][data-kind=question]");
+  await expect(answered).toContainText("Answered 3 questions");
+  await expect(answered).toContainText(words);
+});
+
 test("the artifacts chip lists the pages an agent published", async ({ app }) => {
   mockOnly();
   await app.openWorktree("devl/search-perf");
@@ -140,6 +256,25 @@ test("a reply sent while the agent works waits as pending", async ({ app }) => {
   await expect(pending).toContainText("Also try the stricter rubric, please");
   await expect(pending).toContainText("Queued: sends when Claude finishes");
   await expect(pending.getByRole("button", { name: "Send now" })).toBeEnabled();
+});
+
+test("a turn that ended while its work runs on shows the hourglass and takes a new turn", async ({ app }) => {
+  mockOnly();
+  // Turn check read its finished turn as work still running (unfinished).
+  await app.openWorktree("devl/order-export");
+  await app.page.locator("[data-tab-strip] [data-tab]", { hasText: "Add tests for the export job" }).click();
+  const onWork = app.chat.locator("[data-kind=on-its-work]");
+  await expect(onWork).toHaveText("Waiting on its work");
+  await expect(app.chat.locator("[data-kind=thinking]")).toHaveCount(0);
+  await expect(app.composer.getByRole("button", { name: "Send", exact: true })).toBeVisible();
+  await expect(app.panes.getByRole("button", { name: /^Stop / })).toHaveCount(0);
+  await onWork.getByText("Waiting on its work").hover();
+  await expect(app.page.locator("[data-slot=tooltip-popup]")).toContainText("Its turn ended while its work runs on");
+  // A live turn keeps its spinner, Stop and Queue.
+  await app.openWorktree("gpu/judge-v2");
+  await expect(app.chat.locator("[data-kind=thinking]")).toBeVisible();
+  await expect(app.panes.getByRole("button", { name: "Stop Claude" })).toBeVisible();
+  await expect(app.composer.getByRole("button", { name: "Queue", exact: true })).toBeVisible();
 });
 
 // selectWords selects an element's words, as a triple click does.

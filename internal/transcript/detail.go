@@ -83,12 +83,20 @@ func Detail(source, path, dir, id string) (ToolDetail, error) {
 	needle := []byte(`"` + id + `"`)
 	d := ToolDetail{ID: id}
 	found, answered := false, false
+	var line []byte
 	for {
-		line, err := readLine(r)
+		var err error
+		line, err = readLineInto(r, line)
 		if len(line) > 0 && bytes.Contains(line, needle) {
 			var call, result bool
 			if source == "codex" {
 				call, result = codexDetail(line, id, dir, &d)
+			} else if source == SourceCodexHost {
+				call, result = codexHostDetail(line, id, dir, &d)
+			} else if source == SourceClaudeHost {
+				if inner, ok := unwrapHost(line); ok {
+					call, result = claudeDetail(inner, id, dir, &d)
+				}
 			} else {
 				call, result = claudeDetail(line, id, dir, &d)
 			}
@@ -109,14 +117,19 @@ func Detail(source, path, dir, id string) (ToolDetail, error) {
 
 // readLine reads one line, skipping (not keeping) any longer than
 // detailLine.
-func readLine(r *bufio.Reader) ([]byte, error) {
-	var buf []byte
+func readLine(r *bufio.Reader) ([]byte, error) { return readLineInto(r, nil) }
+
+// readLineInto is readLine into buf's space: a scan of a long record reuses
+// one buffer rather than allocating every line again. The line is good
+// until the next call.
+func readLineInto(r *bufio.Reader, buf []byte) ([]byte, error) {
+	buf = buf[:0]
 	over := false
 	for {
 		chunk, err := r.ReadSlice('\n')
 		if !over {
 			if len(buf)+len(chunk) > detailLine {
-				over, buf = true, nil
+				over, buf = true, buf[:0]
 			} else {
 				buf = append(buf, chunk...)
 			}
@@ -134,9 +147,15 @@ func claudeDetail(line []byte, id, dir string, d *ToolDetail) (call, result bool
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 		ToolUseResult json.RawMessage `json:"toolUseResult"`
+		// The same, as Claude Code's stream (a structured session's log)
+		// names it.
+		StreamResult json.RawMessage `json:"tool_use_result"`
 	}
 	if json.Unmarshal(line, &l) != nil {
 		return
+	}
+	if len(l.ToolUseResult) == 0 {
+		l.ToolUseResult = l.StreamResult
 	}
 	var blocks []struct {
 		Type      string          `json:"type"`

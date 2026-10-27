@@ -30,6 +30,35 @@ ifneq ($(TMUX),0)
 	@scripts/build-tmux.sh $(BIN) || echo "make daemons: Shipyard's tmux was not built (above says why); berth add ssh installs tmux with the box's package manager instead"
 endif
 
+# The helpers: programs a plugin runs on a box. Each is built like berthd,
+# static and without cgo, for every box platform and for a Mac that is its
+# own box, side by side in bin/. They are not part of `all`, of the app or
+# of Shipyard's own releases: a plugin's manifest names these builds by
+# checksum, and Shipyard installs the one for a box when the plugin's helper
+# is turned on there (internal/box/helpers.go). scripts/release-helper.sh
+# builds one with its target here, lists the builds in site/plugins/ and
+# uploads them to a release of their own; scripts/helpers.json is the table
+# of them (program, plugin, command, target), and a new helper is a row
+# there and a target here.
+#
+#   leadline   berth-leadline records what code did in development: queries,
+#              traces and logs (internal/leadline/API.md).
+#   database   berth-database browses and edits a worktree's own development
+#              database (internal/database/API.md).
+define helper
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/$(1)-linux-amd64 ./cmd/$(1)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/$(1)-linux-arm64 ./cmd/$(1)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/$(1)-darwin-arm64 ./cmd/$(1)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/$(1)-darwin-amd64 ./cmd/$(1)
+endef
+
+.PHONY: leadline database
+leadline:
+	$(call helper,berth-leadline)
+
+database:
+	$(call helper,berth-database)
+
 test:
 	$(GO) vet ./...
 	$(GO) test -race ./...

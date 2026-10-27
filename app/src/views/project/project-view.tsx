@@ -19,6 +19,10 @@ import { FlowsSection } from "@/views/project/flows-section";
 import { mergeConfig } from "@/lib/kits";
 import { KitSection } from "@/views/project/kit-section";
 import { KitLayer, LayeredScript, Section, SourceBadge } from "@/views/project/parts";
+import { LoginSection } from "@/views/project/login-section";
+import { KeepMainSection } from "@/views/project/keep-main-section";
+import { ReviewButtonSection } from "@/views/project/review-button-section";
+import { TeamSuggestLine } from "@/views/project/team-suggest-line";
 import { ServicesSection } from "@/views/project/services-section";
 import { ProjectTeamKeys } from "@/views/team/team-keys-note";
 import { clean, useProjectConfig } from "@/views/project/use-project-config";
@@ -28,9 +32,12 @@ import { ErrorText } from "@/components/error-note";
 const SECTIONS = [
   { id: "kit", label: "Kit" },
   { id: "scripts", label: "Setup & teardown" },
+  { id: "main", label: "Main branch" },
   { id: "env", label: "Environment" },
   { id: "ports", label: "Ports" },
   { id: "services", label: "Services" },
+  { id: "login", label: "Login users" },
+  { id: "review-button", label: "Review button" },
   { id: "agents", label: "Agents" },
   { id: "flows", label: "Automations" },
   { id: "skills", label: "Skills" },
@@ -75,10 +82,10 @@ export function ProjectView({ box, location }: { box: string; location: string }
     <div className="flex h-full flex-col">
       <ViewHeader
         title={
-          <span className="flex items-center gap-2">
-            <FolderGitIcon className="size-3.5 text-muted-foreground" />
+          <span className="flex items-baseline gap-2">
+            <FolderGitIcon className="size-5 self-center text-muted-foreground" />
             {location}
-            <span className="font-normal text-muted-foreground">on</span>
+            <span className="font-normal text-muted-foreground text-subtitle">on</span>
             <MemberSwitcher box={box} location={location} />
           </span>
         }
@@ -86,10 +93,10 @@ export function ProjectView({ box, location }: { box: string; location: string }
           repo ? (
             <span className="flex min-w-0 items-center gap-1.5">
               <GitCommitHorizontalIcon className="size-3 shrink-0" />
-              <code className="truncate font-mono">{config?.repo_path}</code>
-              <span className="shrink-0 rounded-md border px-1.5 text-[11px]">committed in the repo</span>
+              <code className="truncate font-mono text-mono">{config?.repo_path}</code>
+              <span className="shrink-0 rounded-md border px-1.5 text-tag">committed in the repo</span>
               {trustPending(trust) ? (
-                <span className="shrink-0 rounded-md border border-warning/30 px-1.5 text-[11px] text-warning-foreground">not trusted on {box}</span>
+                <span className="shrink-0 rounded-md border border-warning/30 px-1.5 text-tag text-warning-foreground">not trusted on {box}</span>
               ) : (
                 trust?.state === "trusted" &&
                 (runsAnything(repo) ? (
@@ -114,13 +121,13 @@ export function ProjectView({ box, location }: { box: string; location: string }
                 <MenuItem onClick={() => copy("effective")}>
                   <span className="flex flex-col">
                     <span>Everything that applies</span>
-                    <span className="text-muted-foreground text-xs">The repo's config with {box}'s changes</span>
+                    <span className="text-muted-foreground text-meta">The repo's config with {box}'s changes</span>
                   </span>
                 </MenuItem>
                 <MenuItem onClick={() => copy("local")}>
                   <span className="flex flex-col">
                     <span>Only {box}'s changes</span>
-                    <span className="text-muted-foreground text-xs">To move them into the repo</span>
+                    <span className="text-muted-foreground text-meta">To move them into the repo</span>
                   </span>
                 </MenuItem>
               </MenuPopup>
@@ -138,16 +145,16 @@ export function ProjectView({ box, location }: { box: string; location: string }
       />
 
       <div className="flex min-h-0 flex-1">
-        <nav className="hidden w-48 shrink-0 border-r px-3 py-6 lg:block">
+        <nav className="hidden w-48 shrink-0 border-r px-edge py-6 lg:block">
           {SECTIONS.map((s) => (
-            <a key={s.id} href={`#${s.id}`} className="block rounded-md px-2.5 py-1.5 text-muted-foreground text-sm hover:bg-accent hover:text-foreground">
+            <a key={s.id} href={`#${s.id}`} className="block rounded-md px-2 py-1.5 text-muted-foreground text-body hover:bg-accent hover:text-foreground">
               {s.label}
             </a>
           ))}
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl space-y-8 px-8 pt-7 pb-24">
-            {error && <ErrorText className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-destructive-foreground text-sm" text={error} />}
+          <div className="mx-auto w-full max-w-[calc(44rem+2*var(--spacing-page))] space-y-8 px-page pt-7 pb-24">
+            {error && <ErrorText className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-destructive-foreground text-body" text={error} />}
             {!config ? (
               <div className="space-y-4">
                 <Skeleton className="h-40 rounded-xl" />
@@ -156,6 +163,7 @@ export function ProjectView({ box, location }: { box: string; location: string }
             ) : (
               <KitLayer.Provider value={{ config: kit?.config, name: kit?.name }}>
                 <RepoTrustBanner box={box} location={location} config={config} onChanged={() => void reload()} />
+                <TeamSuggestLine box={box} location={location} />
                 <KitSection box={box} location={location} kit={kit} onChanged={() => void reload()} />
                 <Section id="scripts" title="Setup & teardown" description="Run in a new worktree after it is made, and before one is removed. A failing teardown keeps the worktree.">
                   <div className="divide-y divide-border/70">
@@ -182,10 +190,13 @@ export function ProjectView({ box, location }: { box: string; location: string }
                   </div>
                 </Section>
 
+                <KeepMainSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <ProjectTeamKeys box={box} location={location} env={{ ...(base?.env ?? {}), ...(draft.env ?? {}) }} onAdd={(keys) => setDraft({ ...draft, env: { ...Object.fromEntries(keys.map((k) => [k, ""])), ...(draft.env ?? {}) } })} />
                 <EnvSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <PortsSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <ServicesSection repo={base} draft={draft} setDraft={setDraft} box={box} location={location} urlPort={urlPort} />
+                <LoginSection config={config} box={box} />
+                <ReviewButtonSection config={config} draft={draft} setDraft={setDraft} box={box} />
                 <AgentsSection repo={base} draft={draft} setDraft={setDraft} box={box} />
                 <FlowsSection box={box} location={location} />
                 <section id="skills" className="scroll-mt-6">
@@ -208,13 +219,13 @@ function PortsSection({ repo, draft, setDraft, box }: { repo: RepoConfig | null;
     <Section id="ports" title="Ports" description="Each worktree gets its own block of ports, so every worktree's servers can run at once.">
       <div className="flex items-center gap-6 px-4 py-3.5">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 text-row">
             Ports per worktree
             {source && <SourceBadge source={source} box={box} field="ports" />}
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
             {names.map((n) => (
-              <code key={n} className={cn("rounded bg-muted px-1.5 py-px font-mono text-[11px] text-muted-foreground")}>
+              <code key={n} className={cn("rounded bg-muted px-1.5 py-px font-mono text-tag text-muted-foreground")}>
                 {n}
               </code>
             ))}
@@ -236,9 +247,9 @@ function PortsSection({ repo, draft, setDraft, box }: { repo: RepoConfig | null;
 function MemberSwitcher({ box, location }: { box: string; location: string }) {
   const { projects } = useProjects();
   const p = projects.find((x) => x.members.some((m) => m.box.name === box && m.loc.name === location));
-  if (!p || p.members.length < 2) return <span className="font-normal text-muted-foreground">{box}</span>;
+  if (!p || p.members.length < 2) return <span className="font-normal text-muted-foreground text-subtitle">{box}</span>;
   return (
-    <span className="inline-flex items-center gap-0.5 rounded-md border p-0.5 font-normal text-xs" role="group" aria-label="Box">
+    <span className="inline-flex items-center gap-0.5 rounded-md border p-0.5 font-normal text-meta" role="group" aria-label="Box">
       {p.members.map((m) => (
         <button
           key={m.box.name}
@@ -255,4 +266,4 @@ function MemberSwitcher({ box, location }: { box: string; location: string }) {
 
 // runsAnything: a committed config with only ports needs no trust.
 const runsAnything = (c: RepoConfig | null) =>
-  !!c && !!(c.setup || c.archive || Object.keys(c.env ?? {}).length || c.services?.length || c.hooks?.length || c.flows?.length || c.agents?.length);
+  !!c && !!(c.setup || c.archive || Object.keys(c.env ?? {}).length || c.services?.length || c.hooks?.length || c.flows?.length || c.agents?.length || c.login);

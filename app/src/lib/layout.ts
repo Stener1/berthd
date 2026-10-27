@@ -11,7 +11,10 @@ export type PaneContent =
   // unset follows the person's default.
   // title: the session's title while it ran, so an ended pane keeps its name.
   | { kind: "terminal"; box: string; session: string; agent?: string; command?: string; title?: string; view?: "terminal" | "conversation" }
-  | { kind: "browser"; url: string }
+  // watch: when an agent opened its browser here (lib/agent-browser-open),
+  // so the pane shows the agent's view, live; cleared once you go back to
+  // your own.
+  | { kind: "browser"; url: string; watch?: number }
   // The same page at several sizes at once (components/preview-pane).
   | { kind: "preview"; url: string }
   | { kind: "log"; box: string; location: string; worktree: string; service: string }
@@ -91,6 +94,21 @@ export function sessionsShown(roots: PaneNode[], box: string): Set<string> {
 
 export function leaves(node: PaneNode): Leaf[] {
   return node.kind === "leaf" ? [node] : [...leaves(node.a), ...leaves(node.b)];
+}
+
+export type AgentBrowserPlace = { kind: "watch"; pane: string } | { kind: "split"; beside: string };
+
+// placeAgentBrowser is where the agent's view goes in the tab showing (key
+// is its workspace's): the worktree's own browser pane, else beside the
+// worktree's agent (the focused one first); undefined when the tab shows no
+// agent of that worktree.
+export function placeAgentBrowser(root: PaneNode, focus: string, key: string, worktree: string, isAgent: (l: Leaf) => boolean): AgentBrowserPlace | undefined {
+  const mine = leaves(root).filter((l) => paneWorktree(key, l) === worktree);
+  const browser = mine.find((l) => l.content.kind === "browser");
+  if (browser) return { kind: "watch", pane: browser.id };
+  const agents = mine.filter(isAgent);
+  const beside = agents.find((l) => l.id === focus) ?? agents[0];
+  return beside && { kind: "split", beside: beside.id };
 }
 
 export function findLeaf(node: PaneNode, id: string): Leaf | undefined {

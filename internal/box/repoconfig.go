@@ -74,6 +74,11 @@ func (c RepoConfig) validate() error {
 	if err := ValidateFlows(c.Flows); err != nil {
 		return err
 	}
+	if c.Login != nil {
+		if err := c.Login.validate(); err != nil {
+			return err
+		}
+	}
 	return hooks.Validate(c.Hooks)
 }
 
@@ -115,6 +120,16 @@ func merge(repo, local RepoConfig) RepoConfig {
 	if local.Shots != nil {
 		out.Shots = local.Shots
 	}
+	// A login is whole: the script and its users go together.
+	if local.Login != nil {
+		out.Login = local.Login
+	}
+	if local.ReviewButton != nil {
+		out.ReviewButton = local.ReviewButton
+	}
+	if local.KeepMain != nil {
+		out.KeepMain = local.KeepMain
+	}
 	return out
 }
 
@@ -148,6 +163,10 @@ type Config struct {
 	// Local is this box's own config for the location.
 	Local     RepoConfig `json:"local"`
 	Effective RepoConfig `json:"effective"`
+	// ReviewButton is whether PRs opened from the project's worktrees get
+	// the "Review in Shipyard" button, and from where (reviewbutton.go):
+	// the team's team.json counts too, which Effective doesn't hold.
+	ReviewButton *ReviewButtonState `json:"review_button,omitempty"`
 }
 
 // Config reads a location's config. A broken repository file is reported
@@ -384,6 +403,17 @@ func (b *Box) worktreeEnv(ctx context.Context, location string, wt Worktree) (wo
 	for k, v := range cfg.Effective.Env {
 		merged[k] = v
 	}
+	// A pull request opened for review gets the team's shared keys, as any
+	// worktree does, and never the reviewer's own (prreview.go).
+	if _, mark := b.Locations.reviewAt(wt.Path); mark != nil && wt.Path != "" {
+		for _, k := range mark.Withheld {
+			delete(merged, k)
+		}
+		vars["BERTH_REVIEW"] = strconv.Itoa(mark.PR)
+		vars["BERTH_REVIEW_REPO"] = mark.Repo
+		vars["BERTH_REVIEW_SHA"] = mark.SHA
+		vars["BERTH_WITHHELD"] = strings.Join(mark.Withheld, ",")
+	}
 	// Many dev servers read PORT (the hello sample, Express, Next.js): give
 	// it the worktree's own in every terminal, agent and service, unless the
 	// box or the project sets it. Without it every worktree's `npm start`
@@ -457,6 +487,8 @@ func (b *Box) getConfig(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	st := b.reviewButtonFor(r.PathValue("name"))
+	c.ReviewButton = &st
 	writeJSON(w, c)
 	return nil
 }

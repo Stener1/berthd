@@ -1,0 +1,70 @@
+{
+  "plugins": [
+    {
+      "id": "database",
+      "name": "Database",
+      "description": "A worktree's own development database, as a tab on the worktree: browse its tables, edit rows and run SQL, read-only until you unlock it. Postgres for now. Installs berth-database on the boxes you turn it on for.",
+      "version": "0.2.0",
+      "author": "Shipyard",
+      "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/database",
+      "files": [
+        {
+          "path": "berth-plugin.json",
+          "url": "database/0.2.0/berth-plugin.json",
+          "sha256": "e1d51b5e87499526d29201dc82c2295f9a0f92504f7f0caf1ffda4684c653a7b",
+          "size": 1965
+        },
+        {
+          "path": "dist/index.js",
+          "url": "database/0.2.0/dist/index.js",
+          "sha256": "5045707d80d0548d38e17f1ab463ee825bfdcc05f8634175b29980e6c6c61788",
+          "size": 144542
+        }
+      ]
+    },
+    {
+      "id": "hello-ports",
+      "name": "Hello ports (example)",
+      "description": "An example plugin to copy from: every dev server on every box, one click from your browser. Off until you turn it on.",
+      "version": "0.1.0",
+      "author": "Shipyard",
+      "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/hello-ports",
+      "files": [
+        {
+          "path": "berth-plugin.json",
+          "url": "hello-ports/0.1.0/berth-plugin.json",
+          "sha256": "b8d54d1dd7757044e0c566b786dc8ea0fc0be6b8b400cfd760935958ba43e9e4",
+          "size": 382
+        },
+        {
+          "path": "dist/index.js",
+          "url": "hello-ports/0.1.0/dist/index.js",
+          "sha256": "f99029431a0d64d8ceb938476c0cd3a4386043ee4f6a7f9d882cefba7ee35b3c",
+          "size": 5335
+        }
+      ]
+    },
+    {
+      "id": "leadline",
+      "name": "Leadline",
+      "description": "What your code did in development, as tabs on a worktree: database queries with their N+1s, request traces, logs and endpoints. Installs berth-leadline on the boxes you turn it on for.",
+      "version": "0.1.1",
+      "author": "Shipyard",
+      "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/leadline",
+      "files": [
+        {
+          "path": "berth-plugin.json",
+          "url": "leadline/0.1.1/berth-plugin.json",
+          "sha256": "ae7ebf156c627c80d7b8da14f48a9551b2515162515d411d5868e93961ca7c0e",
+          "size": 1959
+        },
+        {
+          "path": "dist/index.js",
+          "url": "leadline/0.1.1/dist/index.js",
+          "sha256": "d978386b101fe527e3dfde7b098413fb29921521c5ea50fade2c6008bdea39c0",
+          "size": 106940
+        }
+      ]
+    }
+  ]
+}

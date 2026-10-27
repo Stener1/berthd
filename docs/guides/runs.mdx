@@ -110,6 +110,17 @@ POST /v1/runs
 6. The pick gets a draft PR (`then.pr`), and the other worktrees go through
    the project's archive script (`cleanup`).
 
+**The pull request.** The `pr` step pushes the pick's branch and opens the
+pull request with `gh`, on github.com or a GitHub Enterprise host `gh` is
+signed in to. On any other host (Gitea, Forgejo, GitLab, a folder) it pushes
+the branch and stops there: the step is `skipped`, says why, and passes on
+the link the forge printed on push for opening one by hand. The run goes on
+and archives the other attempts. If `gh` fails, that is publishing failing,
+not the agents' work: the run waits at a gate, "The pull request didn't
+open", with `gh`'s words, the pick kept and nothing archived. **Retry
+publishing** (`berth run approve`) tries again; **Finish without a pull
+request** (`berth run reject`) skips it, and the run goes on and succeeds.
+
 In the app, **Try N ways…** in ⌘K or a session's Orchestrate menu starts
 one.
 
@@ -139,6 +150,7 @@ were, and the step that was in flight follows its kind's rule:
 | `headless` | Adopts the answer if the agent finished, or keeps waiting for it; never asks again |
 | `notify`, `webhook` | Sent again with the same `idem_key` (an `Idempotency-Key` header on webhooks) |
 | `gate`, `sleep` | Their deadlines are absolute, kept in the journal |
+| `pr` | Pushes again and adopts the pull request if it opened. One that waits at "The pull request didn't open" waits there again, without trying `gh` by itself |
 
 ## Admission, concurrency and budgets
 

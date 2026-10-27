@@ -220,10 +220,15 @@ function inline(text: string, ctx: Ctx): ReactNode[] {
         </Link>,
       );
     } else if (m[13] !== undefined) {
+      // Only a GitHub issue's text has a repository for #12 to point into.
       out.push(
-        <Link key={k} url={`https://github.com/${ctx.repo}/issues/${m[13]}`} ctx={ctx}>
-          #{m[13]}
-        </Link>,
+        ctx.repo ? (
+          <Link key={k} url={`https://github.com/${ctx.repo}/issues/${m[13]}`} ctx={ctx}>
+            #{m[13]}
+          </Link>
+        ) : (
+          `#${m[13]}`
+        ),
       );
     } else if (m[14] !== undefined) {
       out.push(

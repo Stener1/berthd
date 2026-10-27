@@ -1,7 +1,9 @@
+import { toastError } from "@/components/error-note";
 import { toastManager } from "@/components/ui/toast";
 import type { Client } from "@/lib/api";
+import { errorMessage } from "@/lib/format";
 import { unpinWorktree } from "@/lib/pinned-worktrees";
-import { clearRemoving, markRemoving, markScript, pruneRemovals, type RemovalKind, removeResult, useRemovals } from "@/lib/removing";
+import { clearRemoving, markRemoving, markScript, pruneRemovals, type RemovalKind, removalOf, removeResult, useRemovals } from "@/lib/removing";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { forgetWorktree } from "@/lib/workspaces";
 import { worktreesApi } from "@/lib/worktrees";
@@ -37,6 +39,51 @@ export async function removeWorktreeOnBox(
   }
   scheduleRefresh(box, ["locations", "sessions", "services"]);
   return res;
+}
+
+// Removals asked for and not yet sent, per box. Each box takes one at a
+// time, so a slow teardown never has others half done beside it.
+const waiting = new Map<string, { location: string; wt: { name: string; path: string }; force?: boolean }[]>();
+
+// queueRemoval removes a worktree without asking first: it is marked
+// "Removing…" at once and goes when its box gets to it. Its branch stays,
+// and git still refuses to lose uncommitted work: then a toast offers to
+// remove it anyway.
+export function queueRemoval(box: string, location: string, wt: { name: string; path: string }, opts: { force?: boolean } = {}) {
+  if (removalOf(useRemovals.getState().byKey, box, wt.path)) return;
+  markRemoving(box, wt.path, "remove", wt.name);
+  const list = waiting.get(box);
+  if (list) {
+    list.push({ location, wt, force: opts.force });
+    return;
+  }
+  waiting.set(box, [{ location, wt, force: opts.force }]);
+  void drain(box);
+}
+
+async function drain(box: string) {
+  const list = waiting.get(box)!;
+  while (list.length) {
+    const { location, wt, force } = list[0];
+    try {
+      const client = useStore.getState().client;
+      if (!client) throw new Error("not connected");
+      await removeWorktreeOnBox(client, box, location, wt, "remove", { force });
+    } catch (err) {
+      clearRemoving(box, wt.path);
+      // git's own words for work it would lose.
+      if (!force && /modified|untracked|uncommitted|contains/i.test(errorMessage(err))) {
+        toastManager.add({
+          type: "warning",
+          title: `Kept ${wt.name}`,
+          description: "It has uncommitted changes, so git left it as it is.",
+          actionProps: { children: "Remove anyway", onClick: () => queueRemoval(box, location, wt, { force: true }) },
+        });
+      } else toastError(err, { title: `Couldn't remove ${wt.name}`, box });
+    }
+    list.shift();
+  }
+  waiting.delete(box);
 }
 
 // worktreeGone is the box saying a worktree went: its workspace (tabs,

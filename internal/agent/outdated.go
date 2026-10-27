@@ -21,7 +21,10 @@ type OutdatedBox struct {
 	Current   string `json:"current,omitempty"`
 	Available string `json:"available,omitempty"`
 	Outdated  bool   `json:"outdated"`
-	Error     string `json:"error,omitempty"`
+	// Newer is a box on a newer release than this berth: not outdated,
+	// and never downgraded by Update all.
+	Newer bool   `json:"newer,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // outdatedFresh is how long an answer stands: each check reads the box's

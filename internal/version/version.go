@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 // Version is set at link time by release builds.
@@ -34,4 +36,41 @@ func Line(program string) string {
 		}
 	}
 	return fmt.Sprintf("%s %s (build %s, %s/%s)", program, Version, build, runtime.GOOS, runtime.GOARCH)
+}
+
+// Compare orders two releases ("v0.3.22" against "v0.3.11"): -1, 0 or 1, as
+// a is older, the same or newer. ok is false unless both are releases: a
+// "dev" build, or a box too old to say its version, can't be placed.
+func Compare(a, b string) (c int, ok bool) {
+	pa, oka := parse(a)
+	pb, okb := parse(b)
+	if !oka || !okb {
+		return 0, false
+	}
+	for i := range pa {
+		if pa[i] != pb[i] {
+			if pa[i] < pb[i] {
+				return -1, true
+			}
+			return 1, true
+		}
+	}
+	return 0, true
+}
+
+// parse reads "vX.Y.Z" (or "X.Y.Z").
+func parse(v string) ([3]int, bool) {
+	var p [3]int
+	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	if len(parts) != 3 {
+		return p, false
+	}
+	for i, s := range parts {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return p, false
+		}
+		p[i] = n
+	}
+	return p, true
 }

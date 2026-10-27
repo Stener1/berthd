@@ -1,3 +1,4 @@
+import { currentSuggestions, reviewSuggestion } from "@/lib/team-suggest";
 import {
   BellIcon,
   BellOffIcon,
@@ -20,6 +21,7 @@ import {
   GitCompareArrowsIcon,
   GlobeIcon,
   LayoutDashboardIcon,
+  Layers3Icon,
   PanelTopIcon,
   PuzzleIcon,
   RefreshCwIcon,
@@ -29,6 +31,7 @@ import {
   SquareTerminalIcon,
   PackageIcon,
   PackagePlusIcon,
+  UserRoundIcon,
   UsersIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -61,14 +64,17 @@ import { FROM_TABLE } from "@/lib/palette-shortcuts";
 import { describe, keysFor, SHORTCUTS } from "@/lib/shortcuts";
 import { runShortcut } from "@/hooks/use-shortcuts";
 import { openRenameWorktree } from "@/components/sidebar/rename-worktree";
-import type { SettingsSectionId } from "@/views/settings/settings-view";
+import type { SettingsSectionId } from "@/views/settings/open";
 import { agentOf, sessionAgent, sessionName, sortedWorktrees, worktreeOf } from "@/lib/derive";
 import { openBroadcast, openPromptPicker } from "@/lib/prompts";
 import { quietNow, setDoNotDisturb, setNotificationsOpen } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
 import { useStore } from "@/lib/store";
 import { isLink, teamRef } from "@/lib/team-ref";
-import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useWorkspaces } from "@/lib/workspaces";
+import { loginUrl, loginUserLabel, useLoginConfig, worktreeOrigin } from "@/lib/login-users";
+import { openReviewSheet } from "@/lib/pr-review";
+import { parseReviewRef } from "@/lib/review-link";
+import { focusedPane, focusSession, goHome, hereRef, recentWorktrees, refOf, selectWorktree, useHereRef, useWorkspaces } from "@/lib/workspaces";
 import { openShortcuts } from "@/components/shortcuts-sheet";
 import { hasWhatsNew, openWhatsNew } from "@/lib/whats-new";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
@@ -80,6 +86,7 @@ import { openAddBox } from "@/views/onboarding/add-box-dialog";
 import { openAttempts, openComposer } from "@/lib/composer";
 import { defaultScope } from "@/views/automations/flows/project-label";
 import { placeLabel, worktreeLabel } from "@/lib/worktree-names";
+import { setSwitchboardOpen } from "@/lib/switchboard";
 
 // Settings' sections ⌘K goes to, with words they answer to besides their name.
 const SETTINGS_SECTIONS: [SettingsSectionId, string, string][] = [
@@ -90,6 +97,7 @@ const SETTINGS_SECTIONS: [SettingsSectionId, string, string][] = [
   ["computers", "Computers", "laptops devices"],
   ["phone", "Phone", "mobile pair"],
   ["agents", "Agents", "claude codex install"],
+  ["integrations", "Integrations", "linear api key issues"],
   ["plugins", "Plugins", "extensions"],
   ["shortcuts", "Shortcuts", "keys keyboard"],
   ["labs", "Labs", "experiments"],
@@ -148,6 +156,9 @@ export function CommandPalette() {
   const themes = useThemes();
   const pluginCommands = useRegistry((s) => s.commands);
   const nav = useArrangedNav();
+  // The users the worktree you are in can be logged in as (lib/login-users).
+  const here = useHereRef();
+  const login = useLoginConfig(here?.box, here?.location);
   const [query, setQuery] = useState("");
   // The theme in use when the palette opened, to put back after a preview.
   const before = useRef<string | undefined>(undefined);
@@ -159,7 +170,12 @@ export function CommandPalette() {
     setOpen(false);
   };
 
+  // Closed, it keeps what it last listed (its closing frames show it)
+  // rather than listing every session and worktree again whenever a box
+  // reports in; it lists them afresh as it opens.
+  const shown = useRef<{ groups: Group[]; query: string }>(undefined);
   const groups = useMemo<Group[]>(() => {
+    if (!open && shown.current && shown.current.query === query) return shown.current.groups;
     const st = useStore.getState();
     const go = (fn: () => void) => () => {
       close(true);
@@ -204,6 +220,7 @@ export function CommandPalette() {
       { value: "home harbour start", label: "Home", icon: slot(<HouseIcon />), run: go(goHome) },
       { value: "review inbox approve changes", label: "Review", icon: slot(<InboxIcon />), run: go(() => st.setView({ kind: "review" })) },
       { value: "dashboard", label: "Agent Dashboard", icon: slot(<LayoutDashboardIcon />), shortcut: keysFor("dashboard"), run: go(() => st.setView({ kind: "dashboard" })) },
+      { value: "switchboard focus areas recent work", label: "Switchboard…", icon: slot(<Layers3Icon />), shortcut: keysFor("switchboard"), run: go(() => setSwitchboardOpen(true)) },
       ...(hasWhatsNew() ? [{ value: "whats new release notes changes update", label: "What's new in Shipyard", icon: slot(<SparkleIcon />), run: go(() => openWhatsNew("palette")) }] : []),
       { value: "keyboard shortcuts keys help", label: "Keyboard shortcuts", icon: slot(<KeyboardIcon />), shortcut: keysFor("shortcuts"), run: go(openShortcuts) },
       { value: "notifications inbox bell", label: "Notifications", icon: slot(<BellIcon />), shortcut: keysFor("notifications"), run: go(() => setNotificationsOpen(true)) },
@@ -227,9 +244,15 @@ export function CommandPalette() {
       { value: "settings", label: "Settings", icon: slot(<SettingsIcon />), run: go(() => st.setView({ kind: "settings" })) },
       { value: "add-box", label: "Add a box…", icon: slot(<ServerIcon />), run: go(openAddBox) },
       { value: "team setup github org berth workspace kit onboarding", label: "Team setup…", icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", from: "palette" })) },
+      // The orgs the laptop noticed publish one (lib/team-suggest.ts).
+      ...currentSuggestions().map((s) => ({ value: `team setup for ${s.org} ${s.name} suggested github org`, label: `Team setup for ${s.org}`, detail: s.repo, icon: slot(<UsersIcon />), run: go(() => reviewSuggestion(s)) })),
       // A link to a team setup pasted here opens it.
       ...(q.includes("/") && teamRef(q) && isLink(teamRef(q)!)
         ? [{ value: `team setup link ${q}`, label: "Open team setup from link", detail: teamRef(q), search: q, icon: slot(<UsersIcon />), run: go(() => st.setView({ kind: "team", org: teamRef(q), from: "palette" })) }]
+        : []),
+      // A review link, or OWNER/NAME#N, pasted here opens the PR's review sheet.
+      ...(parseReviewRef(q)
+        ? [{ value: `review pr ${q}`, label: "Review this PR on your box…", detail: `${parseReviewRef(q)!.repo}#${parseReviewRef(q)!.pr}`, search: q, icon: slot(<GitBranchIcon />), run: go(() => openReviewSheet(parseReviewRef(q)!)) }]
         : []),
       { value: "settings-developer", label: "Developer settings", icon: slot(<CodeIcon />), run: go(() => st.setView({ kind: "settings", section: "developer" })) },
       // Each part of Settings, by name ("appearance", "theme", "terminal").
@@ -252,6 +275,21 @@ export function CommandPalette() {
           label: `Demo: an agent opens Claude Code in a ${how} here`,
           icon: slot(<CodeIcon />),
           run: go(() => void import("@/lib/mock").then((m) => m.mockAgentOpens(ws.ref.box, where, ws.ref.path, how))),
+        });
+      }
+    }
+
+    // Log in as a seeded user: the worktree's page in a Browser tab, through
+    // the laptop proxy's login route.
+    const loginOrigin = hereAt && login ? worktreeOrigin(hereAt, status?.proxy.url_port) : undefined;
+    if (hereAt && loginOrigin) {
+      for (const u of login?.users ?? []) {
+        actions.push({
+          value: `log in as ${u.email} ${u.label ?? ""} login user persona`,
+          label: `Log in as ${loginUserLabel(u)}`,
+          detail: u.label ? u.email : undefined,
+          icon: slot(<UserRoundIcon />),
+          run: go(() => openBrowserAt(loginUrl(loginOrigin, u.email, "/"))),
         });
       }
     }
@@ -366,7 +404,8 @@ export function CommandPalette() {
     ].filter((g) => g.items.length);
     // close is stable enough: it only reads refs and store setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, boxes, status, themes, themeId, spaces, pluginCommands, query, nav.hidden, open]);
+  }, [sessions, boxes, status, themes, themeId, spaces, pluginCommands, query, nav.hidden, open, login]);
+  shown.current = { groups, query };
 
   return (
     <CommandDialog
@@ -403,7 +442,7 @@ export function CommandPalette() {
                       <CommandItem key={item.value} value={item} className="gap-2" onClick={() => item.run()}>
                         {item.icon}
                         <span className="truncate">{item.label}</span>
-                        {item.detail && <span className="ml-auto min-w-0 shrink truncate text-muted-foreground text-xs">{item.detail}</span>}
+                        {item.detail && <span className="ml-auto min-w-0 shrink truncate text-muted-foreground text-meta">{item.detail}</span>}
                         {item.trailing}
                         {item.shortcut && <Kbd className={item.detail ? "" : "ml-auto"}>{item.shortcut}</Kbd>}
                       </CommandItem>
@@ -413,7 +452,7 @@ export function CommandPalette() {
               )}
             </CommandList>
           </CommandPanel>
-          <CommandFooter className="text-[11px] text-muted-foreground">
+          <CommandFooter className="text-tag text-muted-foreground">
             <span className="flex items-center gap-1">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> to move, <Kbd>↵</Kbd> to open

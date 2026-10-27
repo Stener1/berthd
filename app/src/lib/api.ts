@@ -1,4 +1,6 @@
 import type { ToolDetail } from "@/lib/transcript";
+import type { Marketplace, MarketPlugin } from "@/lib/marketplace";
+import type { HelperRemoved, PluginHelpers } from "@/lib/plugin-helpers";
 import { invoke } from "@tauri-apps/api/core";
 import { readTimeout, reconnectDelay, STREAM_SILENCE_MS } from "@/lib/net";
 import { IS_LINUX } from "@/lib/platform";
@@ -6,6 +8,7 @@ import type {
   BerthEvent,
   BoxInfo,
   BoxRoute,
+  Conversation,
   ExecResult,
   QueuedPrompt,
   SendResult,
@@ -16,6 +19,7 @@ import type {
   WaitResult,
   WorktreeService,
   Location,
+  PastSessions,
   PluginInfo,
   Service,
   Session,
@@ -203,8 +207,8 @@ export interface Client {
   // onProgress how much has gone; the promise rejects with an AbortError
   // when signal aborts.
   upload<T = unknown>(box: string, path: string, body: Blob, onProgress?: (sent: number, total: number) => void, signal?: AbortSignal): Promise<T>;
-  // Any laptop API call, such as "GET", "/v1/hooks".
-  laptop<T = unknown>(method: string, path: string, body?: unknown): Promise<T>;
+  // Any laptop API call, such as "GET", "/v1/hooks"; signal aborts it.
+  laptop<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T>;
   // A laptop API call that answers NDJSON, one value per line, as long
   // commands do (adding a box, upgrading, signing in to a tailnet).
   stream(method: string, path: string, body: unknown, onValue: (v: unknown) => void, signal?: AbortSignal): Promise<void>;
@@ -253,6 +257,9 @@ export const boxApi = {
   stats: (c: Client, box: string) => c.box<Stats>(box, "GET", "stats"),
   services: async (c: Client, box: string) => (await c.box<Service[] | null>(box, "GET", "services")) ?? [],
   info: (c: Client, box: string) => c.box<BoxInfo>(box, "GET", "info"),
+  // How the box starts agents that name no driver (lib/box-defaults.ts;
+  // boxes with "agents.defaults").
+  putAgentDefaults: (c: Client, box: string, d: { structured: boolean; mode?: string }) => c.box<{ structured: boolean; mode?: string }>(box, "PUT", "agents/defaults", d),
   addLocation: (c: Client, box: string, name: string, path: string) => c.box<Location>(box, "POST", "locations", { name, path }),
   addWorktree: (c: Client, box: string, location: string, req: { name: string; branch?: string; base?: string }) =>
     c.box<Worktree>(box, "POST", `locations/${encodeURIComponent(location)}/worktrees`, req),
@@ -260,9 +267,31 @@ export const boxApi = {
     c.box(box, "DELETE", `locations/${encodeURIComponent(location)}/worktrees/${encodeURIComponent(worktree)}${force ? "?force=1" : ""}`),
   // home: in the box user's home folder, tied to no worktree, in place of a
   // location (boxes with the "session.home" capability).
-  startSession: (c: Client, box: string, req: ({ location: string } | { home: true }) & { name?: string; command?: string; agent?: string; prompt?: string; model?: string; effort?: string; title?: string }) =>
+  startSession: (c: Client, box: string, req: ({ location: string } | { home: true }) & { name?: string; command?: string; agent?: string; prompt?: string; model?: string; effort?: string; title?: string; driver?: "terminal" | "claude" | "codex" | "acp"; mode?: string }) =>
     c.box<Session>(box, "POST", "sessions", req),
   stopSession: (c: Client, box: string, name: string) => c.box(box, "DELETE", `sessions/${encodeURIComponent(name)}`),
+  // A structured agent's conversations, those that worked in path
+  // ("conversations" capability).
+  conversations: async (c: Client, box: string, path?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (limit) params.set("limit", String(limit));
+    return (await c.box<Conversation[] | null>(box, "GET", `conversations${params.size ? `?${params}` : ""}`)) ?? [];
+  },
+  // Carries a conversation on: in its session, started again if it ended,
+  // or in a new one when that is gone.
+  resumeConversation: (c: Client, box: string, id: string) => c.box<Session>(box, "POST", `conversations/${encodeURIComponent(id)}/resume`),
+  // Starts a structured session whose agent ended again, on its own record;
+  // given one of its agent's past conversations (pastSessions), carries
+  // that one on in the session instead.
+  resumeSession: (c: Client, box: string, name: string, agentSessionId?: string) =>
+    c.box<Session>(box, "POST", `sessions/${encodeURIComponent(name)}/resume`, agentSessionId ? { agent_session_id: agentSessionId } : undefined),
+  // The agent's own past conversations in a structured session's folder.
+  pastSessions: (c: Client, box: string, name: string) => c.box<PastSessions>(box, "GET", `sessions/${encodeURIComponent(name)}/past`),
+  // Takes a structured session to Claude Code's own terminal, or back to its
+  // chat (Session.switch).
+  switchSession: (c: Client, box: string, name: string, to: "terminal" | "chat") =>
+    c.box<Session>(box, "POST", `sessions/${encodeURIComponent(name)}/switch`, { to }),
   // Names a session's work; "" clears its title.
   // renameWorktree gives a worktree a display name ("" clears it), on boxes
   // that list "worktree.titles" (lib/worktree-names).
@@ -507,7 +536,22 @@ export const laptopApi = {
   // Turning a plugin on takes the hash of the files the user reviewed (see
   // plugins/consent.ts); the agent refuses it if they have changed since.
   allowPlugin: (c: Client, id: string, hash: string) => c.laptop<PluginInfo>("POST", `/v1/plugins/${encodeURIComponent(id)}/enable`, { hash }),
-  disablePlugin: (c: Client, id: string) => c.laptop<PluginInfo>("POST", `/v1/plugins/${encodeURIComponent(id)}/disable`),
+  // Turning one off stops its helper on the boxes, if it brings one:
+  // helpers says what became of it on each (lib/plugin-helpers.ts).
+  disablePlugin: (c: Client, id: string) => c.laptop<PluginInfo & { helpers?: HelperRemoved[] }>("POST", `/v1/plugins/${encodeURIComponent(id)}/disable`),
+  // Where a plugin's helper is, to say before turning the plugin off.
+  pluginHelpers: (c: Client, id: string) => c.laptop<PluginHelpers>("GET", `/v1/plugins/${encodeURIComponent(id)}/helpers`),
+  // The plugin listing (lib/marketplace.ts). The agent reads it from the
+  // web, since the app's own page may talk only to the agent; fresh reads
+  // it again rather than the copy the agent keeps for a few minutes.
+  marketplace: (c: Client, fresh = false) => c.laptop<Marketplace>("GET", `/v1/marketplace${fresh ? "?fresh=1" : ""}`),
+  // Installing puts the plugin in ~/.berth/plugins and never turns it on.
+  // version is the one shown, so a listing that moved on is refused (409
+  // listing_changed); replace installs over a folder the listing didn't.
+  installPlugin: (c: Client, id: string, version: string, replace = false) =>
+    c.laptop<MarketPlugin>("POST", `/v1/marketplace/${encodeURIComponent(id)}/install`, replace ? { version, replace } : { version }),
+  // Removing one removes its helper from the boxes too, and what it recorded.
+  uninstallPlugin: (c: Client, id: string) => c.laptop<{ removed: string; helpers?: HelperRemoved[] }>("DELETE", `/v1/marketplace/${encodeURIComponent(id)}`),
 };
 
 export function httpClient(ep: Endpoint): Client {
@@ -604,7 +648,7 @@ export function httpClient(ep: Endpoint): Client {
         };
         xhr.send(body);
       }),
-    laptop: (method, path, body) => request(method, path, body),
+    laptop: (method, path, body, signal) => request(method, path, body, signal),
     async stream(method, path, body, onValue, signal) {
       const res = await fetch(ep.url + path, {
         method,

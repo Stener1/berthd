@@ -47,9 +47,9 @@ func (l countingListener) Accept() (net.Conn, error) {
 	return c, err
 }
 
-func startBox(t *testing.T) *box { return startBoxWith(t, nil) }
+func startBox(t testing.TB) *box { return startBoxWith(t, nil) }
 
-func startBoxWith(t *testing.T, configure func(*Server)) *box {
+func startBoxWith(t testing.TB, configure func(*Server)) *box {
 	t.Helper()
 	dir := t.TempDir()
 	id, err := identity.LoadOrCreate(filepath.Join(dir, "identity.pem"))
@@ -82,7 +82,7 @@ func startBoxWith(t *testing.T, configure func(*Server)) *box {
 	return &box{server: s, address: ln.Addr().String(), dir: dir, accepted: accepted}
 }
 
-func (b *box) issue(t *testing.T) pairing.Token {
+func (b *box) issue(t testing.TB) pairing.Token {
 	t.Helper()
 	code, err := b.server.Pending.Issue(10*time.Minute, time.Now())
 	if err != nil {
@@ -95,7 +95,7 @@ func (b *box) peer() trust.Peer {
 	return trust.Peer{Name: "dev-test", Address: b.address, Fingerprint: b.server.Identity.Fingerprint()}
 }
 
-func laptop(t *testing.T) *identity.Identity {
+func laptop(t testing.TB) *identity.Identity {
 	t.Helper()
 	id, err := identity.LoadOrCreate(filepath.Join(t.TempDir(), "identity.pem"))
 	if err != nil {
@@ -105,7 +105,7 @@ func laptop(t *testing.T) *identity.Identity {
 }
 
 // paired returns a client for a laptop that has completed pairing with b.
-func paired(t *testing.T, b *box) *Client {
+func paired(t testing.TB, b *box) *Client {
 	t.Helper()
 	me := laptop(t)
 	if _, err := Pair(context.Background(), me, b.issue(t), "alex-mbp"); err != nil {
@@ -407,14 +407,22 @@ func testRevokeClosesOpenStreams(t *testing.T, every time.Duration, tell bool) {
 	if tell {
 		b.server.ClientsChanged()
 	}
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	conn.Write([]byte("still here\n"))
-	got, err := io.ReadAll(conn)
-	if err == nil && strings.Contains(string(got), "still here") {
-		t.Fatalf("revoked laptop's stream still echoes: %q", got)
-	}
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		t.Fatal("revoked laptop's stream was left open")
+	// The daemon cuts the stream at its next look, or as soon as it is
+	// told: until then a line may still echo (on a slow runner it did), and
+	// once it is cut nothing does. It has to be cut well within a few
+	// seconds either way.
+	deadline := time.Now().Add(5 * time.Second)
+	line := make([]byte, 64)
+	for {
+		conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+		_, werr := conn.Write([]byte("still here\n"))
+		_, rerr := conn.Read(line)
+		if ne, ok := rerr.(net.Error); werr != nil || (rerr != nil && !(ok && ne.Timeout())) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("revoked laptop's stream was left open")
+		}
 	}
 }
 

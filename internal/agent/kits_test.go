@@ -167,3 +167,40 @@ func TestOnlyTheReviewedKitIsKeptAndApplied(t *testing.T) {
 		t.Fatalf("apply of a kit other than the reviewed one: %d %s, want 409", resp.StatusCode, body)
 	}
 }
+
+// A link copied from a commit's page names the commit by its hash, which
+// git clone --branch refuses: the kit is fetched at that commit, by its
+// full or shortened hash, even once the branch has moved on.
+func TestAKitLinkCanPinACommit(t *testing.T) {
+	allowFileKits(t)
+	repo := kitRepo(t, "1.0.0")
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := strings.TrimSpace(string(out))
+	os.WriteFile(filepath.Join(repo, "kits", "cal", "scripts", "setup.sh"), []byte("#!/bin/sh\necho set up 2\n"), 0o755)
+	exec.Command("git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "v2").Run()
+	setup := func(dir string) string {
+		b, _ := os.ReadFile(filepath.Join(dir, "kits", "cal", "scripts", "setup.sh"))
+		return string(b)
+	}
+
+	for _, ref := range []string{pinned, pinned[:12]} {
+		dir := filepath.Join(t.TempDir(), "repo")
+		if err := cloneAt(t.Context(), "file://"+repo, ref, dir); err != nil {
+			t.Fatalf("at %s: %v", ref, err)
+		}
+		if !strings.Contains(setup(dir), "set up 1.0.0") {
+			t.Fatalf("at %s: setup.sh = %q", ref, setup(dir))
+		}
+	}
+	if err := cloneAt(t.Context(), "file://"+repo, "0123456789ab", filepath.Join(t.TempDir(), "repo")); err == nil || !strings.Contains(err.Error(), "no commit 0123456789ab") {
+		t.Fatalf("a missing commit: %v", err)
+	}
+	// A branch still comes from a shallow clone of that branch.
+	dir := filepath.Join(t.TempDir(), "repo")
+	if err := cloneAt(t.Context(), "file://"+repo, "main", dir); err != nil || !strings.Contains(setup(dir), "set up 2") {
+		t.Fatalf("at main: %v %q", err, setup(dir))
+	}
+}

@@ -36,6 +36,25 @@ func TestSlugsComeFromEveryKindOfRemote(t *testing.T) {
 	}
 }
 
+func TestGitHubSlugIsOnlyForGitHubDotCom(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:acme/web.git":               "acme/web",
+		"https://github.com/acme/web":               "acme/web",
+		"https://token@github.com/acme/web.git":     "acme/web",
+		"ssh://git@ssh.github.com:443/acme/api.git": "acme/api",
+		"git@github.com-work:acme/tools.git":        "acme/tools",
+		"https://github.acme.example/acme/web.git":  "",
+		"git@gitlab.com:acme/web.git":               "",
+		"/srv/git/web.git":                          "",
+		"https://github.com/acme":                   "",
+		"":                                          "",
+	} {
+		if got := GitHubSlug(in); got != want {
+			t.Errorf("GitHubSlug(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResolveTurnsInputIntoAWorktree(t *testing.T) {
 	ctx := context.Background()
 	repo := gitRepo(t)

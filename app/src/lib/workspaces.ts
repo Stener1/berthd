@@ -7,6 +7,7 @@ import { agentOf, sessionState } from "@/lib/derive";
 import { findLeaf, type Leaf, leaf, leaves, mapLeaf, moveBetween, movePane, neighbor, newId, type PaneContent, type PaneNode, paneWorktree, place, remove, sessionsShown, setRatio, type Side, split, swap, worktreesOf } from "@/lib/layout";
 import { foldedOf, groupsOf, NARROW, stepGroup, stripTabs, withGroup, withoutGroup } from "@/lib/groups";
 import { usePrefs } from "@/lib/prefs";
+import { restoreSaved } from "@/lib/restore";
 import { load, save } from "@/lib/storage";
 import { useStore } from "@/lib/store";
 
@@ -117,43 +118,26 @@ export function useWorktreeRef(key: string | undefined): WorktreeRef | undefined
   return useMemo(() => own ?? (key ? lookupRef(box, path, locations) : undefined), [own, key, box, path, locations]);
 }
 
-// Panes that were starting when the app closed did not finish; drop them.
-function sanitize(spaces: Record<string, Workspace>): Record<string, Workspace> {
-  const out: Record<string, Workspace> = {};
-  for (const [k, ws] of Object.entries(spaces)) {
-    const tabs: WsTab[] = [];
-    for (const t of ws.tabs) {
-      let root: PaneNode | undefined = t.root;
-      // A Compare tab keeps its two sides: one that was starting is empty.
-      if (t.compare) root = mapLeaves(t.root, (l) => (l.content.kind === "starting" || l.content.kind === "error" ? { ...l, content: { kind: "empty", label: "Agent" } } : l));
-      else for (const l of leaves(t.root)) if (l.content.kind === "starting" || l.content.kind === "error") root = root && remove(root, l.id);
-      if (root) tabs.push({ ...t, root, focus: leaves(root).some((l) => l.id === t.focus) ? t.focus : leaves(root)[0].id });
-    }
-    out[k] = { ...ws, tabs, active: tabs.some((t) => t.id === ws.active) ? ws.active : tabs[0]?.id, hidden: ws.hidden ?? [] };
-  }
-  return out;
-}
+// What was saved, made safe to draw (lib/restore.ts): it is read before
+// anything shows, so a bad save must never stop the window from opening.
+const saved = restoreSaved(load<unknown>("berth.workspaces", {}));
 
-const saved = load<Partial<State>>("berth.workspaces", {});
-
-const savedSpaces = sanitize(saved.spaces ?? {});
+const savedSpaces: Record<string, Workspace> = saved.spaces;
 const savedShown = groupsOf(saved.shown, saved.current, (k) => !!savedSpaces[k]);
 
 export const useWorkspaces = create<State>()(() => ({
   current: saved.current,
   shown: savedShown,
-  folded: saved.folded ?? [],
-  tones: saved.tones ?? {},
+  folded: saved.folded,
+  tones: saved.tones,
   spaces: savedSpaces,
   // Every group's panes are mounted from the start, so any of them can
   // show at once.
   mounted: savedShown,
-  recentUrls: saved.recentUrls ?? [],
+  recentUrls: saved.recentUrls,
 }));
 
 useWorkspaces.subscribe((s) => save("berth.workspaces", { current: s.current, shown: s.shown, folded: s.folded, tones: s.tones, spaces: s.spaces, recentUrls: s.recentUrls }));
-
-const mapLeaves = (n: PaneNode, fn: (l: Leaf) => Leaf): PaneNode => (n.kind === "leaf" ? fn(n) : { ...n, a: mapLeaves(n.a, fn), b: mapLeaves(n.b, fn) });
 
 function update(key: string, fn: (ws: Workspace) => Workspace) {
   useWorkspaces.setState((s) => (s.spaces[key] ? { spaces: { ...s.spaces, [key]: fn(s.spaces[key]) } } : s));

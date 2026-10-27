@@ -5,16 +5,17 @@ import { serviceKeepsRunning } from "@/components/workspace/service-terminal";
 import { toastManager } from "@/components/ui/toast";
 import { usePrefs } from "@/lib/prefs";
 import { offerAgentHooks } from "@/lib/agent-hooks";
-import { type AgentPreset, boxApi, type Location, type Worktree } from "@/lib/api";
+import { type AgentPreset, boxApi, type Conversation, type Location, type Session, type Worktree } from "@/lib/api";
 import { agentLabel, agentOf } from "@/lib/derive";
 import { errorMessage } from "@/lib/format";
 import { plainError } from "@/lib/errors";
 import { findLeaf, type Leaf, leaves, type PaneContent, paneWorktree } from "@/lib/layout";
 import { scheduleRefresh, useStore } from "@/lib/store";
 import { resolveBrowserInput } from "@/lib/browser-url";
-import { closeCompare } from "@/lib/compare-actions";
+import { closeCompare, setCompareLane } from "@/lib/compare-actions";
 import { currentSpace, focusSession, here, hereRef, homeBox, openTab, refFor, removePane, setPaneContent, showWorktree, splitPane, useWorkspaces, type WorktreeRef, wsKey } from "@/lib/workspaces";
 import { refuseHome } from "@/lib/box-home";
+import { structuredLaunch } from "@/lib/structured";
 
 // Agents offered when a box does not list its own.
 export const DEFAULT_AGENTS: AgentPreset[] = [
@@ -75,6 +76,17 @@ function place(content: PaneContent, target: Target, wt: string): { key: string;
   return { key, tab: target.tab, pane: target.pane };
 }
 
+// listSession puts a session the box just started into its list at once.
+// Until the next refresh its pane would find a session the box doesn't list,
+// which reads as one that has ended ("Claude Code has ended", for a moment).
+function listSession(box: string, s: Session) {
+  useStore.setState((st) => {
+    const b = st.boxes[box];
+    if (!b?.sessions || b.sessions.some((x) => x.name === s.name)) return st;
+    return { boxes: { ...st.boxes, [box]: { ...b, sessions: [...b.sessions, s] } } };
+  });
+}
+
 // startSession runs a command (an agent, or a shell when empty) in the
 // worktree you are acting in (or, beside a pane, that pane's; or the one
 // given) and shows it in a new tab, a split, or an existing pane. It resolves to the new
@@ -91,9 +103,65 @@ export async function startSession(command: string, target: Target = { kind: "ta
   if (!at) return;
   try {
     const s = await boxApi.startSession(client, box, ref ? { location: refLocation(ref), command: command || undefined } : { home: true, command: command || undefined });
+    listSession(box, s);
     setPaneContent(at.key, at.tab, at.pane, { kind: "terminal", box, session: s.name });
     scheduleRefresh(box, ["sessions"]);
     if (command) void offerAgentHooks(box, command, s.name);
+    return s.name;
+  } catch (err) {
+    setPaneContent(at.key, at.tab, at.pane, { kind: "error", message: plainError(err) });
+  }
+}
+
+// resumeConversation carries a structured agent's conversation on in a tab
+// of its worktree: in its own session when that still runs (or only
+// ended), else in a new one.
+export async function resumeConversation(box: string, conv: Conversation, worktree: string): Promise<string | undefined> {
+  const client = useStore.getState().client;
+  if (!client) return;
+  const at = place({ kind: "starting", label: agentLabel(conv.agent) }, { kind: "tab" }, worktree);
+  if (!at) return;
+  try {
+    const s = await boxApi.resumeConversation(client, box, conv.id);
+    listSession(box, s);
+    setPaneContent(at.key, at.tab, at.pane, { kind: "terminal", box, session: s.name, agent: conv.agent });
+    scheduleRefresh(box, ["sessions"]);
+    return s.name;
+  } catch (err) {
+    setPaneContent(at.key, at.tab, at.pane, { kind: "error", message: plainError(err) });
+  }
+}
+
+// resumeSession starts a structured agent that ended again, in its pane.
+export async function resumeSession(box: string, session: string): Promise<void> {
+  const client = useStore.getState().client;
+  if (!client) return;
+  try {
+    await boxApi.resumeSession(client, box, session);
+    scheduleRefresh(box, ["sessions"]);
+  } catch (err) {
+    toastManager.add({ type: "error", title: "Couldn't resume it", description: errorMessage(err) });
+  }
+}
+
+// startAgent starts preset p as an agent: through its structured driver
+// when Labs runs it so (lib/structured.ts), else in its terminal as
+// startSession would. A box's home has no worktree for an agent: there it
+// is the preset's command in a terminal.
+export async function startAgent(p: AgentPreset, target: Target = { kind: "tab" }, label = p.name, worktree?: string): Promise<string | undefined> {
+  const wt = worktree ?? targetWorktree(target);
+  const ref = refFor(wt);
+  const client = useStore.getState().client;
+  if (!ref) return startSession(p.command, target, label, worktree);
+  if (!wt || !client) return;
+  const at = place({ kind: "starting", label }, target, wt);
+  if (!at) return;
+  try {
+    const s = await boxApi.startSession(client, ref.box, { location: refLocation(ref), agent: p.id, ...structuredLaunch(ref.box, p.id, p) });
+    listSession(ref.box, s);
+    setPaneContent(at.key, at.tab, at.pane, { kind: "terminal", box: ref.box, session: s.name, agent: p.id });
+    scheduleRefresh(ref.box, ["sessions"]);
+    void offerAgentHooks(ref.box, p.command, s.name);
     return s.name;
   } catch (err) {
     setPaneContent(at.key, at.tab, at.pane, { kind: "error", message: plainError(err) });
@@ -320,6 +388,25 @@ export function closeTab(key: string, tab: string) {
   const t = useWorkspaces.getState().spaces[key]?.tabs.find((x) => x.id === tab);
   if (t?.compare) return closeCompare(key, tab);
   if (t) ask({ key, tab, leaves: leaves(t.root) });
+}
+
+// For a tab that broke (components/workspace/pane-guard.tsx): resetTab
+// shows it as plain terminals, an agent's chat as its terminal and a
+// Compare tab in its Terminal lane; dropTab takes it away without the
+// usual question, which may be what can't draw. Neither stops anything:
+// its agents keep running, and the launcher has them.
+export function resetTab(key: string, tab: string) {
+  const t = useWorkspaces.getState().spaces[key]?.tabs.find((x) => x.id === tab);
+  if (!t) return;
+  if (t.compare) return setCompareLane(key, tab, "terminal");
+  for (const l of leaves(t.root)) if (l.content.kind === "terminal" && l.content.view !== "terminal") setPaneContent(key, tab, l.id, { ...l.content, view: "terminal" });
+}
+
+export function dropTab(key: string, tab: string) {
+  const t = useWorkspaces.getState().spaces[key]?.tabs.find((x) => x.id === tab);
+  if (!t) return;
+  if (t.compare) return closeCompare(key, tab);
+  for (const l of leaves(t.root)) removePane(key, tab, l.id, l.content.kind === "terminal" ? l.content.session : undefined);
 }
 
 export async function stopSession(box: string, name: string, quiet = false) {

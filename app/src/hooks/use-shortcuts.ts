@@ -24,11 +24,16 @@ import { findLeaf, leaves, paneWorktree } from "@/lib/layout";
 import { paneKey, toggleDrawer } from "@/lib/devtools";
 import { isOnboardingActive } from "@/views/onboarding/onboarding-state";
 import { firstFocusable, rescueFocus } from "@/lib/focus-home";
+import { go } from "@/lib/nav-history";
+import { setSwitchboardOpen, useSwitchboardOpen } from "@/lib/switchboard";
 
 // The app's shortcuts (lib/shortcuts.json) come two ways: as keys, caught on
 // the window before a terminal sees them, and, in the Mac app, from the menu
 // bar, whose items carry the same keys so macOS cannot take them first (it
-// takes ⌘. for "cancel" before the page sees it). Both end up in run.
+// takes ⌘. for "cancel" before the page sees it). Both end up in run, as do
+// a mouse's back and forward buttons.
+
+type Via = "key" | "menu" | "mouse";
 
 type Dir = "left" | "right" | "up" | "down";
 const arrows: Record<string, Dir> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
@@ -36,7 +41,7 @@ const arrows: Record<string, Dir> = { ArrowLeft: "left", ArrowRight: "right", Ar
 // run does what the shortcut id does and says whether it did anything, so a
 // key that does nothing here goes on to the page. arg is the tab's number
 // (tab) or the direction (focus).
-function run(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
+function run(id: string, from: Via, arg?: number | Dir): boolean {
   // Zoom works everywhere, onboarding included.
   if (id === "zoom-in" || id === "zoom-out" || id === "zoom-reset") {
     // With a terminal focused it sizes the terminal's font (lib/zoom.ts).
@@ -130,12 +135,22 @@ function run(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
     case "dashboard":
       s.setView({ kind: "dashboard" });
       return true;
+    case "back":
+    case "forward":
+      // In a code editor they are its outdent and indent (toEditor).
+      if (from === "menu" && toEditor(id, "menu")) return true;
+      return go(id === "back" ? -1 : 1);
     case "notifications":
       toggleNotifications();
       return true;
     case "palette":
       if (useFiles.getState().pickerOpen) setPickerOpen(false);
+      if (useSwitchboardOpen.getState().open) setSwitchboardOpen(false);
       s.setPaletteOpen(!s.paletteOpen);
+      return true;
+    case "switchboard":
+      if (s.paletteOpen) s.setPaletteOpen(false);
+      setSwitchboardOpen(!useSwitchboardOpen.getState().open);
       return true;
     case "files":
       // ⌘P finds a file in the worktree you are acting in.
@@ -160,7 +175,9 @@ function run(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
       handOff("[data-testid=files-panel]", "[data-testid=files-panel]");
       return true;
     case "save-file": {
-      // ⌘S in a File tab, wherever in it the focus is.
+      // ⌘S in a File tab, wherever in it the focus is. Over the
+      // Switchboard, ⌘S stars its highlighted row instead.
+      if (useSwitchboardOpen.getState().open) return false;
       const leaf = inWorkspace && tab && wsKey ? findLeaf(tab.root, tab.focus) : undefined;
       if (!leaf || leaf.content.kind !== "file" || !wsKey) return false;
       void save(docKey(paneWorktree(wsKey, leaf), leaf.content.path));
@@ -216,10 +233,36 @@ function handOff(target: string, panel: string) {
   requestAnimationFrame(tick);
 }
 
+// ⌘[ and ⌘] in a code editor (a File tab's, a plugin's SQL) are its outdent
+// and indent, not Back and Forward. Its keydown goes on to it; when the Mac
+// app's menu bar took the press first, the editor is sent the key here.
+// toEditor says whether the press is the editor's, and lets one press that
+// arrives both ways reach it once.
+let editorPress: { id: string; via: Via; at: number } | undefined;
+const sent = new WeakSet<Event>();
+function toEditor(id: string, via: Via, e?: KeyboardEvent): boolean {
+  const el = document.activeElement;
+  if (!el?.closest(".cm-editor")) return false;
+  if (e && sent.has(e)) return true;
+  const now = performance.now();
+  const twice = editorPress?.id === id && editorPress.via !== via && now - editorPress.at < 400;
+  editorPress = { id, via, at: now };
+  if (twice) {
+    // The menu's half already reached the editor: drop this keydown.
+    e?.preventDefault();
+    e?.stopPropagation();
+  } else if (via === "menu") {
+    const key = new KeyboardEvent("keydown", { key: id === "back" ? "[" : "]", code: id === "back" ? "BracketLeft" : "BracketRight", metaKey: !IS_LINUX, ctrlKey: IS_LINUX, bubbles: true, cancelable: true });
+    sent.add(key);
+    el.dispatchEvent(key);
+  }
+  return true;
+}
+
 // One press can arrive both ways (the page's keydown, then the menu bar, or
 // the other way round); the second is dropped so a toggle stays toggled.
 let last: { what: string; from: string; at: number } | undefined;
-export function runShortcut(id: string, from: "key" | "menu", arg?: number | Dir): boolean {
+export function runShortcut(id: string, from: Via, arg?: number | Dir): boolean {
   const what = arg === undefined ? id : `${id}-${arg}`;
   const now = performance.now();
   if (last && last.what === what && last.from !== from && now - last.at < 400) return true;
@@ -241,12 +284,16 @@ function fromKey(e: KeyboardEvent): [string, (number | Dir)?] | undefined {
   if (key === ".") return ["zen"];
   if (key === "\\") return ["sidebar"];
   if (key === "/" && !shift) return ["shortcuts"];
-  if (key === "k") return ["palette"];
+  if (key === "k") return [shift ? "switchboard" : "palette"];
   if (key === "p" && !shift) return ["files"];
   if (key === "s" && !shift) return ["save-file"];
   if (key === "e" && shift) return ["file-tree"];
   if (key === "n") return [shift ? "notifications" : "new-worktree"];
   if (key === "j") return ["dashboard"];
+  // By the key's place too: on a layout where [ and ] need ⌥ (Norwegian,
+  // German), ⌘ and the keys where a US one has them.
+  if (!shift && (key === "[" || e.code === "BracketLeft")) return ["back"];
+  if (!shift && (key === "]" || e.code === "BracketRight")) return ["forward"];
   if (key === "t" && !shift) return ["new-terminal"];
   if (key === "b" && shift) return ["new-browser"];
   if (key === "o" && shift) return ["open-editor"];
@@ -269,7 +316,8 @@ function fromKey(e: KeyboardEvent): [string, (number | Dir)?] | undefined {
 function fromLinuxKey(e: KeyboardEvent): [string, (number | Dir)?] | undefined {
   const inTerminal = e.target instanceof Element && !!e.target.closest("[data-terminal]");
   if (!inTerminal || e.altKey) return fromKey(e);
-  const letter = /^Key[A-Z]$/.test(e.code) || e.key === "\\";
+  // Ctrl+[ is esc to a shell, and Ctrl+] telnet's escape.
+  const letter = /^Key[A-Z]$/.test(e.code) || e.key === "\\" || e.code === "BracketLeft" || e.code === "BracketRight";
   if (!letter) return fromKey(e);
   if (!e.shiftKey) return undefined;
   if (e.code === "KeyC" || e.code === "KeyV") return undefined;
@@ -312,11 +360,18 @@ export function useShortcuts() {
         if (!meta || (e.metaKey && e.ctrlKey)) return;
       }
       const hit = IS_LINUX ? fromLinuxKey(e) : fromKey(e);
+      if (hit && (hit[0] === "back" || hit[0] === "forward") && toEditor(hit[0], "key", e)) return;
       if (!hit || !runShortcut(hit[0], "key", hit[1])) return;
       e.preventDefault();
       e.stopPropagation();
     };
     window.addEventListener("keydown", onKey, { capture: true });
+    // A mouse's back and forward buttons (3 and 4), as in a browser.
+    const onMouse = (e: MouseEvent) => {
+      if ((e.button !== 3 && e.button !== 4) || !runShortcut(e.button === 3 ? "back" : "forward", "mouse")) return;
+      e.preventDefault();
+    };
+    window.addEventListener("mouseup", onMouse, { capture: true });
     // The Mac app's menu bar: each item sends its id (src-tauri/src/lib.rs).
     let unlisten: (() => void) | undefined;
     let gone = false;
@@ -329,6 +384,7 @@ export function useShortcuts() {
       gone = true;
       unlisten?.();
       window.removeEventListener("keydown", onKey, { capture: true });
+      window.removeEventListener("mouseup", onMouse, { capture: true });
     };
   }, []);
 }

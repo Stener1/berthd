@@ -32,14 +32,14 @@ export function ZoomHud() {
       data-testid="zoom-hud"
       data-shown={shown || undefined}
       className={cn(
-        "pointer-events-none fixed top-[64px] left-1/2 z-70 flex w-[244px] -translate-x-1/2 flex-col gap-[10px] rounded-lg border bg-popover px-[14px] pt-[12px] pb-[12px] text-popover-foreground shadow-xl/20",
+        "pointer-events-none fixed top-[64px] left-1/2 z-70 flex w-[244px] -translate-x-1/2 flex-col gap-[10px] rounded-lg border bg-popover px-3.5 py-3 text-popover-foreground shadow-xl/20",
         "opacity-0 transition-[opacity,translate] duration-200 ease-out -translate-y-[4px] data-shown:translate-y-0 data-shown:opacity-100",
       )}
     >
-      <div className="flex items-center gap-[8px] text-[13px] leading-[16px]">
+      <div className="flex items-center gap-[8px] text-desc leading-[16px]">
         <Icon className="size-[16px] shrink-0 text-muted-foreground" />
         <span className="font-medium">{target === "terminal" ? "Terminal text" : "Text size"}</span>
-        <span className="ms-auto font-mono text-[12px] text-muted-foreground tabular-nums">{size}px</span>
+        <span className="ms-auto font-mono text-mono text-muted-foreground tabular-nums">{size}px</span>
       </div>
       {/* One notch a step; the dot under one marks the default. */}
       <div className="flex items-start gap-[3px]" aria-hidden>
@@ -53,7 +53,7 @@ export function ZoomHud() {
           );
         })}
       </div>
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground leading-[14px]">
+      <div className="flex items-center justify-between text-tag text-muted-foreground">
         <span>{edge ?? `${size > range.default ? "+" : "−"}${Math.abs(size - range.default)} from default`}</span>
         <span>
           <kbd className="font-sans">{platformKeys("⌘0")}</kbd> resets

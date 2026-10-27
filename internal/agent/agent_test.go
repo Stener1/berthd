@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,7 +32,7 @@ import (
 type testBox struct {
 	services []box.Service
 	bus      *events.Bus
-	t        *testing.T
+	t        testing.TB
 	dir      string
 	address  string
 	server   *wire.Server
@@ -41,6 +41,8 @@ type testBox struct {
 	done     chan error
 	// extra mounts more box routes each time the box starts.
 	extra func(*wire.Server)
+	// servicesCalls counts GET /v1/services.
+	servicesCalls atomic.Int64
 }
 
 type countingListener struct {
@@ -56,13 +58,13 @@ func (l countingListener) Accept() (net.Conn, error) {
 	return c, err
 }
 
-func newBox(t *testing.T) *testBox {
+func newBox(t testing.TB) *testBox {
 	t.Helper()
 	return newBoxWith(t, nil)
 }
 
 // newBoxWith is newBox with more routes, such as sessions.
-func newBoxWith(t *testing.T, extra func(*wire.Server)) *testBox {
+func newBoxWith(t testing.TB, extra func(*wire.Server)) *testBox {
 	t.Helper()
 	b := &testBox{t: t, dir: t.TempDir(), extra: extra}
 	b.start("127.0.0.1:0")
@@ -86,6 +88,7 @@ func (b *testBox) start(addr string) {
 		b.bus = &events.Bus{}
 	}
 	b.server.Handle("GET /v1/services", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b.servicesCalls.Add(1)
 		json.NewEncoder(w).Encode(b.services)
 	}))
 	b.server.Handle("GET /v1/events", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +188,7 @@ func (c *clock) jump(d time.Duration) {
 
 // shortSocket returns a socket path under /tmp: test temp dirs on macOS are
 // longer than the 104-byte limit for Unix socket paths.
-func shortSocket(t *testing.T) string {
+func shortSocket(t testing.TB) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "cp")
 	if err != nil {
@@ -195,27 +198,50 @@ func shortSocket(t *testing.T) string {
 	return filepath.Join(dir, "a.sock")
 }
 
-func startAgent(t *testing.T, dir string) *runningAgent {
+func startAgent(t testing.TB, dir string) *runningAgent {
 	t.Helper()
 	return startAgentWith(t, dir, &fakeNetworks{})
 }
 
-func startAgentWith(t *testing.T, dir string, nets Networks) *runningAgent {
+func startAgentWith(t testing.TB, dir string, nets Networks) *runningAgent {
 	t.Helper()
 	return startAgentConfig(t, dir, nets, nil)
 }
 
 // startAgentConfig is startAgentWith with changes to the agent's Config,
 // such as its log or how long a health check waits.
-func startAgentConfig(t *testing.T, dir string, nets Networks, change func(*Config)) *runningAgent {
+func startAgentConfig(t testing.TB, dir string, nets Networks, change func(*Config)) *runningAgent {
 	t.Helper()
+	// A free port is free only until someone takes it, and an agent whose
+	// app API port is taken goes on without it: one whose port went to
+	// another test's agent in between starts again on new ports.
+	for attempt := 1; ; attempt++ {
+		a := launchAgent(t, dir, nets, change)
+		if a.servesUI() {
+			t.Cleanup(a.stop)
+			return a
+		}
+		a.stop()
+		if attempt == 3 {
+			t.Fatalf("the agent's app API never had its own port (last %s)", a.ui)
+		}
+	}
+}
+
+func launchAgent(t testing.TB, dir string, nets Networks, change func(*Config)) *runningAgent {
+	t.Helper()
+	// Both held at once, so the proxy and the app API never get one port.
 	proxyLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxyAddr := proxyLn.Addr().String()
+	uiLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyAddr, uiAddr := proxyLn.Addr().String(), uiLn.Addr().String()
 	proxyLn.Close()
-	uiAddr := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	uiLn.Close()
 	socket := shortSocket(t)
 	clk := &clock{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,8 +280,25 @@ func startAgentConfig(t *testing.T, dir string, nets Networks, change func(*Conf
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Cleanup(a.stop)
 	return a
+}
+
+// servesUI is whether the app API on a.ui is this agent's: it takes the
+// token this agent wrote.
+func (a *runningAgent) servesUI() bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tok, err := os.ReadFile(filepath.Join(a.dir, UITokenFile)); err == nil && len(tok) > 0 {
+			req, _ := http.NewRequest("GET", "http://"+a.ui+"/v1/status", nil)
+			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tok)))
+			if resp, err := http.DefaultClient.Do(req); err == nil {
+				resp.Body.Close()
+				return resp.StatusCode == http.StatusOK
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 func (a *runningAgent) stop() {
@@ -266,7 +309,7 @@ func (a *runningAgent) stop() {
 	}
 }
 
-func eventually(t *testing.T, what string, cond func() bool) {
+func eventually(t testing.TB, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for !cond() {
@@ -277,7 +320,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-func stateOf(t *testing.T, a *runningAgent) string {
+func stateOf(t testing.TB, a *runningAgent) string {
 	t.Helper()
 	s, err := a.client.Status(context.Background())
 	if err != nil || len(s.Boxes) != 1 {
@@ -305,7 +348,7 @@ func echoServer(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-func freePort(t *testing.T) int {
+func freePort(t testing.TB) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -506,10 +549,13 @@ func TestAForwardWhosePortIsBusyStaysSavedAndStartsOnceFree(t *testing.T) {
 	}
 	a.stop()
 
-	squatter, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(local)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The stopped agent lets go of the port a moment after it returns.
+	var squatter net.Listener
+	eventually(t, "the port let go", func() bool {
+		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(local)))
+		squatter = ln
+		return err == nil
+	})
 	a = startAgent(t, dir)
 	eventually(t, "failed forward reported", func() bool {
 		s, err := a.client.Status(context.Background())

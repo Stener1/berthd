@@ -56,6 +56,11 @@ export interface SidebarItem {
   title: string;
   icon?: IconName;
   screen: string;
+  // A hook for the count on its row, shaped like HomeWidget's. A count shows
+  // in amber, like Home's agents waiting, and on More's row while the item
+  // is under More; urgent: false shows it quiet instead. 0 or undefined
+  // shows none. Called on every render, under the plugin's context.
+  useCount?: () => number | { n: number; urgent?: boolean } | undefined;
 }
 
 export interface WorktreePanelProps extends ScreenProps {
@@ -194,6 +199,35 @@ export interface BerthApi {
   renameSession(box: string, session: string, title: string): Promise<Session>;
   // The private URL of a port on a box, served by the laptop's proxy.
   serviceUrl(box: string, port: number): string;
+  // Uploads a file for an agent the way the app's composer does: raw bytes into a
+  // running session's worktree, or a worktree an agent is about to start in
+  // (.berth/attachments, which git ignores). Resolves with where it is on the box
+  // (pass path to the agent in the prompt). Up to 20 MB; larger is refused.
+  // file as a string is a path on this computer (see localPaths): the laptop
+  // agent uploads it, and on a box that runs on this computer it resolves to
+  // the path as it is, unread (size 0). pasted: true shrinks a pasted
+  // screenshot first, as the composer does; a dropped file goes as it is.
+  // An older Shipyard has no attach: check typeof berth.api.attach === "function".
+  attach(
+    box: string,
+    target: { session: string } | { location: string; worktree: string },
+    file: File | string,
+    opts?: { onProgress?(sent: number, total: number): void; signal?: AbortSignal; pasted?: boolean },
+  ): Promise<Attachment>;
+  // Paths to files on this computer that a paste is made of (Finder's copy of
+  // a file, a screenshot's /var/folders/… path), or [] for any other text.
+  // Pass them to attach. An older Shipyard has no localPaths either.
+  localPaths(text: string): string[];
+}
+
+// A file uploaded by api.attach: path is where it is on the box, name what
+// the box saved it as, the time first ("20261022-101502-notes.md"; a pasted
+// "image.png" goes up as "pasted-101502.png").
+export interface Attachment {
+  path: string;
+  name: string;
+  type: string;
+  size: number;
 }
 
 // What a loop reports while it runs, and how it ends; see orchestrate.loop.
@@ -331,6 +365,185 @@ export interface BerthPrompts {
   openBroadcast(opts?: { promptId?: string; text?: string; targets?: PromptTarget[] }): void;
 }
 
+// Linear, once the person has added an API key in Settings → Integrations.
+// The laptop holds the key and makes the calls; a plugin never sees it.
+export interface LinearStatus {
+  connected: boolean;
+  viewer?: { id: string; name: string; email?: string };
+  workspace?: { name: string; url_key: string };
+  // Where the key is, or would be, kept on this computer.
+  file?: string;
+}
+
+export interface LinearTeam {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface LinearIssue {
+  id: string;
+  // "WEB-12", as people say it.
+  identifier: string;
+  title: string;
+  url: string;
+  // 0 none, 1 urgent, 2 high, 3 medium, 4 low.
+  priority: number;
+  priority_label?: string;
+  // type is Linear's own: triage, backlog, unstarted, started, completed or
+  // canceled. color is hex with its #.
+  state: { name: string; type: string; color: string };
+  team: LinearTeam;
+  assignee?: { id: string; name: string };
+  creator?: string;
+  labels: { name: string; color: string }[];
+  // The branch name Linear suggests for the issue.
+  branch?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LinearIssueDetail extends LinearIssue {
+  // Markdown.
+  description: string;
+  comments: { author?: string; body: string; created_at: string; url?: string }[];
+  // What is attached to it, the pull requests Linear linked among them.
+  links: { title: string; url: string; source?: string }[];
+}
+
+export interface BerthLinear {
+  // Whose key it is. Not connected is an answer, not an error.
+  status(): Promise<LinearStatus>;
+  teams(): Promise<LinearTeam[]>;
+  // Up to 100 issues that are not done or cancelled, the most recently
+  // updated first: a team's (by its key), the person's own, or both.
+  issues(opts?: { team?: string; mine?: boolean }): Promise<LinearIssue[]>;
+  // By id or identifier ("WEB-12").
+  issue(id: string): Promise<LinearIssueDetail>;
+  // Comments as the key's owner. id is the issue's id, not its identifier.
+  comment(id: string, body: string): Promise<void>;
+}
+
+// A plugin's helper: a program of its own that Shipyard installs and runs on
+// a box the person turns it on for (berth-plugin.json's "box.helper" names
+// it, with its builds and their checksums). The box daemon keeps it running,
+// gives it a folder for its data and passes requests through to its HTTP
+// API; a plugin only ever reaches its own.
+export type HelperState =
+  // The plugin, as it is installed, names no helper: there is nothing to install.
+  | "none"
+  // This box can't run it: its berthd is older than helpers, or the plugin
+  // has no build for its platform.
+  | "unsupported"
+  // Not on this box: it was never installed there, or was turned off. A box
+  // doesn't say which, and what the helper recorded before may still be there.
+  | "off"
+  | "installing"
+  | "starting"
+  | "running"
+  // It was installed or started and that went wrong; error says how.
+  | "failed";
+
+export interface HelperStatus {
+  plugin: string;
+  box: string;
+  state: HelperState;
+  // The box's platform, as the manifest's assets name it: "linux-amd64".
+  platform: string;
+  // The version on the box, and the one the installed plugin carries.
+  version?: string;
+  latest?: string;
+  // The box runs another helper than the plugin carries (its version, its
+  // build or how it is run): install() replaces it.
+  update?: true;
+  error?: string;
+  // In the answer to remove(): the services running on the box that were
+  // started while the helper was on. What the helper gave them (where to send
+  // telemetry, a database URL through it) is still in their environment, so
+  // they need a restart to be as the project wrote them.
+  attached?: HelperService[];
+}
+
+// A worktree's service, as the box names it.
+export interface HelperService {
+  location: string;
+  worktree: string;
+  service: string;
+}
+
+export interface BerthHelper {
+  // What the box has of this plugin's helper. A box that can't run one is
+  // an answer ("unsupported"), not an error; a box that is offline rejects.
+  status(box: string): Promise<HelperStatus>;
+  // Installs the helper on the box, or updates it, and turns it on. Ask the
+  // person first: it puts a program on their machine. It resolves with the
+  // state it reached, which can still be "installing" or "starting": read
+  // status() until it settles.
+  install(box: string): Promise<HelperStatus>;
+  // Stops the helper and removes it from the box. What it recorded stays in
+  // its folder for the next install, unless purge. It resolves with the
+  // state it left, and in `attached` the running services that still point
+  // at the helper: say so, they are not restarted for anyone.
+  remove(box: string, opts?: { purge?: boolean }): Promise<HelperStatus>;
+  // The helper's own HTTP API, through the box: request("devl", "GET",
+  // "queries?limit=50") asks the helper for /api/queries?limit=50. It
+  // rejects with code "helper_off" (status 409) when the helper isn't
+  // running there, and with the helper's own code and message when it
+  // refuses the request.
+  request<T = unknown>(box: string, method: string, path: string, body?: unknown): Promise<T>;
+  // Has the box look in a worktree's own .env files for the variables this
+  // plugin's manifest names (attach_env), and tell the helper what it found,
+  // as it is told before one of the worktree's services starts, with ".env"
+  // where the service's name would be: for a project whose dev servers
+  // Shipyard does not start. Looking again replaces what the last look
+  // found. worktree "" is the location's main checkout.
+  //
+  // It resolves with what was looked at and never a value. Nothing found is
+  // an answer, not an error. It rejects with code "box_outdated" (status
+  // 404) on a box whose berthd is from before this, "helper_off" (409) when
+  // the helper isn't running there, "helper_no_attach" (409) for a helper
+  // whose manifest names no attach path, "helper_unreachable" (502) when the
+  // helper did not answer, and "refused" (403) when a hook on the box said
+  // no. Absent in a Shipyard from before it: check before calling.
+  //
+  // With `env`, no file is read: the helper is told those variables, which
+  // the person gave (a database's address they pasted), with "manual" where
+  // the service's name would be, in place of what it was last told that
+  // way. An empty `env` takes it back. Every name must be one the manifest's
+  // attach_env names (400 "bad_request" otherwise). A value given this way
+  // is a secret: it goes to the box in the request's body and on to the
+  // helper, and is in no answer, log or event. Don't keep it, and don't show
+  // it again.
+  attachEnv<A = Record<string, unknown>>(box: string, where: { location: string; worktree: string; env?: Record<string, string> }): Promise<HelperEnvLook<A>>;
+}
+
+// What a box found in a worktree's .env files for a helper (attachEnv).
+export interface HelperEnvLook<A = Record<string, unknown>> {
+  plugin: string;
+  location: string;
+  // The worktree's name on the box, its main checkout's too.
+  worktree: string;
+  // What the helper was told in place of a service's name: ".env" for a
+  // look in the files, "manual" for variables that were given.
+  command: string;
+  // The files that were read, in the order they were read; a later one's
+  // value for a variable wins. Of .env, .env.development, .env.local and
+  // .env.development.local in the worktree's own folder, the ones there.
+  files: string[];
+  // The ones that are there and were not read: "outside" (a link that
+  // leads out of the worktree), "not_a_file", "too_large", "not_text" or
+  // "unreadable".
+  skipped: { file: string; reason: string }[];
+  // The variables of those files that the manifest names. sent says the
+  // helper was told its value; when it was not, reason is "secret" (it names
+  // a secret: op://, env://), "unresolved" (it refers to a variable the
+  // files do not set), "empty" or "too_long". file is "" for a variable
+  // that was given and not read.
+  variables: { name: string; file: string; sent: boolean; reason?: string }[];
+  // The helper's own answer to being told, without its "env".
+  answer: A;
+}
+
 export interface BerthPluginContext {
   // The plugin's id: the name of its folder under ~/.berth/plugins (or the
   // built-in's folder), not a field in berth-plugin.json.
@@ -338,6 +551,11 @@ export interface BerthPluginContext {
   readonly api: BerthApi;
   readonly orchestrate: BerthOrchestrate;
   readonly prompts: BerthPrompts;
+  readonly linear: BerthLinear;
+  // This plugin's helper on a box (see BerthHelper). Every call is for the
+  // plugin's own id; one without "box.helper" in its manifest has none to
+  // install.
+  readonly helper: BerthHelper;
   addSidebarItem(item: SidebarItem): Dispose;
   addScreen(screen: Screen): Dispose;
   addWorktreePanel(panel: WorktreePanel): Dispose;
@@ -353,6 +571,8 @@ export interface BerthPluginContext {
   // A toast in the app, and a system notification when it is not focused.
   notify(title: string, body?: string): void;
   openScreen(id: string): void;
+  // Opens the app's Settings, on a section when given one ("integrations").
+  openSettings(section?: string): void;
   openTerminal(box: string, session: string): void;
   openUrl(url: string): void;
   // Brings a worktree's workspace to the front, as clicking it in the

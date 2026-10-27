@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { queueRemoval } from "@/lib/remove-worktree";
 import { load, save } from "@/lib/storage";
 import { ViewHeader } from "@/views/view-header";
 import { BulkBar } from "@/views/worktrees/bulk-bar";
-import { DeleteDialog } from "@/views/worktrees/delete-dialog";
+import { ArchiveDialog } from "@/views/worktrees/archive-dialog";
 import { HistorySheet } from "@/views/worktrees/history-sheet";
 import { type BulkAction, useBulk } from "@/views/worktrees/use-bulk";
 import { type Row, useWorktrees } from "@/views/worktrees/use-worktrees";
@@ -47,8 +48,7 @@ export function WorktreesView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string>();
   const [openKey, setOpenKey] = useState<string>();
-  const [deleting, setDeleting] = useState<Row[]>();
-  const [archiving, setArchiving] = useState(false);
+  const [archiving, setArchiving] = useState<Row[]>();
   // The row order when a bulk action started: rows stay put under the
   // pointer while their commits change, until its summary is dismissed.
   const [frozen, setFrozen] = useState<string[]>();
@@ -145,8 +145,13 @@ export function WorktreesView() {
   const busy = !!summary && !summary.done;
   const act = (a: BulkAction, list: Row[]) => {
     if (busy) return;
-    if (a.kind !== "delete") setFrozen(flat.map((r) => r.key));
+    setFrozen(flat.map((r) => r.key));
     void run(a, list);
+  };
+  // Delete asks nothing: each worktree shows "Removing…" until its box has
+  // removed it, one at a time per box (lib/remove-worktree.ts).
+  const remove = (list: Row[]) => {
+    for (const r of list) if (!r.main) queueRemoval(r.box, r.location, { name: r.name, path: r.path });
   };
   const dismiss = () => {
     clear();
@@ -172,7 +177,7 @@ export function WorktreesView() {
       />
 
       {/* One row of filters, search first; it stays one row down to 1100px. */}
-      <div className="@container/toolbar flex shrink-0 items-center gap-2 border-b px-6 py-2">
+      <div className="@container/toolbar flex shrink-0 items-center gap-2 border-b px-page py-2">
         <div className="relative w-56 min-w-36 shrink">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input size="sm" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="[&_input]:pl-8" aria-label="Search worktrees" />
@@ -217,12 +222,12 @@ export function WorktreesView() {
 
       <div className="min-h-0 flex-1 overflow-auto pb-24">
         {Object.entries(errors).map(([box, err]) => (
-          <div key={box} className="border-b px-6 py-2">
+          <div key={box} className="border-b px-page py-2">
             <BoxError box={box} error={err} what="its worktrees" />
           </div>
         ))}
         {!loaded ? (
-          <div className="space-y-2 px-6 pt-4">
+          <div className="space-y-2 px-page pt-4">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-10" />
             ))}
@@ -260,20 +265,17 @@ export function WorktreesView() {
 
       <BulkBar
         selected={selectedRows}
-        summary={summary && summary.action.kind !== "delete" ? summary : undefined}
+        summary={summary}
         progress={progress}
         onSync={(mode, paused) => act({ kind: "sync", mode, paused }, selectedRows)}
         onPause={() => act({ kind: "pause" }, selectedRows)}
         onResume={() => act({ kind: "resume" }, selectedRows)}
         onStop={() => act({ kind: "stop" }, selectedRows)}
         onDelete={() => {
-          setArchiving(false);
-          setDeleting(selectedRows);
+          remove(selectedRows);
+          setSelected(new Set());
         }}
-        onArchive={() => {
-          setArchiving(true);
-          setDeleting(selectedRows);
-        }}
+        onArchive={() => setArchiving(selectedRows)}
         onClear={() => setSelected(new Set())}
         onCancel={cancel}
         onDismiss={dismiss}
@@ -290,28 +292,24 @@ export function WorktreesView() {
         onClose={() => setOpenKey(undefined)}
         onAction={(a) => open && act(a, [open])}
         onDelete={() => {
-          setArchiving(false);
-          if (open) setDeleting([open]);
+          if (open) remove([open]);
+          setOpenKey(undefined);
         }}
-        onArchive={() => {
-          setArchiving(true);
-          if (open) setDeleting([open]);
-        }}
+        onArchive={() => open && setArchiving([open])}
       />
 
-      <DeleteDialog
-        rows={deleting}
-        archive={archiving}
+      <ArchiveDialog
+        rows={archiving}
         progress={progress}
-        running={busy && (summary?.action.kind === "delete" || summary?.action.kind === "archive")}
-        onRun={(a) => deleting && act(a, deleting)}
+        running={busy && summary?.action.kind === "archive"}
+        onRun={() => archiving && act({ kind: "archive" }, archiving)}
         onClose={() => {
-          if (summary?.action.kind === "delete" || summary?.action.kind === "archive") {
+          if (summary?.action.kind === "archive") {
             clear();
             setSelected(new Set());
             setOpenKey(undefined);
           }
-          setDeleting(undefined);
+          setArchiving(undefined);
         }}
       />
     </div>

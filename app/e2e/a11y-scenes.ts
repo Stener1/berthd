@@ -87,7 +87,9 @@ const settings = (section: string): Scene => ({
   key: section === "appearance" || section === "general",
   async run(app, theme) {
     await app.open({ theme });
-    await app.openSettings(section);
+    const body = await app.openSettings(section);
+    // Plugins reads its lists after the page: wait for the listing's rows.
+    if (section === "plugins") await expect(body.getByTestId("market-plugin").first()).toBeVisible();
   },
 });
 
@@ -264,6 +266,46 @@ export const scenes: Scene[] = [
     },
   },
   {
+    // Home with a team suggestion's card, and the project's quiet mark
+    // (lib/team-suggest.ts).
+    id: "team-suggestion",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, params: { teamsuggest: "1" } });
+      await expect(app.page.getByTestId("team-suggest-card")).toBeVisible();
+      await expect(app.page.getByTestId("team-suggest-mark")).toBeVisible();
+    },
+  },
+  {
+    // Just the kit's sheet (views/team/team-kit-sheet.tsx): what the kit
+    // needs on the box, and the keys and init left unticked.
+    id: "team-kit-sheet",
+    extra: true,
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme, params: { teamsuggest: "1" } });
+      await page.getByTestId("team-suggest-mark").locator("xpath=ancestor::button[1]").click({ button: "right" });
+      await page.getByRole("menuitem", { name: /kit for this project/ }).click();
+      await expect(page.getByTestId("team-kit-requires")).toBeVisible();
+    },
+  },
+  {
+    // A PR review link's sheet (views/pr-review), with setup files changed.
+    id: "pr-review-sheet",
+    async run(app, theme) {
+      await app.open({ theme, params: { "review-link": "berth://review?repo=acme/shop&pr=57" } });
+      await expect(app.page.getByTestId("pr-review-changes")).toBeVisible();
+    },
+  },
+  {
+    id: "pr-review-refused",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, params: { "review-link": "berth://review?repo=acme/shop&pr=63" } });
+      await expect(app.page.getByTestId("pr-review-refused")).toBeVisible();
+    },
+  },
+  {
     id: "guided-install",
     async run(app, theme) {
       const { page } = app;
@@ -275,7 +317,7 @@ export const scenes: Scene[] = [
       await expect(page.getByTestId("install-plan")).toBeVisible();
     },
   },
-  ...["general", "notifications", "appearance", "terminal", "boxes", "computers", "phone", "agents", "plugins", "shortcuts", "labs", "about", "developer"].map(settings),
+  ...["general", "notifications", "appearance", "terminal", "boxes", "computers", "phone", "agents", "integrations", "plugins", "shortcuts", "labs", "about", "developer"].map(settings),
   {
     id: "sidebar-rename",
     async run(app, theme) {
@@ -309,6 +351,99 @@ export const scenes: Scene[] = [
       await app.open({ theme });
       await app.page.getByRole("button", { name: "Hide the sidebar" }).click();
       await expect(app.page.getByRole("navigation", { name: "Agents" })).toBeVisible();
+    },
+  },
+  {
+    // The rail sidebar, the default: a project picked on the rail, its
+    // worktrees on the sheet beside it.
+    id: "sidebar-rail",
+    async run(app, theme) {
+      await app.open({ theme, prefs: { sidebarLayout: "rail" } });
+      await expect(app.page.getByTestId("rail-project")).toHaveCount(3);
+      await app.page.locator("[data-testid=rail-project][data-project=shop]").click();
+      await expect(app.worktree("devl/checkout-fix")).toBeVisible();
+      // Switching to shop lands on its agent that worked last (qa-deck's);
+      // back Home, as the scene was before switching landed anywhere.
+      await expect(app.worktree("devl/qa-deck")).toHaveAttribute("data-active", "true");
+      await app.page.getByTestId("nav-home").first().click();
+      await expect(app.page.getByTestId("nav-home").first()).toHaveAttribute("aria-current", "page");
+    },
+  },
+  {
+    // The rail sidebar folded away (⌘\): the rail alone.
+    id: "sidebar-rail-folded",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, prefs: { version: 4, sidebarLayout: "rail" } });
+      await app.page.getByRole("button", { name: "Hide the sidebar" }).click();
+      await expect(app.page.getByTestId("sidebar-rail").getByTestId("rail-project").first()).toBeVisible();
+    },
+  },
+  {
+    // The two-column sidebar (Settings › Appearance): a project picked, its
+    // tasks beside the projects.
+    id: "sidebar-columns",
+    async run(app, theme) {
+      await app.open({ theme, prefs: { sidebarLayout: "columns" } });
+      await expect(app.page.getByTestId("column-project")).toHaveCount(3);
+      await app.page.locator("[data-testid=column-project][data-project=shop]").click();
+      await expect(app.worktree("devl/checkout-fix")).toBeVisible();
+      // Switching to shop lands on its agent that worked last (qa-deck's);
+      // back Home, as the scene was before switching landed anywhere.
+      await expect(app.worktree("devl/qa-deck")).toHaveAttribute("data-active", "true");
+      await app.page.getByTestId("nav-home").first().click();
+      await expect(app.page.getByTestId("nav-home").first()).toHaveAttribute("aria-current", "page");
+    },
+  },
+  {
+    // The sidebar's notice that boxes' skills aren't installed or are out
+    // of date (components/sidebar/skills-notice.tsx), unfolded, with an
+    // install a hook on the box refused.
+    id: "skills-notice",
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme });
+      await page.evaluate(() => (window as unknown as { __berthMockSkills: { refuse(box: string): void } }).__berthMockSkills.refuse("devl"));
+      await page.getByTestId("skills-notices-more").click();
+      await page.locator('[data-testid=skills-notice][data-box="devl"]').getByRole("button", { name: "Install now" }).click();
+      await expect(page.getByTestId("skills-notice-error")).toBeVisible();
+      await expect(page.locator('[data-testid=skills-notice][data-box="gpu"]')).toBeVisible();
+    },
+  },
+  {
+    // Its Snooze menu.
+    id: "skills-notice-snooze",
+    extra: true,
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme });
+      await page.getByRole("button", { name: "Snooze the reminder for devl" }).click();
+      await expect(page.getByRole("menuitem", { name: "Don't remind me for devl" })).toBeVisible();
+    },
+  },
+  {
+    // The same notices from the folded sidebar's one button.
+    id: "skills-notice-rail",
+    extra: true,
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme });
+      await page.getByRole("button", { name: "Hide the sidebar" }).click();
+      await page.getByTestId("skills-notices-rail").click();
+      await expect(page.getByTestId("skills-notice")).toHaveCount(2);
+    },
+  },
+  {
+    // Settings → Agents with a box's reminder snoozed.
+    id: "settings-agents-snoozed",
+    extra: true,
+    async run(app, theme) {
+      const { page } = app;
+      await app.open({ theme });
+      await page.getByRole("button", { name: "Snooze the reminder for devl" }).click();
+      await page.getByRole("menuitem", { name: "Until tomorrow" }).click();
+      const body = await app.openSettings("agents");
+      await expect(body.getByRole("button", { name: "Remind me now" })).toBeVisible();
     },
   },
   {
@@ -525,5 +660,321 @@ export const scenes: Scene[] = [
       await expect(app.page.getByRole("dialog")).toBeVisible();
     },
   },
+  // Leadline's panels (plugins/leadline) on the mock helper's fixtures
+  // (src/lib/mock-helper.ts): a list with a row's detail open beside it.
+  {
+    id: "leadline-queries",
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/checkout-fix", "Queries");
+      await p.getByTestId("leadline-row").filter({ hasText: "FROM order_items" }).click();
+      await expect(p.getByTestId("leadline-detail").getByTestId("leadline-traces").first()).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-traces",
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/checkout-fix", "Traces");
+      await p.getByTestId("leadline-row").filter({ hasText: "POST /api/checkout" }).first().click();
+      await p.getByTestId("leadline-span").filter({ hasText: "INSERT INTO orders" }).click();
+      await expect(p.getByTestId("leadline-span-info")).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-logs",
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/checkout-fix", "Logs");
+      await p.getByTestId("leadline-row").filter({ hasText: "webhook failed" }).first().click();
+      await expect(p.getByTestId("leadline-log-info")).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-endpoints",
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/checkout-fix", "Endpoints");
+      await p.getByTestId("leadline-row").filter({ hasText: "webhooks" }).click();
+      await expect(p.getByTestId("leadline-detail").getByTestId("leadline-traces").first()).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-screen",
+    async run(app, theme) {
+      await app.open({ theme });
+      // Its sidebar item starts under More: the palette's command is there
+      // once the plugin has loaded.
+      const input = app.page.getByRole("combobox", { name: "Search sessions, worktrees and commands" });
+      const command = app.page.getByRole("option", { name: /^Show Leadline/ });
+      await expect(async () => {
+        if (!(await input.isVisible())) await app.page.keyboard.press("Meta+k");
+        await input.fill("Show Leadline");
+        if (!(await command.isVisible())) await app.page.keyboard.press("Escape");
+        await expect(command).toBeVisible({ timeout: 500 });
+      }).toPass();
+      await command.click();
+      await expect(app.page.getByTestId("leadline-heard").first()).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-off",
+    extra: true,
+    async run(app, theme) {
+      const p = await leadline(app, theme, "gpu/ci-flake", "Queries");
+      await p.getByRole("button", { name: "Turn on…" }).click();
+      await expect(app.page.getByRole("alertdialog")).toBeVisible();
+    },
+  },
+  {
+    // A plugin that changed, with its program left running meanwhile.
+    id: "plugin-helper-held",
+    extra: true,
+    async run(app, theme) {
+      await app.open({ theme, params: { helper: "held" } });
+      await app.page.getByRole("dialog", { name: "Leadline has changed" }).getByRole("button", { name: "Not now" }).click();
+      const body = await app.openSettings("plugins");
+      await expect(body.getByTestId("plugin-helper-held")).toBeVisible();
+    },
+  },
+  {
+    id: "leadline-nothing-yet",
+    extra: true,
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/qa-deck", "Traces");
+      await expect(p.getByTestId("leadline-notice")).toContainText("Nothing from qa-deck yet");
+    },
+  },
+  {
+    id: "leadline-send",
+    extra: true,
+    async run(app, theme) {
+      const p = await leadline(app, theme, "devl/checkout-fix", "Endpoints");
+      await p.getByRole("button", { name: "Send this failing endpoint to the agent" }).click();
+      await expect(app.page.getByTestId("leadline-send").getByRole("textbox")).toBeVisible();
+    },
+  },
+  // The Database panel (plugins/database) on the mock helper's acme shop
+  // (src/lib/mock-database.ts): a table's grid, an edit in review, the
+  // unlock confirm, the console with a result, and the states.
+  {
+    id: "database-browser",
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByTestId("database-table").filter({ hasText: "orders" }).last().click();
+      await p.getByRole("button", { name: "Filter by status" }).click();
+      // A cell picked: what it offers (the row its key points at) can be reached.
+      await p.locator("[data-testid=database-row]:visible").first().locator('[data-col="customer_id"]').click();
+      await expect(p.locator("[data-testid=database-row]:visible [aria-selected=true]")).toHaveCount(1);
+    },
+  },
+  {
+    id: "database-review",
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByTestId("database-table").filter({ hasText: "customers" }).click();
+      await p.getByRole("button", { name: "Unlock writes…" }).click();
+      await app.page.getByRole("alertdialog").getByRole("button", { name: "Unlock for 15 minutes" }).click();
+      const plan = p.locator("[data-testid=database-row]:visible").first().locator('[data-col="plan"]');
+      await plan.dblclick();
+      await plan.getByRole("textbox").fill("business");
+      await plan.getByRole("textbox").press("Enter");
+      await p.getByRole("button", { name: "Add row" }).click();
+      await p.getByRole("checkbox", { name: "Pick row 4", exact: true }).check();
+      await p.getByRole("button", { name: "Delete 1 row" }).click();
+      await p.getByTestId("database-staged").getByRole("button", { name: "Review…" }).click();
+      await expect(app.page.getByTestId("database-review").getByTestId("database-change")).toHaveCount(3);
+      // The sheet slides in.
+      await app.page.waitForTimeout(400);
+    },
+  },
+  {
+    id: "database-staged",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByTestId("database-table").filter({ hasText: "customers" }).click();
+      await p.getByRole("button", { name: "Unlock writes…" }).click();
+      await app.page.getByRole("alertdialog").getByRole("button", { name: "Unlock for 15 minutes" }).click();
+      await p.getByRole("button", { name: "Add row" }).click();
+      const notes = p.locator("[data-testid=database-row]:visible").nth(3).locator('[data-col="notes"]');
+      await notes.dblclick();
+      await expect(notes.getByRole("button", { name: "Set NULL" })).toBeVisible();
+    },
+  },
+  {
+    id: "database-unlock",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByRole("button", { name: "Unlock writes…" }).click();
+      await expect(app.page.getByRole("alertdialog")).toBeVisible();
+    },
+  },
+  {
+    id: "database-structure",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByTestId("database-table").filter({ hasText: "order_items" }).click();
+      await p.getByRole("group", { name: "What to show of the table" }).getByRole("button", { name: "Structure" }).click();
+      await expect(p.getByTestId("database-structure")).toBeVisible();
+    },
+  },
+  {
+    id: "database-console",
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByRole("group", { name: "Browse the tables, or run SQL" }).getByRole("button", { name: "Console" }).click();
+      await p.getByRole("textbox", { name: "SQL to run" }).click();
+      await app.page.keyboard.type("SELECT id, name, notes FROM customers LIMIT 20");
+      await app.page.keyboard.press("ControlOrMeta+Enter");
+      await expect(p.locator("[data-testid=database-row]:visible").first()).toBeVisible();
+    },
+  },
+  {
+    id: "database-console-error",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByRole("group", { name: "Browse the tables, or run SQL" }).getByRole("button", { name: "Console" }).click();
+      await p.getByRole("textbox", { name: "SQL to run" }).click();
+      await app.page.keyboard.type("SELECT id, emial FROM customers");
+      await app.page.keyboard.press("ControlOrMeta+Enter");
+      await expect(p.getByTestId("database-error")).toBeVisible();
+    },
+  },
+  {
+    id: "database-other-engine",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix");
+      await p.getByTestId("database-connection").click();
+      await app.page.getByRole("menuitem", { name: /events/ }).click();
+      await p.getByTestId("database-table").filter({ hasText: "deliveries" }).click();
+      await expect(p.getByTestId("database-browse-only")).toBeVisible();
+    },
+  },
+  // A database found in the worktree's .env: the file's name in the bar.
+  {
+    id: "database-from-env",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "env" });
+      await expect(p.getByTestId("database-from-env")).toBeVisible();
+    },
+  },
+  // A look that found none: what it looked at, over what always showed.
+  {
+    id: "database-env-refused",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "env-refused" });
+      await expect(p.getByTestId("database-looked")).toBeVisible();
+    },
+  },
+  // Connect a database…: the address field, masked, with what went wrong under it.
+  {
+    id: "database-connect",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "none" });
+      await p.getByRole("button", { name: "Connect a database…" }).click();
+      const dialog = app.page.getByRole("alertdialog");
+      await dialog.getByLabel("Address", { exact: true }).fill("postgres://acme:acme@db.acme.example:5432/shop_staging");
+      await dialog.getByRole("button", { name: "Connect", exact: true }).click();
+      await expect(dialog.getByTestId("database-connect-problem")).toBeVisible();
+      await app.page.waitForTimeout(400);
+    },
+  },
+  // A connection added by hand: how it got here, and Forget.
+  {
+    id: "database-by-hand",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "none" });
+      await p.getByRole("button", { name: "Connect a database…" }).click();
+      const dialog = app.page.getByRole("alertdialog");
+      await dialog.getByLabel("Address", { exact: true }).fill("postgres://acme:acme@localhost:5433/shop_scratch");
+      await dialog.getByRole("button", { name: "Connect", exact: true }).click();
+      await expect(p.getByTestId("database-by-hand")).toBeVisible();
+    },
+  },
+  {
+    id: "database-screen",
+    async run(app, theme) {
+      await app.open({ theme });
+      const input = app.page.getByRole("combobox", { name: "Search sessions, worktrees and commands" });
+      const command = app.page.getByRole("option", { name: /^Show Database/ });
+      await expect(async () => {
+        if (!(await input.isVisible())) await app.page.keyboard.press("Meta+k");
+        await input.fill("Show Database");
+        if (!(await command.isVisible())) await app.page.keyboard.press("Escape");
+        await expect(command).toBeVisible({ timeout: 500 });
+      }).toPass();
+      await command.click();
+      await expect(app.page.locator('[data-testid=database-box][data-box="devl"]')).toHaveAttribute("data-state", "running");
+    },
+  },
+  {
+    id: "database-off",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "gpu/ci-flake");
+      await expect(p.getByTestId("database-notice")).toContainText("Database is off on gpu");
+    },
+  },
+  {
+    id: "database-none",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "none" });
+      await expect(p.getByTestId("database-notice")).toContainText("No database for checkout-fix yet");
+    },
+  },
+  {
+    id: "database-old-box",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "unauthorized" });
+      await expect(p.getByTestId("database-notice")).toContainText("devl needs updating for Database");
+    },
+  },
+  {
+    id: "database-refused",
+    extra: true,
+    async run(app, theme) {
+      const p = await database(app, theme, "devl/checkout-fix", { db: "refused" });
+      await expect(p.getByTestId("database-notice")).toContainText("Couldn't reach shop_checkout_fix");
+    },
+  },
 ];
+
+// database opens the Database panel in a worktree, once the plugin has
+// loaded and the "+" menu lists it.
+async function database(app: App, theme: string, wt: string, params?: Record<string, string>) {
+  await app.open({ theme, params });
+  await app.openWorktree(wt);
+  const option = app.page.getByRole("option", { name: /^Database/ });
+  await expect(async () => {
+    if (!(await option.isVisible())) await app.page.getByRole("button", { name: "New tab" }).click();
+    await expect(option).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await option.click();
+  const p = app.page.locator("[data-testid=database]:visible");
+  await expect(p.getByTestId("database-tree").or(p.getByTestId("database-notice")).first()).toBeVisible();
+  return p;
+}
+
+// leadline opens one of Leadline's panels in a worktree, once the plugin
+// has loaded and the "+" menu lists it.
+async function leadline(app: App, theme: string, wt: string, title: string) {
+  await app.open({ theme });
+  await app.openWorktree(wt);
+  const option = app.page.getByRole("option", { name: new RegExp(`^${title}`) });
+  await expect(async () => {
+    if (!(await option.isVisible())) await app.page.getByRole("button", { name: "New tab" }).click();
+    await expect(option).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await option.click();
+  const p = app.page.locator(`[data-testid=leadline][data-leadline=${title.toLowerCase()}]:visible`);
+  await expect(p.getByTestId("leadline-row").or(p.getByTestId("leadline-notice")).first()).toBeVisible();
+  return p;
+}
 

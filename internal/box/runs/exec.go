@@ -369,7 +369,7 @@ func (x *execution) seq(ctx context.Context, sc *scope, steps []Step, prefix str
 		if err != nil {
 			return false, err
 		}
-		if ctx.Err() != nil && res.Status != Succeeded && res.Status != Failed {
+		if ctx.Err() != nil && res.Status != Succeeded && res.Status != Failed && res.Status != Skipped {
 			return false, ctx.Err()
 		}
 		prevOK = res.ok()
@@ -771,7 +771,13 @@ func (x *execution) await(ctx context.Context, g Gate, timeout, onTimeout, id st
 	if op, ok := x.opened[path]; ok && op.Step != nil {
 		st.Started = op.Step.Started
 	}
-	if !d.Approve {
+	if g.RejectLabel != "" {
+		// A choice between two ways on, not a yes or no: neither failed.
+		st.Output = g.RejectLabel
+		if d.Approve {
+			st.Output = g.ApproveLabel
+		}
+	} else if !d.Approve {
 		st.Status = Failed
 	}
 	x.record(Record{T: recGateDone, Path: path, Decided: &d, Step: &st}, true)
@@ -850,6 +856,11 @@ func (x *execution) leaf(ctx context.Context, sc *scope, s Step, id, path string
 			sctx.Attempt = rec.Attempt
 		}
 		sctx.IdemKey = idemKey(x.run.ID, path, sctx.Attempt)
+		if s.Kind == "pr" && rec.Step != nil && rec.Step.Status == Failed {
+			// berthd stopped while a person was asked about a pull request
+			// that didn't open: the same question, not another try.
+			return x.publishFailed(ctx, sc, sctx, id, Result{Status: Failed, Code: rec.Step.ExitCode, Out: rec.Step.Output, Err: rec.Step.Error}, rec.Step)
+		}
 		if res, ok := x.e.Host.Reenter(ctx, sctx); ok {
 			if res.Status == "unknown" {
 				arrived, err := x.await(ctx, Gate{Path: path + ".arrived", Title: "Did the prompt arrive?",
@@ -918,8 +929,64 @@ func (x *execution) execute(ctx context.Context, sc *scope, sctx *StepCtx, id st
 			res.Err = "cancelled"
 		}
 	}
+	if s.Kind == "pr" && res.Status == Failed {
+		return x.publishFailed(ctx, sc, sctx, id, res, started)
+	}
 	x.finish(sc, sctx, id, res, started)
 	return res, nil
+}
+
+// publishFailed is a pull request that didn't open. That is publishing
+// failing, not the agents' work: the pick stays recorded, nothing is
+// archived, and the run waits for a person to retry, or to finish without
+// a pull request, which the steps after see as a skip and go on.
+func (x *execution) publishFailed(ctx context.Context, sc *scope, sctx *StepCtx, id string, res Result, started *StepRun) (Result, error) {
+	path := sctx.Path
+	g := Gate{Path: fmt.Sprintf("%s.publish%d", path, sctx.Attempt), Title: "The pull request didn't open", Text: publishText(res, sctx.Vars["pick.path"] != ""),
+		ApproveLabel: "Retry publishing", RejectLabel: "Finish without a pull request"}
+	if _, ok := x.opened[g.Path]; !ok {
+		// The step shows its failure while the run waits.
+		failed := *started
+		failed.Status, failed.Error, failed.Output, failed.ExitCode = Failed, res.Err, tail(res.Out, 4000), res.Code
+		failed.Ended = x.e.now().UTC()
+		x.record(Record{T: recStarted, Path: path, Attempt: sctx.Attempt, Step: &failed}, true)
+	}
+	d, err := x.await(ctx, g, "", "", id)
+	if err != nil {
+		return Result{Status: Failed}, err
+	}
+	if d.Approve {
+		sctx.Attempt++
+		sctx.IdemKey = idemKey(x.run.ID, path, sctx.Attempt)
+		return x.execute(ctx, sc, sctx, id)
+	}
+	out := "Finished without a pull request"
+	if res.Err != "" {
+		out += " (" + res.Err + ")"
+	}
+	skip := Result{Status: Skipped, Out: out + ".", Set: map[string]string{"pr.skipped": "1"}}
+	x.finish(sc, sctx, id, skip, started)
+	return skip, nil
+}
+
+// publishText is the publish gate's text: what failed, in the tool's own
+// words, and what each way on does.
+func publishText(res Result, picked bool) string {
+	what := res.Err
+	if what == "" {
+		what = "it failed"
+	}
+	t := "The agents' work is done and kept; only publishing failed: " + what + "."
+	if picked {
+		t = "The agents' work is done and your pick is kept; only publishing failed: " + what + "."
+	}
+	if o := strings.TrimSpace(res.Out); o != "" {
+		t += "\n\n" + tail(o, 1200)
+	}
+	if picked {
+		return t + "\n\nRetry once it's fixed, or finish without a pull request: the run goes on and archives the other attempts."
+	}
+	return t + "\n\nRetry once it's fixed, or finish without a pull request: the run goes on with its next steps."
 }
 
 // finish journals a leaf's result.

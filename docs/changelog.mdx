@@ -18,6 +18,851 @@ again.
   are kept on this computer, and a worktree's pin goes when you archive or
   remove it.
 
+- **Switching projects no longer opens a new task.** Clicking a project on
+  the rail (or in the projects column) with no agent at work in it now takes
+  you to the worktree of it you were in last, or its main checkout, instead
+  of popping up New task.
+- **The app has a new icon:** a box in its tray with the amber lamp lit on
+  top. A dev build wears the same box on orange.
+- **An agent waiting on its own work no longer looks like a live turn.**
+  When turn check reads a finished turn as work still running (a build, a
+  deploy, a task it waits on), the sidebar and its tab show an hourglass
+  that says so, instead of the spinner of a turn still going. Turn check
+  also reads a handoff as done: an agent that started a worker it won't
+  follow and told you that you can close the session no longer shows as
+  working.
+- **Plugins can give an agent a file.** `berth.api.attach` uploads a
+  pasted or dropped file into a session's worktree, or a worktree an agent
+  is about to start in, the way the composer does, and resolves with its
+  path on the box to put in a prompt. A pasted screenshot shrinks first, and
+  a path to a file on this computer (`berth.api.localPaths` finds them in
+  pasted text) goes up through Shipyard. Files up to 20 MB.
+- **A chat whose turn ended no longer looks busy.** When an agent's turn
+  ends while its work runs on (turn check read a build, a deploy or a
+  delegated task as still going), its chat now ends on an hourglass,
+  **Waiting on its work**, instead of a spinner and a ticking timer, and
+  the reply box shows **Send** rather than Stop: what you type starts a
+  new turn.
+- **Turn check reads a status report on another session as done.** A
+  reply that says how another session or worker is getting on and offers
+  to follow it up ("I can nudge it, or tell you when its turn ends") no
+  longer keeps the session showing as working. Waiting on another session
+  still counts as working when the agent says it will act once that
+  session reports back.
+- **A helper working in the background no longer restarts a finished
+  turn.** Tool use by a Claude Code subagent left running after the
+  agent's turn ended used to put the session back to running until your
+  next prompt.
+- **Stopping several agents can archive their worktrees too.** The Agent
+  Dashboard's Stop and Clean up dialogs have a box, **Archive their
+  worktrees where it's safe**. Ticked, each stopped agent's worktree is
+  archived once its agents are stopped: the archive script runs and the
+  branch is kept. A worktree with uncommitted changes, or with another
+  agent still running in it, is kept as it is, and its row says why. The
+  dialog remembers whether you ticked it.
+- **Archiving never tears down uncommitted work.** A box now refuses to
+  archive or remove a worktree with uncommitted or untracked files before
+  it stops anything or runs the archive script, instead of running the
+  script first and only then finding that git won't remove it. Remove
+  anyway still forces it.
+- **Cards for agents in chat say what the agent is doing.** On the Agent
+  Dashboard, an agent that runs in chat showed the frames of the host
+  that runs it ("out stream_event") and "stdio" as its prompt. Its card
+  now shows what it asks while it waits (the command and why, or the
+  question) with its answers, otherwise the last lines of its reply, and
+  the prompt it started with. Cards for agents in a terminal are as
+  before.
+
+## v0.3.30
+
+- **Agents on a Mac run at full speed.** Shipyard's login agents (the
+  Mac app's agent, and `berthd` on a Mac box) used to ask macOS to run
+  them as background work, which slows their CPU and disk, and with them
+  every agent and build they start. They now run as interactive work.
+  Updating the app applies it to this Mac right away. A Mac box updated
+  with **Update all** gets it the next time it restarts or you log in
+  there; running the install command again applies it at once.
+- **Back and Forward, as in a browser.** The arrows at the top of the
+  sidebar, ⌘[ and ⌘] (also in the Go menu and ⌘K), and a mouse's back and
+  forward buttons take you through the places you've been: a page such as
+  the Agent Dashboard, or a worktree and the tab you had open in it.
+- **Archiving the worktree you're in takes you back.** When the worktree
+  in front is archived or removed, you land on the place you were before
+  it, such as the Agent Dashboard, instead of Home. The dashboard also
+  keeps where you'd scrolled to.
+- **The + next to Worktrees makes a worktree.** In the project sheet
+  beside the rail, it now opens New worktree for that project, instead of
+  a menu to add a project or a box. Those stay on the rail's own + and
+  the boxes row at the bottom of the sidebar.
+
+## v0.3.29
+
+- **Removing a worktree no longer asks first.** Remove worktree in the
+  sidebar, Stop and remove worktree on the dashboard, and Delete in the
+  Worktrees view now act at once: the worktree shows Removing… and goes
+  when its box gets to it, one at a time. Its branch is kept. One with
+  uncommitted changes stays, and the note that says so has **Remove
+  anyway**.
+- **Switching projects takes you to where the work is.** Picking another
+  project in the sidebar now opens the agent in it that worked last, one
+  that's working or waiting on you. With none, the new task box for that
+  project opens instead.
+- **Answers from the question card reach Claude Code, long ones too.**
+  When Claude asked several questions with lists in them, or you wrote a
+  long answer, the card's answers often stopped before the first one and
+  left Claude's own form untouched: an agent nobody has open has a screen
+  too short for the form. Now the box makes room while it answers, then
+  puts the screen back.
+
+- **Answers that don't go are kept.** If the box still can't fill in
+  Claude's form, the card keeps every answer and says why, with Retry and
+  Copy answers, and Claude's own screen opens under it to finish there.
+
+- **⌘-click a Markdown path in a terminal to read it here.** A `.md` file
+  of the worktree, such as one an agent names in its reply, opens in a File
+  tab as a page. ⌘⇧-click sends it to your editor, as ⌘-click does with
+  every other file.
+
+- **Pictures show in a Markdown file's Preview again.** Since v0.3.27 a
+  `.md` file's pictures, from the worktree or the web, didn't show.
+
+- **A new Claude chat opens in Claude Code's terminal before you've said
+  anything.** Switching one to its terminal used to flash "No conversation
+  found" and end the session. Now the terminal opens on the same
+  conversation, and the chat picks it up again when you switch back.
+
+- **No made-up question card.** An agent whose last message asks you
+  something still shows as **Needs you**, but its chat no longer adds a
+  "Needs your answer" card with Yes and No that it can't answer with (the
+  card took its title from Claude Code's footer, often "/rc"), and the
+  Agent Dashboard no longer offers a numbered plan in that message as
+  options to pick: answer it from the reply box. Options show only when
+  the agent's own screen offers them, and the mode menu works while such an
+  agent waits.
+
+## v0.3.28
+
+- **Every worktree shows in the sidebar.** Worktrees with nothing going on
+  are no longer folded under "Show N older", so the sidebar's room goes to
+  your worktrees. The Active / All worktrees choice went with it. A
+  project still folds from its header, and a worktree's handed-off
+  children from their count.
+
+## v0.3.27
+
+Keeping main up to date and opening Codex edits need each box's new
+`berthd`: use **Update all** in the status bar, or `berth upgrade BOX`.
+
+- **Main stays up to date.** A new worktree from `main` starts from what
+  `origin` has now, not from whenever the box last pulled: the box fetches
+  `main` first and fast-forwards your local one, so the main checkout and
+  diffs against `main` are current too. It never moves past uncommitted
+  changes or commits of your own. Turn it off per project under **Main
+  branch** in Project settings.
+
+- **Markdown files open as a page.** A `.md` File tab shows the rendered
+  page, its source, or both side by side, from three buttons in its header.
+  Links to other files open them in a tab, and the worktree's pictures
+  show. Pictures from the web, such as a README's badges, now load in the
+  app.
+
+- **Codex edits open again.** In a chat with Codex, opening an edit's
+  **This change** (or a command's output) said "that step is no longer in
+  the conversation". It now shows the change. Edits by Claude keep their
+  line numbers too.
+
+## v0.3.26
+- **The sidebar is a rail of your projects.** Each project is a tile on a
+  narrow rail, with its GitHub owner's picture or a pattern made from its
+  name, and a dot that turns amber when an agent in it needs you and blue
+  while one works. Pick a tile to see that project's worktrees beside it,
+  with search and New task at the top. Review, Automations and your other
+  places sit at the top of the rail, and Settings at its foot. With one
+  project there's no rail. Settings › Appearance › Sidebar switches back
+  to the single list or the two columns.
+- **Everything lines up.** The app is laid out on one grid. The bar
+  across the top is one height on every screen (the sidebar's strip, the
+  tabs, Review and the other full pages), with the window's buttons and
+  everything else in it on one centre line. Every pane's toolbar is one
+  height too. In each sidebar layout, rows, their icons and labels, and
+  their right ends sit on the same lines, and each full page's content
+  starts right under its title. Full pages now title themselves in the top
+  bar, at the size of a window's title.
+- **Agents run in chat, with nothing to turn on.** New Claude Code, Codex,
+  OpenCode, Gemini CLI, Cursor Agent and oh-my-pi agents open as a
+  conversation that the box drives directly, whether Labs is on or off.
+  The *Structured agents* switch is gone from Settings → Labs, and
+  *Permissions* (Bypass or Ask) moved to Settings → Agents and models.
+  Agents that other agents, the CLI, runs and automations start run in chat
+  too, asking for each permission on a box Shipyard hasn't reached yet.
+  Claude Code's own terminal is still one click away in its pane, and a box
+  too old for chat keeps running agents in their terminals until you
+  upgrade it. [Agents in chat](/guides/structured-agents) has the details.
+- **Attempts on a repository GitHub doesn't host finish with your pick.**
+  On Gitea, Forgejo, GitLab or a folder, picking an attempt with a draft PR
+  turned on failed the run at `gh pr create` and left every worktree
+  behind. Shipyard now pushes the picked branch, says plainly that it
+  didn't open a pull request there (with the forge's own link to open one
+  when it prints it), archives the other attempts and finishes the run.
+- **A pull request that doesn't open no longer fails the run.** When `gh`
+  can't open the pick's pull request (a sign-in that ran out, say), the
+  run waits with your pick kept and nothing archived, and says it is
+  publishing that failed, not the agents' work. Review's Compare and
+  Automations → Runs offer **Retry publishing** or **Finish without a pull
+  request**; `berth run approve` and `berth run reject` do the same.
+- **A saved Compare tab no longer leaves the window empty.** Quitting with
+  a Compare tab open left the next launch, and every one after, on a dark
+  grey window with no sidebar, until the saved tab was removed by hand. It
+  now opens as it was. Saved tabs that can't be drawn are left out rather
+  than stopping the app, and a pane that breaks says so in its own place,
+  with a way out (its terminal, or closing the tab), while the sidebar and
+  your other tabs carry on.
+- **A helper that is back shows as back in a chat session.** In a chat
+  (structured) Claude session, a helper Claude left working in the
+  background stayed "working" in Crew, its time running on, after it had
+  come back: the stream says so in a line of its own that wasn't read. It
+  now shows back, its time stopped when it returned.
+- **A turn Claude starts by itself shows as working.** When a helper
+  (subagent) Claude left in the background came back, Claude went on in a
+  turn no prompt started, and the session showed as done while it worked:
+  no spinner and no Stop. That turn now shows as working until it ends.
+- **A helper's permission no longer gets lost.** When Claude Code started
+  helpers (subagents) in a chat session and they asked to run something
+  while Claude asked too, or after its turn ended, the app showed the newest
+  ask while Yes answered the oldest, moved on to "working" after one answer,
+  and dropped the helpers' asks when the turn ended: they waited forever.
+  Each ask now shows in turn, the one shown is the one you answer, and a
+  helper's ask stays until you answer it or the helper is stopped.
+- **Another Claude in the same folder no longer stalls a session.** A Claude
+  that Shipyard didn't start (in an editor, or a one-off `claude -p` a tool
+  runs) in a session's folder could mark the session's agent exited when it
+  quit; the session then showed as working for good and Stop did nothing.
+  Its events are now told apart by its own conversation.
+- **A two-column sidebar.** Pick it in Settings › Appearance › Sidebar and
+  your projects sit in one column, with the tasks of the one you pick in
+  the next. A project's row turns amber when something in it needs you and
+  blue while something works. The tasks column can be resized or folded
+  away, and opening a worktree shows its project.
+- **The sidebar is quieter.** Its text is one colour in a few strengths,
+  and colour means only two things: amber when an agent needs you, blue
+  while one works. A finished task gets a quiet check, an idle one no mark
+  at all, and times show only on tasks that are doing something.
+- **Boxes stay out of the way until they matter.** They no longer have rows
+  in the list: a project on a box that's away dims and says "offline", and
+  the line at the foot of the sidebar says which boxes are up. Its tooltip
+  has each box's load, which leaves the status bar. A box's actions are in
+  its projects' menus and in the foot's menu.
+- **Text is the same size for the same thing on every page.** Chats,
+  Settings, onboarding, Home, Review and the rest use one set of sizes, and
+  ⌘+ makes all of them bigger.
+- **A queued prompt that failed is amber in the status bar,** like anything
+  else that needs you, rather than red.
+
+## v0.3.25
+
+- **The sidebar is a size smaller.** Its rows are the size of Settings' list:
+  13px names with small icons, project names as quiet labels, and the same
+  height for tasks, the worktrees under them and your boxes.
+- **Boxes that are offline or slow sit at the foot of the sidebar,** just
+  above the boxes' line, so your projects stay at the top.
+- **A worktree's menu is shorter.** It is four groups: what to start in it;
+  where to open it and what to run; its name, colour and what to copy (path,
+  branch, URL and review links are under Copy); then stop, archive and
+  remove. Resuming a conversation is under New agent, and Compare and tabs
+  beside are under Open in.
+- **A chat that recovers from a read error no longer crashes the app.** A
+  pane that went from "Couldn't read the conversation" to its chat drew with
+  one hook more than before and showed "Shipyard hit an error".
+
+## v0.3.24
+
+- **Sidebar rows hover cleanly.** A row stays lit while the pointer is on its
+  + and ⋯, instead of the buttons sitting on a patch of their own, and folded
+  projects sit one under another without big gaps.
+- **The sidebar lists your tasks.** Each row names what its agent is working
+  on, with a dot, spinner or check for how it's going and how long it has
+  been that way. Worktrees an agent handed work to sit under it on a line, a
+  count beside it folds them. Home is called New task, notifications and
+  hiding the sidebar sit at its top, your boxes at its foot, and notices are
+  one quiet line each. The project menu moved into More.
+- **Settings is a full page now.** Its sections are grouped in the sidebar's
+  place (Esc goes back), each page is one calm column of settings, and Find a
+  setting (⌘F) jumps to any of them. Appearance picks Light, Dark or Match
+  system above the themes.
+- **A plugin's sidebar item can show a count.** `addSidebarItem` takes
+  `useCount`, shaped like a Home widget's: an amber count on the item's row,
+  and on More's while the item is under More. Sessions waiting in a plugin's
+  own place, such as a project kept off the Agent Dashboard, now have
+  somewhere in the menu to show. A `useCount` that throws shows no count
+  and leaves the sidebar alone. See
+  [Sidebar counts](/reference/plugin-sdk#sidebar-counts).
+- **Codex sessions get their own status again with Codex's shared daemon.**
+  Codex can run every session from one background daemon, which runs hooks
+  with the first session's environment: with two Codex sessions on a box,
+  the second one's prompts, tools and turn ends showed on the first (which
+  was even renamed after them), and the second only ever read off its
+  screen. Shipyard now starts Codex with `--no-daemon` when the installed
+  Codex knows the flag, and a Codex hook from another session's folder, or
+  about a conversation another session holds, goes to that session.
+- **Every page uses the same type sizes as Settings.** Review, Worktrees,
+  Automations, the Agent Dashboard, Kits, Project settings, Team setup, Home,
+  dialogs and sheets now share one set of sizes: a large page title with a
+  quiet subtitle, bold section titles, medium item names, 13px descriptions
+  and slightly larger metadata and code, so the app reads as one piece.
+- **A box with a full hostname is named by its first label.** A cloud VM
+  whose hostname is `devbox.europe-north1-a.c.example.internal` called itself
+  by all of it: the phone and notifications showed the whole name, and it
+  can't be one label of a worktree's URL, so `$BERTH_URL` was empty and
+  `berthd browser open` refused every worktree. A box (and a box a laptop
+  pairs) is now named by its hostname's first label, `devbox`, with `_`
+  becoming `-`. Restart berthd on such a box to pick up the new name;
+  existing laptop pairings keep theirs.
+- **Turn check: a check-in an agent scheduled for itself is Idle.** An
+  agent that ends its turn saying it will check again at a later time
+  ("tomorrow morning I'll check the numbers"), with nothing running now,
+  shows as **Idle**, even when the machine is kept awake for that check.
+  It used to show as **Working**. Work still running in the background, a
+  re-check or a watcher that reports back, stays **Working**.
+  [Sessions and agents](/concepts/sessions-and-agents#agent-state)
+
+## v0.3.23
+- **Project settings opens for a project with a kit's flows.** A kit whose
+  flow used a step the flow editor doesn't edit (a PR, a loop, a gate) made
+  Project settings show "Something broke" every time. That flow now shows
+  in Automations with a plain icon.
+- **A long Codex turn stays working until it ends.** Codex's `notify` comes
+  at the end of each of its messages, not only the turn's, so a turn read as
+  finished after its first message. Once a session's Codex hooks have said a
+  prompt started, only its `Stop` hook ends the turn; Codex versions without
+  hooks still finish with `notify`. `berthd integrations install codex` (and
+  an upgrade) also adds `PreToolUse` and `PostToolUse` hooks: a question in
+  Codex's question box shows as needs you, and answering it, or Codex carrying
+  on by itself after a turn ended, shows it working again. If Codex asks,
+  trust the new hooks with `/hooks`.
+- **An agent asking you a question no longer reads as done.** When a task's
+  first prompt led Claude Code to ask something (its question form, with
+  choices), Shipyard could read the question off the screen as nothing,
+  end the wait and mark the agent finished while it waited for you. Now a
+  wait Claude's hooks report lasts until Claude goes on, the turn ends at
+  Claude's own Stop, and the screen recognises the question form too.
+  [Sessions and agents](/concepts/sessions-and-agents)
+- **No more tall blinking bar at a terminal's left edge.** With the Ghostty
+  renderer, a focused terminal showed the browser's own text cursor down its
+  whole height, next to the terminal's real cursor. Only the real one shows
+  now.
+- **A box newer than the app is no longer called outdated.** An older
+  Shipyard used to offer to update a box that already ran a newer release,
+  and *Update all* (or updating boxes automatically) would put its older
+  `berthd` on it. Now a newer box is left alone, and `berth upgrade` refuses
+  to downgrade one unless you pass `--force`. This works once both the app
+  and the box are on this release or later.
+- **Keep a project off the Agent Dashboard.** In **Settings → Agents →
+  Agent Dashboard**, pick projects whose agents you follow somewhere else,
+  such as on a plugin's own board. Their agents leave the dashboard and the
+  waiting and working counts in the sidebar and status bar, and the
+  dashboard's header says how many projects are kept off. They still show
+  in the sidebar, on Home and in notifications. **Show** brings a project
+  back.
+- **Project changes made quickly all stick.** Renaming a project, moving it
+  between sections or keeping it off the dashboard twice in a row could
+  lose the first change, because both saves read the same version of your
+  projects. They now save one after the other.
+- **A kit link pinned to a commit works.** A GitHub link copied from a
+  commit's page (`…/tree/308bc75…/kits/web`) used to fail with "Git
+  couldn't do that", because git can't clone a commit by its hash as if it
+  were a branch. Shipyard now fetches the kit at that commit.
+
+## v0.3.22
+
+- **Mac terminal keys work in terminals.** ⇧↵ starts a new line in Claude
+  Code instead of sending, ⌥← and ⌥→ move a word, ⌘← and ⌘→ go to the
+  start and end of the line, and ⌘⌫ deletes back to its start. ⇧↵ needs
+  the box upgraded; a session's agent started before then picks it up
+  when it restarts.
+  [Terminals](/guides/terminals#keys)
+- **`/resume` works in a structured agent's chat.** It opens a list of the
+  agent's past conversations in that folder, newest first, including the ones
+  you had in Claude Code's own terminal. Pick one and it carries on in the
+  same tab, with what was said before shown in the chat. The conversation you
+  leave stays under *Resume a conversation*. ACP agents that can list their
+  sessions (OpenCode, for one) get the same list; Codex's isn't there yet.
+  Needs the box upgraded.
+- **A skill Claude loads shows as one step.** In a structured chat, the
+  skill's whole text used to show up as a message from you. Now the chat
+  says "Used the berth-orchestrate skill" among the agent's steps. Needs
+  the box upgraded.
+- **New terminals no longer open with a systemd warning.** On boxes with
+  systemd 258 or later, every new tab started with *D-Bus property
+  CPUAccounting is deprecated*. Sessions still report their CPU use as
+  before. Needs the box upgraded.
+
+## v0.3.21
+
+- **The phone app pairs from a pasted link.** Its Pair and Boxes screens have
+  *Or paste a pairing link*, for a phone app added to the home screen, which
+  keeps its own storage apart from the browser. A good pairing link no longer
+  says it is damaged, and Back always returns to the list instead of leaving
+  the app. Needs the box upgraded.
+  [Phone](/guides/phone)
+
+- **Turn check: a turn that ends on a question needs you.** Off by
+  default; turned on for a box in Settings → Agents, berthd asks a
+  decision model you pick about each finished Claude Code or Codex turn:
+  **Jev on Vercel AI Gateway**, **OpenAI Decisions** (`gpt-6-luna`), or
+  **Laya** on a server you run, which keeps turns on your machines. One
+  that asks you something or is blocked shows as **Needs you**; one that
+  stopped while something it started still runs (a build, a deploy, a
+  watcher) as **Working**; and one parked until someone else replies or a
+  later time ("check again in 24 hours"), with nothing running, as
+  **Idle**. Neither of those notifies you. A failed or unsure answer, or
+  work that is done, leaves it Done. It sends the turn's prompt (its first 4,000 characters,
+  looked for further back when a long turn's tool calls pushed it out of
+  view), the end of its reply and the session's title, with anything that
+  looks like a secret taken out first. It is set only from a paired laptop,
+  never from the box's own socket; each provider's key is kept apart and
+  goes only to that provider.
+- **Switchboard:** Pick up focused and recent conversations and worktrees with ⌘⇧K or from Home. Type to find one, ↑ ↓ and ↵ to open it, ⌘S to star it into Focus, ⌘E to leave a pickup note, and Tab to step through your areas. Right-click a row (or ⇧F10) to move it to another area. Your focus, areas and notes stay on this computer.
+- **Choose the picture at the top of a new chat.** Settings › Appearance ›
+  Header picture picks the painting across the top of a new chat, an empty
+  worktree and Home: the harbour (still the default), one of six new
+  paintings (Alpine lake, Meadow, Desert mesa, Snowy fjord, Lavender fields,
+  Sea of clouds), a picture of your own, or none. Each new painting has its
+  own night version for dark themes, as the harbour does, and a picture of
+  your own is dimmed there.
+- **Six new chat backgrounds.** The same six paintings are scenes under
+  Settings › Appearance › Chat background, at night in a dark theme.
+- **Math in code blocks draws too.** A ` ```math ` block, as GitHub writes a
+  formula, and a ` ```latex ` or ` ```tex ` block of equations now show as
+  typeset math. A whole LaTeX document (with `\documentclass`, meant for
+  `pdflatex`) stays code, as does a block still being written.
+- **Agents started by other agents follow Structured agents too.** With
+  *Structured agents* on in Settings › Labs, an agent that another agent
+  starts with the berth tools, one started with `berth task new` or
+  `berth session new`, and the agents of runs and automations now run
+  structured, with your *Permissions* choice, instead of always in their
+  terminals. Update your boxes (`berth upgrade BOX`, or Update all) for it
+  to take effect.
+- **Mermaid flowcharts in a reply draw as diagrams.** A `mermaid` code
+  block with a flowchart shows as the diagram, in the theme's colours, the
+  way a diagram artifact does; *Source* in its corner shows what it was
+  drawn from, and *Copy* still copies that. Other Mermaid diagrams, such
+  as sequence diagrams, show as written, and a reply still being written
+  shows its blocks as text until it's done.
+- **Mermaid flowcharts draw as they were written.** Subgraphs show as
+  titled, tinted boxes around their nodes, nested where they nest, and a
+  `<br/>` in a label starts a new line. Labels lose their quotes, codes
+  such as `#quot;` and `&amp;` show as the characters they stand for, and
+  nodes keep their shapes: pills, cylinders, circles, hexagons and slanted
+  boxes. Every kind of arrow is read, labelled or not, as are chains like
+  `a --> b --> c` and `a & b --> c`. A loop back up the chart curves round
+  the side instead of stretching it. This goes for diagram artifacts too.
+- **Diffs in a reply look like the chat's edits.** A `diff` or `patch`
+  code block draws with file names, line numbers and highlighting, as an
+  agent's edits do. Plain lines of `+` and `-` show coloured, without
+  numbers. A block that isn't really a diff stays as written.
+
+## v0.3.20
+
+- **Pictures from a worktree show in replies.** An agent can include a
+  Markdown image such as `![Checkout](screenshots/checkout.png)` and the chat
+  shows a thumbnail after checking it belongs to that worktree. Click the
+  image to open its File tab, or use *Source* to see the Markdown. External
+  image addresses stay as text instead of loading in the app.
+- **Tables in a reply can be explored.** An agent's Markdown table gets
+  an *Explore* view with sortable columns and a failures filter for status
+  results. A small numeric table can switch to a chart in Shipyard's theme.
+  *Original* brings back the table exactly as written.
+- **Test failures in a reply have a short result card.** Vitest,
+  Playwright and Go test output in a code block shows pass and fail counts
+  and the failed tests. A file and line in the worktree opens from the card;
+  *Source* shows the full output.
+
+- **Updating lands on the newest release.** An update the app had already
+  downloaded used to wait for your restart even after a newer one came out,
+  so you went one version at a time. Now a newer release replaces the one
+  waiting, and *Restart to update* checks once more before it installs.
+- **A new agent no longer flashes "has ended" as it opens.** For a moment
+  after it started, its chat showed *Claude Code has ended* with *Start
+  Claude Code again*, before the box had listed the new session.
+- **Callouts in a reply look like GitHub's.** A quote that starts with
+  `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` shows as
+  a tinted box with its icon and name, in your theme's colours.
+- **Issues, pull requests and commits in a reply are links.** In a chat
+  whose repository is on GitHub, `#123`, `acme/shop#45` and a commit's hash
+  open on GitHub when you click them. Colours like `#fff`, line anchors like
+  `#L14`, code blocks and existing links stay as they are.
+- **Files an agent names link to them.** A path of the worktree in a
+  reply's code, like `src/app.ts:14` or `src/app.ts:14-30`, gets a faint
+  dotted underline. Hovering it shows those lines, drawn like the chat's
+  edits; clicking opens the file at that line (⌥-click beside the chat,
+  ⌘-click in your editor). Commands and names that aren't files stay as
+  they were.
+- **Math in the chat.** Replies with LaTeX (`$$…$$`, `\(…\)` and `\[…\]`)
+  show as typeset math, centred on its own lines for a display. A single
+  `$` is left alone, so "costs $5 and $10" reads as it was written, and
+  math in code stays as code. A formula that doesn't parse shows as its
+  source, in red.
+
+
+## v0.3.19
+
+- **Labs: a structured agent keeps its permission mode when it's resumed.**
+  A mode chosen while the agent was working could be lost, so a Codex
+  agent set to *Bypass permissions* came back asking again once
+  resumed.
+- **Labs: a structured agent's chat no longer opens a terminal under it.**
+  When the agent was idle, *"Claude Code is showing its own screen — answer
+  it here"* opened with the log of the process running the agent, and
+  typing went into that log. Now it opens only for agents running in their
+  terminal. For a structured Claude Code, *Show terminal* opens Claude
+  Code's own terminal on the same conversation, as the pane's terminal
+  toggle does. Structured Codex and ACP agents have no terminal of their
+  own, so they don't offer one.
+
+## v0.3.18
+
+- **Labs: every way of starting an agent starts it structured.** With
+  *Structured agents* on, only the composer started agents structured; the
+  sidebar's and a worktree's *New agent*, the launcher, the new-tab and split
+  menus, the worktree picker and hand-offs (and reviews) started them in
+  their terminal. They all start structured now.
+- **oh-my-pi is a built-in agent.** Start it from a project like any other
+  (`omp`), with a model and thinking level. With *Structured agents* on, it runs
+  through the Agent Client Protocol: its replies and tool calls fill the chat
+  and its permission requests come to it. `berthd integrations install omp`
+  adds a small extension to `~/.omp/agent/extensions` so a terminal session
+  says when it is working, needs you or is done, and adds Shipyard's MCP
+  server to `~/.omp/agent/mcp.json` so omp can drive other sessions; a box
+  that has omp gets both with the other agents' hooks. Needs the box
+  upgraded.
+- **Labs: a structured agent's first permission waits for you.** When a
+  structured agent asked for a permission in its very first turn, with
+  *Permissions: Ask*, the box read the session's screen, which shows nothing
+  of it, ended the wait a second later and then the turn: the chat had no
+  Allow / Deny, said the agent was done, and the agent waited forever. The
+  screen no longer settles structured sessions; their own stream does.
+  Needs the box upgraded.
+- **Settings › Boxes reads correctly to a screen reader.** A box with no
+  browsers running put its "No browsers running" note inside the browsers
+  list, so assistive tech announced an empty list with a stray line in it.
+  The note now stands on its own.
+
+## v0.3.17
+
+- **Agents sharing a worktree each get a browser tab of their own.** When
+  several agents check pages in one worktree at once, each passes
+  `--tab NAME` to `berthd browser` and gets its own page, cookies and size,
+  so they no longer take the page from each other. Every tab keeps rendering
+  at full speed while nobody watches it. The agent's view in a browser pane
+  shows the tabs, stays on the one you pick, and no longer jumps from one
+  agent's page to the next. Needs the box upgraded.
+
+- **Labs: OpenCode, Gemini CLI and Cursor Agent run structured too.** With
+  *Structured agents* on, they start through the Agent Client Protocol: their
+  replies stream into the chat, their permission requests come to it (or,
+  with Bypass, the box allows them), Stop cancels their turn, their own modes
+  are in the chat's mode menu, and they can be resumed. A repository's own
+  agent can join in by giving its preset an `acp`. Needs the box upgraded.
+
+- **Labs: Codex agents can run structured too.** With *Structured agents*
+  on (Settings › Labs), a new Codex agent
+  runs as Codex's app server, driven by the box: replies stream into the
+  chat, commands and file changes to approve come to it as Allow / Always
+  allow / Deny (or, with Bypass, run without asking), its questions are
+  answered there, and it can be stopped and resumed. Needs the box upgraded.
+
+- **Labs: a structured Claude agent's conversation can be resumed.** When
+  one ends, its pane offers *Resume the conversation* rather than a fresh
+  start, and once its session is closed a worktree's menu lists its
+  conversations under *Resume a conversation*: each carries on where it left
+  off, earlier turns and permission mode included. Needs the box upgraded.
+
+- **Labs: a structured Claude agent opens in Claude Code's own terminal and
+  comes back.** The Terminal switch on a structured agent's pane stops it and
+  opens the same conversation in Claude Code's screen, for `/login`,
+  `/memory`, its menus and anything else only it does; Conversation brings it
+  back to the chat, with what was said in the terminal in its place. Needs the
+  box upgraded.
+
+- **Labs: structured Claude agents.** Turn on *Structured agents*
+  in Settings › Labs and new Claude Code agents run without their
+  terminal: the box drives Claude Code through its stream and keeps its own
+  record of the conversation, so replies stream in as they are written,
+  nothing is read off a screen, and an agent keeps working while your
+  laptop is away or the box's berthd restarts. Permissions come to the chat
+  as Allow / Always allow / Deny, or with *Permissions: Bypass* (the
+  default) the box allows them for you; questions and plans always wait for
+  you. They open as conversations. Needs the box upgraded.
+- **Doctor no longer says berthd runs "not as a service" when it does.**
+  `berthd install` puts your login shell's PATH in the service, and doctor
+  compared the service with one that had no PATH, so on a Mac it always
+  asked you to run `berthd install` again. Now any PATH counts; the program,
+  its arguments and the rest must still match.
+
+## v0.3.16
+
+- **Typing `/` in a chat lists your skills.** A bare `/` used to stop after
+  the agent's first 60 commands, which hid every skill and plugin command
+  (and the agent's last few) until you typed part of a name. It now lists
+  everything: your own commands and skills first, then the agent's, then
+  plugins'. And if the list couldn't be read when the chat opened, Shipyard
+  asks the box again instead of leaving the menu closed.
+
+- **An agent's browser opens beside it.** When an agent opens its browser
+  in the worktree you're looking at, its live view now opens to the right
+  of the agent, so you see the chat and the page side by side without
+  clicking **Agent's view · live**. If the tab already has a browser pane,
+  that pane switches to the agent's view instead. Your keyboard stays with
+  the agent, and nothing opens while you're looking at another worktree.
+  Turn it off in **Settings → General**.
+
+## v0.3.15
+
+Both need each box's new `berthd`, and the first the Database plugin's
+update (**Settings → Plugins**).
+
+- **Database finds a worktree's database in its `.env`.** Until now the
+  Database tab only showed a database once Shipyard had started one of the
+  worktree's services with its address, so a project that keeps
+  `DATABASE_URL` in `.env` and starts its own dev server saw "No database
+  yet" for every worktree. Now, when you open the tab and no service has
+  said, the box reads the worktree's `.env`, `.env.development`,
+  `.env.local` and `.env.development.local` and takes the `DATABASE_URL`
+  or `POSTGRES_URL` it finds, if it points at a Postgres on the box
+  itself. The tab says where a database came from, the refresh button
+  looks in the files again, and when there is none it says which files it
+  read and why a variable it found isn't shown. And when nothing says
+  which database a worktree has, **Connect a database…** takes its
+  address: it has to be a Postgres on the box itself, it is kept on the
+  box with the others, and **Forget…** removes it. See
+  [which databases appear](/guides/database#which-databases-appear).
+- **Leadline records queries for projects that keep `DATABASE_URL` in
+  `.env`.** When Shipyard starts a worktree's service and its own
+  environment for it has no `DATABASE_URL` or `POSTGRES_URL`, it now takes
+  the one in the worktree's `.env` files and starts the service with
+  Leadline's proxy in front of it, so **Queries** fills in without moving
+  the address into Shipyard's config. A variable Shipyard's environment
+  already has still wins, and the files are never changed. An app that
+  overrides its environment from `.env` connects round Leadline. See
+  [which databases Leadline sees](/guides/leadline#which-databases-leadline-sees).
+
+## v0.3.14
+
+Database, Leadline and `worktree new --no-setup` need each box's new
+`berthd`: use **Update all** in the status bar, or `berth upgrade BOX`.
+
+- **Database: a worktree's own development database, as a tab.** A new
+  plugin in **Settings → Plugins → Browse** adds a **Database** tab to a
+  worktree: its tables with their rows in a grid you can sort, filter and
+  page through, each table's structure, and a console for SQL. It opens
+  read-only. **Unlock writes** asks once and lasts 15 minutes; then you can
+  edit cells, add and delete rows, review every change as old → new and
+  apply them together, or run statements that write. It is off until you
+  turn it on for a box, which installs a small program there
+  (`berth-database`) after asking, and it only shows a Postgres on the box
+  itself that the worktree's services were started with. See
+  [Database](/guides/database); plugin authors get a `SqlEditor` and the
+  per-box switch for a plugin's program, `HelperBox`, in the
+  [plugin SDK](/reference/plugin-sdk#ui-components).
+- **A plugin's program stops when the plugin does.** Turning off a plugin
+  that runs a program on your boxes, such as Leadline, now stops that
+  program and removes it from every box it runs on, keeping what it
+  recorded; **Remove…** removes that too. Shipyard asks first and names the
+  boxes, and a box that is offline is done when it next connects. Before,
+  the program kept running and recording, with nothing in the app to stop
+  it. Turning the plugin on again starts nothing: you turn it on for each
+  box again. An update that keeps the same program leaves it running while
+  Shipyard asks you about the new version, with **Stop it** in the plugin's
+  row. See [a helper does not outlive its plugin](/guides/plugins#a-helper-does-not-outlive-its-plugin).
+- **Removing a worktree tells Leadline.** Leadline closes the connection it
+  kept in front of that worktree's database and deletes what it recorded
+  for it, however the worktree was removed; before, it kept both until its
+  data was removed. Plugin authors: a helper can name a
+  [`detach` path](/guides/plugins#detach-when-a-worktree-is-removed).
+- **Turning Leadline off again still names the services to restart.**
+  Turned off, on and off again without restarting a service, the second
+  time named none, though the service was sending to Leadline again.
+- **The sidebar says when a box's skills are missing or out of date.** On a
+  box where Shipyard's skills were never installed, or after a box upgrade
+  leaves them older than its berthd ships, a quiet note at the foot of the
+  sidebar names the box ("devl: Shipyard's skills aren't installed for
+  Claude Code", "gpu: 3 skills are out of date") with two ways out.
+  **Install now** installs or updates them all for the box's user and the
+  note goes; if a hook refuses or the box drops off, it says why.
+  **Snooze** puts that box's note away until tomorrow, for a week or for a
+  month, or **Don't remind me** for that box, which Settings → Agents turns
+  back on. No toast, no sound. See
+  [the sidebar's reminder](/guides/agent-integrations#the-sidebars-reminder).
+- The website's header is now coss.com's: "coss.com shipyard", with Docs,
+  Download, GitHub and its stars, and "Close the laptop" as an icon, and coss.com's
+  lines down the sides of the page and across the top of each chapter.
+- **Review no longer keeps a box busy while an item is open.** With an item
+  open, Review read the box's inbox and the item's diff again every couple of
+  seconds for as long as it showed, each read setting off the next. It now
+  reads them once, and again only when something changes.
+- **Make a worktree without waiting for its setup.** `worktree new --no-setup`
+  creates it at once, without the setup script or autostart services, and
+  `worktree setup LOC/NAME [--wait]` runs them later.
+- **Leadline: what your code did in development, as tabs on a worktree.** A
+  new plugin in **Settings → Plugins → Browse** adds **Queries**,
+  **Traces**, **Logs** and **Endpoints** to a worktree: every database
+  query grouped by shape with its N+1s flagged, each request as a
+  waterfall with its SQL and logs, and per-route latency and queries per
+  request. **Send to the agent** writes a slow query, an N+1 or a failing
+  endpoint up for the worktree's agent, and shows you the text before it
+  goes. It is off until you turn it on for a box, which installs a small
+  program there (`berth-leadline`) after asking; what it records stays on
+  that box, for 72 hours. Queries to a Postgres on the box are recorded
+  with no changes to your app; traces and logs need an OpenTelemetry SDK
+  in it. A plugin that carries a program like this says so, by the
+  program's name, before you allow it and in its row in Settings →
+  Plugins. See [Leadline](/guides/leadline); plugin authors get
+  `berth.helper` and a `Chart` component in the
+  [plugin SDK](/reference/plugin-sdk#helper).
+- **Plugins can be installed from the app.** Settings → Plugins has a new
+  **Browse** list of plugins that aren't built in, starting with Hello
+  ports. Install puts one under Installed, off: it runs only once you allow
+  it, like any plugin of your own, and after an update Shipyard asks again.
+  Remove deletes one you installed this way. To list a plugin of yours, see
+  [publish it to the listing](/guides/plugins#publish-it-to-the-listing).
+- **Shipyard has its own mark.** The B from when the app was called Berth is
+  gone: the icon is now a hull seen bow-on, resting on its keel blocks, with
+  the amber lamp lit inside. It is on the app and its dock icon, the phone
+  app, the site and the docs.
+- **Linear issues in Shipyard.** Paste a personal API key in **Settings →
+  Integrations**, and **Issues** gets a Linear side beside GitHub: what is
+  assigned to you or a team's open issues, each with its description and
+  comments, and **Start an agent** on any of them, in the project you
+  choose, on the branch Linear suggests for the issue. A row then shows how
+  its agent is doing. Home has a **Linear** widget for what is assigned to
+  you. The key stays in a file only you can read on this computer: the
+  laptop agent makes every call to Linear, and the app, plugins and boxes
+  never see it. See [Linear](/guides/linear).
+- **`worktree new` can check out a pull request.** Pass `--pr N` with the
+  pull request's head branch as `--branch`, and the worktree starts on that
+  branch as origin has it. A pull request from a fork is fetched from
+  `pull/N/head`, or from the ref you give with `--ref`.
+- **Links in a terminal open with ⌘-click, and say so.** A link used to
+  underline and show the pointing hand on a plain hover, where a click did
+  nothing, and links a program made with its own text (OSC 8) never opened
+  at all. Now resting on a link shows "⌘-click to open", the hand appears
+  while ⌘ is held, and ⌘-click opens the address in your browser, OSC 8
+  links included (Ctrl-click in the Linux app). A long link that wraps
+  over several rows, such as Codex's ChatGPT sign-in link, opens whole
+  from any of its rows; before, it couldn't be clicked at all.
+- **A home widget's ⋯ menu opens again.** It broke the home screen with
+  "Base UI error #31" instead of showing its Size and Refresh options.
+- **A Browser tab on a port with nothing listening no longer crashes the
+  app.** Opening `http://localhost:3000` before its dev server started closed
+  Shipyard half a second later, and again on every launch after, since the
+  tab came back.
+- **The laptop agent is lighter per request.** Proxied pages, port forwards
+  and calls to your boxes allocate a fraction of what they did, and the kits
+  and team suggestions ask all your boxes at once.
+- **Shipyard opens faster.** It now loads four files before it first paints
+  instead of about three hundred, and settings, dialogs and the browser pane
+  load just after start. In our tests, the window drew in about a fifth of the
+  time.
+- **Chats keep up while an agent writes.** A streamed reply costs about a
+  third of the work it did on the page, and typing in a chat, Home's composer
+  or the sidebar's menus stays quick with hundreds of worktrees.
+- **The app asks the agent and your boxes less.** An idle chat makes about
+  half the requests it did, starting reads every box once, and a box's large
+  answers cross the link to your laptop about ten times smaller.
+- **berthd uses less of a box.** Following a chat, a reply as it streams and
+  the agents' screens runs fewer tmux commands and less CPU; a chat's own
+  poll takes about a quarter of what it did.
+  Opening a long conversation uses a tenth of the memory, and a cache that grew
+  with every conversation now stays small.
+- **The Mac app is 20% smaller.**
+
+## v0.3.13
+
+Most of this needs each box's new `berthd`: use **Update all** in the status
+bar, or `berth upgrade BOX`.
+
+- **The Review in Shipyard button is for UI work.** berthd adds it only to a
+  PR whose files change something a browser shows, agents add it only for
+  such changes, and the button is the words alone, without a mark.
+
+- **Shipyard notices when your team has a setup.** If you added a project
+  from `acme` yourself and acme publishes a [team setup](/guides/team-setup),
+  Shipyard says so quietly: a small icon on the project's row and a line in
+  its menu, a line in Project settings saying what it sets up for the repo,
+  a card on Home once, and **Team setup for acme** in ⌘K. **Review…** opens
+  the setup with your project used as it is; nothing runs until you choose.
+  **Not now** and **Don't suggest again for acme** put it away. The laptop
+  checks only your projects' owners, with your own `gh`, at most daily (weekly
+  for a person's account), and never offline. The project menu also has
+  **Copy team setup link**. See
+  [how Shipyard notices your team's setup](/guides/team-setup#how-shipyard-notices-your-teams-setup).
+
+- **Just the kit from a team setup.** **Use acme's kit for this project…**
+  applies only a project's kit from `acme/.berth` to the project you have: no
+  box steps, sudo, clone or 1Password. The sheet lists the tools the kit needs
+  and whether the box has them; the shared keys and the first-time setup are
+  each an opt-in. The kit then follows the team's newer commits as an update
+  to review. See [just the kit](/guides/team-setup#just-the-kit).
+
+- **Team setup uses the clones you already have.** Before cloning a repo,
+  Shipyard looks for one on the box: a project you added already, or a
+  clone in `~/code`, `~/work`, `~/src` and the like (matched by its origin,
+  reading nothing else). The page shows "Found ~/work/acme-web … · Use this
+  / Clone a fresh copy", and using it changes nothing in it: no checkout,
+  stash, reset or pull, and your `.env` and uncommitted changes stay as
+  they are. Its existing worktrees show in the sidebar and are set up the
+  first time you open each. `berth team setup … --use web=PATH` does the
+  same from the command line. See
+  [repositories you already cloned](/guides/team-setup#repositories-you-already-cloned).
+
+- **Review links can open logged in, at a page.** Add `&as=pro@acme.test&path=/event-types`
+  to a review link (or `--as` and `--path` to `berth review`), and the
+  review opens in its Browser tab logged in as that dev user, at that page,
+  when the project's login lists them; otherwise it opens without logging
+  in, and the sheet says why. **Copy review link as…** in the worktree menu
+  makes one. See [review a PR](/guides/review-a-pr#opening-logged-in-at-a-page).
+
+- **A Review in Shipyard button on pull requests.** GitHub drops
+  `berth://` links from PR descriptions, so a review link is now a button
+  that goes through `https://berthd.app/review`, a small page that checks
+  the link and opens the review in Shipyard (with a link to the PR on
+  GitHub, and to install Shipyard). Agents add it to the PRs they open,
+  logged in as one of the project's dev users and at the page their change
+  affects (`berthd login users` lists them). Turn on `"review_button"` for a
+  project (its `.berth/config.json`, Project settings, or the team's
+  `team.json`) and berthd adds it to each new PR from the project's
+  worktrees by itself, once, without touching the rest of the description;
+  never to a fork's PR or one from outside the org.
+- **Review a PR in one click, on your own box.** A review link,
+  `berth://review?repo=acme/shop&pr=42`, or `berth review acme/shop#42`,
+  opens a review sheet: the PR, its author, the exact commit, the box, what
+  will run there, which keys it gets, and what in the PR changes setup.
+  **Review** makes a worktree at that commit, set up by your team's kit,
+  and opens it with the dev server in a Browser tab and the Diff beside it.
+  Only your team's projects, and only PRs by members and collaborators from
+  the repository itself; never a fork's. The PR's own `.berth/` never runs,
+  the review never gets your own keys, and it cleans itself up when the PR
+  is merged or closed, or after a week unused. **Copy review link** is in
+  every worktree's menu whose branch has a PR. See
+  [review a PR](/guides/review-a-pr).
+- **Open a worktree logged in as a dev user.** A kit, or a project's
+  config, can name a login script and the users it logs in (`"login":
+  {"script", "users", "any"}`). The Browser tab's **Log in as…** menu and ⌘K
+  list them; picking one runs the script against that worktree's own dev
+  server and database and sets its session for that worktree's address
+  alone. Agents get the same with `berthd browser open --as EMAIL`, and
+  `berthd shots compare --as EMAIL` shoots both sides logged in. A link
+  works too: `http://WT.LOC.BOX.localhost:1377/__berth/login?as=EMAIL&next=/path`.
+  See [kits](/guides/kits#personas-logging-in-as-a-dev-user).
+
+## v0.3.12
+
+- **The Linux alpha's downloads.** v0.3.11's Linux build stopped before it
+  began (Ubuntu 22.04, which it builds on for older systems, has no
+  `minisign`), so v0.3.11 shipped for the Mac only. This release carries the
+  AppImage and `.deb` for x86-64 and adds Linux to the update feed; see
+  [Linux (alpha)](/getting-started/install#linux-alpha).
+
 - **Install with Homebrew.** `brew tap cosscom/shipyard https://github.com/cosscom/shipyard`,
   then `brew install --cask cosscom/shipyard/shipyard`, installs the Mac app
   and puts `berth` on your `PATH`.
@@ -27,6 +872,14 @@ again.
   the agent's own in the sidebar, folded behind a "1 child" pill. `berthd
   worktree new … --parent NAME` nests one by hand, such as a stacked branch
   under the branch it builds on.
+
+- **GitHub flows see every worktree's PR.** One poll looks at no more than
+  20 PRs, and it always started from the same worktree, so on a box with
+  more worktrees than that the rest were never looked at: a merge, review or
+  failed check there started nothing. Each poll now starts where the last
+  one stopped. Merged and closed PRs no longer take a turn every poll
+  either; a flow looks at them again once an hour, in case one is reopened.
+  [GitHub triggers](/guides/automations#on-github).
 
 ## v0.3.11
 
@@ -1056,8 +1909,7 @@ October 3, 2026.
   lists that tailnet's machines too. `berth discover --json` reports
   Tailscale's state and each machine's Tailscale SSH and host keys. See
   [add a box](/getting-started/add-a-box#on-your-tailnet).
-- **The Cal.com kit has its own repository**,
-  [berth-kit-calcom](https://github.com/sean-brydon/berth-kit-calcom).
+- **A kit can live in a repository of its own.**
   Kit links to GitHub, GitLab, Bitbucket and Codeberg work without
   `https://` (`berth kit add github.com/me/kit`). See [kits](/guides/kits).
 - **Add another computer** with a join link, and **use this Mac as a box**

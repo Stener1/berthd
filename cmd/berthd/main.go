@@ -20,6 +20,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/cosscom/shipyard/internal/agenthost"
 	"github.com/cosscom/shipyard/internal/box"
 	"github.com/cosscom/shipyard/internal/boxcmd"
 	"github.com/cosscom/shipyard/internal/debugserver"
@@ -205,6 +206,12 @@ func run(args []string) error {
 		return nil
 	case "headless":
 		return box.RunHeadless(args[1:], os.Stdout)
+	case "agent-host":
+		code, err := agenthost.Main(args[1:], os.Stdout)
+		if err != nil {
+			return err
+		}
+		os.Exit(code)
 	case "mcp":
 		return mcpserver.Serve(context.Background(), b.socket(), os.Stdin, os.Stdout)
 	case "agents":
@@ -261,6 +268,9 @@ func serve(b boxHome, args []string) error {
 		// A plist from an older install gives launchd's bare PATH, without
 		// Homebrew's tmux; find it anyway.
 		service.AugmentPATH()
+		if _, err := service.Migrate(daemonService(b, "")); err != nil {
+			fmt.Fprintf(os.Stderr, "berthd: updating its launchd plist: %v\n", err)
+		}
 	}
 	utf8Locale()
 	if *listen == "" {
@@ -350,25 +360,40 @@ func serve(b boxHome, args []string) error {
 		Watcher:      watcher,
 		DaemonChecks: func() []doctor.Check { return daemonChecks(b, ln.Addr().String(), *listen) },
 		LogDir:       filepath.Join(b.dir, "logs"),
-		Units:        &box.Units{Dir: filepath.Join(b.dir, "units")},
-		Turns:        turns,
-		Hooks:        hookRunner,
-		Flows:        box.FlowsAt(userDir, b.dir),
-		KitsDir:      filepath.Join(b.dir, "kits"),
-		EnvFile:      filepath.Join(userDir, "env.json"),
-		Paused:       &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
-		Secrets:      b.boxSecrets(),
-		Socket:       b.socket(),
-		Phone:        &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
-		Guard:        &box.Guard{Path: filepath.Join(userDir, "guard.json")},
-		Invites:      &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
+		// Structured agents' logs (claudedriver.go).
+		ConversationsDir: filepath.Join(b.dir, "conversations"),
+		Units:            &box.Units{Dir: filepath.Join(b.dir, "units")},
+		Turns:            turns,
+		Hooks:            hookRunner,
+		Flows:            box.FlowsAt(userDir, b.dir),
+		KitsDir:          filepath.Join(b.dir, "kits"),
+		EnvFile:          filepath.Join(userDir, "env.json"),
+		Paused:           &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
+		Secrets:          b.boxSecrets(),
+		Socket:           b.socket(),
+		Phone:            &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
+		Guard:            &box.Guard{Path: filepath.Join(userDir, "guard.json")},
+		Invites:          &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
+		TurnCheck:        &box.TurnCheck{Path: filepath.Join(userDir, "turncheck.json"), KeyPath: filepath.Join(b.dir, "turncheck.key"), Log: logger},
 		Update: &box.SelfUpdate{
 			Executable:    exe,
 			Fingerprint:   id.Fingerprint().String(),
 			BeforeRestart: func() { shares.StopAll(); ln.Close() },
 		},
 	}
+	// Plugins' helpers run as berthd's own children: started before it
+	// serves anything, so the first service finds them up, and stopped
+	// with it. A new build taking over starts them again itself.
+	bx.Helpers = &box.Helpers{Dir: filepath.Join(b.dir, "helpers"), Box: hostname, Logf: logger.Printf}
+	bx.Update.BeforeRestart = func() { shares.StopAll(); bx.Helpers.Stop(); ln.Close() }
+	bx.Helpers.Start()
+	defer bx.Helpers.Stop()
+	// A worktree that is removed, however it was, is one they forget.
+	defer bx.Helpers.Watch(bus)()
 	bx.AutoFix = &box.AutoFixStore{Path: filepath.Join(b.dir, "autofix.json")}
+	// How agents start when what starts them names no driver
+	// (agentdefaults.go): the app keeps it to the person's Labs setting.
+	bx.AgentDefaults = &box.AgentDefaultsStore{Path: filepath.Join(b.dir, "agent-defaults.json")}
 	bx.Triggers = &box.TriggerSecrets{Path: filepath.Join(b.dir, "trigger-secrets.json")}
 	rc := box.LoadRunsConfig(filepath.Join(userDir, "runs.json"))
 	bx.NewRuns(filepath.Join(b.dir, "runs"), rc.MaxConcurrentRuns, rc.MaxConcurrentAgents, logger.Printf)
@@ -391,6 +416,14 @@ func serve(b boxHome, args []string) error {
 	go bx.RunShots(ctx)
 	bx.Team = &box.TeamRunner{Dir: filepath.Join(b.dir, "team")}
 	defer bx.Team.Stop()
+	// Pull requests opened for review: their settings, and their clean-up
+	// once merged, closed or idle.
+	bx.Reviews = &box.ReviewStore{Path: filepath.Join(b.dir, "reviews.json")}
+	go bx.RunReviewSweeps(ctx)
+	// The "Review in Shipyard" button on PRs opened from worktrees of
+	// projects that turn it on.
+	bx.ReviewButtons = &box.ReviewButtons{Path: filepath.Join(b.dir, "review-buttons.json")}
+	go bx.RunReviewButtons(ctx)
 	bx.Mount(s)
 	bx.ResumeTeams()
 	// Hooks that ran while berthd was down, in order, before anything new.
@@ -443,6 +476,7 @@ func serve(b boxHome, args []string) error {
 	go bx.Phone.Run(ctx, bx)
 	go bx.Guard.Run(ctx, bx)
 	go bx.WatchSessionMemory(ctx)
+	go bx.TurnCheck.Run(ctx, bx)
 
 	os.Remove(b.socket())
 	local, err := net.Listen("unix", b.socket())

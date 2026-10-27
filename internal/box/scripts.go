@@ -58,6 +58,17 @@ type RepoConfig struct {
 	// Shots is what `berthd shots compare` screenshots and diffs by
 	// default: pages, sizes, and selectors to mask (shots.go).
 	Shots *ShotsConfig `json:"shots,omitempty"`
+	// Login logs a worktree in as a dev user: a script that prints the
+	// session's cookies, and the users it may log in (login.go).
+	Login *LoginConfig `json:"login,omitempty"`
+	// ReviewButton adds a "Review in Shipyard" button to the description of
+	// each pull request opened from the project's worktrees
+	// (reviewbutton.go). Off unless a layer, or the team's team.json, says.
+	ReviewButton *bool `json:"review_button,omitempty"`
+	// KeepMain keeps the default branch current: a new branch from it
+	// fetches it first and fast-forwards the local one (freshbase.go). On
+	// unless a layer says false.
+	KeepMain *bool `json:"keep_main,omitempty"`
 }
 
 // ReadRepoConfig reads repo's .berth/config.json; ok is false without one.

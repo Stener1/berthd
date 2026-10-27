@@ -170,6 +170,9 @@ type ShotsRequest struct {
 	// Save, for `shots baseline`: shoot the worktree only and keep it as
 	// this baseline.
 	Save string `json:"save,omitempty"`
+	// As logs every side in as this email first (login.go): each side's
+	// own login runs against its own dev server and database.
+	As string `json:"as,omitempty"`
 }
 
 // ShotsResult is the text an agent reads, and where the result is.
@@ -349,6 +352,36 @@ func (b *Box) planShots(ctx context.Context, locName, wtName string, req ShotsRe
 	return p, nil
 }
 
+// shotsLogin logs both sides of a compare in as email: the worktree with
+// its own login, and main with main's, since each side has its own dev
+// server and database. A baseline side was shot as it was.
+func (b *Box) shotsLogin(ctx context.Context, sh *shooter, p *shotsPlan, email string) error {
+	tab, err := sh.newTab(ctx, p.cfg, "light")
+	if err != nil {
+		return err
+	}
+	sides := []struct {
+		wt  Worktree
+		url string
+	}{{p.wt, p.headURL}}
+	if p.baseURL != "" {
+		sides = append(sides, struct {
+			wt  Worktree
+			url string
+		}{p.main, p.baseURL})
+	}
+	for _, s := range sides {
+		res, err := b.loginIn(ctx, "shots", p.loc, s.wt, email)
+		if err != nil {
+			return fmt.Errorf("logging %s in as %s: %w", s.wt.Name, email, err)
+		}
+		if err := setLoginCookies(ctx, sh.cdp, tab.session, s.url, res.Cookies); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ShotsCompare runs a compare (or, with Save, takes a baseline).
 func (b *Box) ShotsCompare(ctx context.Context, locName, wtName string, req ShotsRequest) (ShotsResult, error) {
 	t0 := time.Now()
@@ -375,6 +408,11 @@ func (b *Box) ShotsCompare(ctx context.Context, locName, wtName string, req Shot
 		return ShotsResult{}, err
 	}
 	defer sh.close()
+	if req.As != "" {
+		if err := b.shotsLogin(ctx, sh, p, req.As); err != nil {
+			return ShotsResult{}, err
+		}
+	}
 	startMS := int(time.Since(tStart).Milliseconds())
 
 	type pair struct{ before, after shot }
@@ -445,7 +483,7 @@ func (b *Box) ShotsCompare(ctx context.Context, locName, wtName string, req Shot
 		Created: time.Now().UTC(),
 		Head:    vdSide{Kind: "worktree", Label: p.wt.Name, URL: p.headURL, Commit: headCommit, Dirty: headDirty},
 		Settings: vdSettings{Sizes: cfg.Sizes, Scale: cfg.Scale, Threshold: cfg.Threshold, Unchanged: cfg.Unchanged, MaxHeight: cfg.MaxHeight,
-			ColorScheme: cfg.ColorScheme, ColorSchemes: cfg.schemes(), ReducedMotion: true, Mask: cfg.Mask, Chromium: sh.chromiumName()},
+			ColorScheme: cfg.ColorScheme, ColorSchemes: cfg.schemes(), ReducedMotion: true, Mask: cfg.Mask, Chromium: sh.chromiumName(), Login: req.As},
 		Note:   req.Note,
 		Notice: p.notice,
 	}

@@ -26,8 +26,14 @@ In the app, a **project** is one repository wherever it is checked out. A
 location on `devl` and one on `gpu` whose remotes name the same
 `owner/repo` (or, without a remote, that share a name) are one project with
 two members; you can rename, merge and split projects from the sidebar. Each
-project has a **default box**, where new work goes unless you pick another,
-and the sidebar groups worktrees by project (or by box, if you prefer).
+project has a **default box**, where new work goes unless you pick another.
+
+The sidebar is a rail with a tile per project: its GitHub owner's picture,
+or a pattern made from its name. A dot on a tile turns amber when an agent
+in that project needs you and blue while one works. Pick a tile and that
+project's worktrees show beside the rail. With one project there's no rail.
+Settings › Appearance › Sidebar switches to a single list of every
+project's worktrees, grouped by project or by box, or to two columns.
 
 Projects are an idea of the app and the laptop; boxes only know their own
 locations. A flow can still run for
@@ -46,7 +52,8 @@ each other. Shipyard makes them with git, next to the repository:
 ```
 
 ```sh
-berth worktree new devl/shop/checkout [--branch B] [--base REF] [--parent NAME]
+berth worktree new devl/shop/checkout [--branch B] [--base REF] [--parent NAME] [--no-setup]
+berth worktree setup devl/shop/checkout [--wait]
 berth worktree rm devl/shop/checkout [--force]
 ```
 
@@ -55,6 +62,14 @@ berth worktree rm devl/shop/checkout [--force]
 - The branch defaults to the name. An existing branch, local or on
   `origin`, is checked out as it is (tracking `origin`); a new one starts from
   `--base`, or from what the repository has checked out.
+- A new branch from the default branch (`main`) starts from what `origin`
+  has now. The box fetches `main` first and fast-forwards the local one, so
+  the main checkout and `git diff main...HEAD` are current too. It only
+  ever fast-forwards: a main checkout with uncommitted changes, or a `main`
+  with commits `origin` doesn't have, is left as it is (the new branch then
+  starts from `origin/main`, or from your local commits). A failed fetch
+  changes nothing. Turn it off with `"keep_main": false` in the
+  [config](/reference/config), or under **Main branch** in Project settings.
 - `--parent` nests the new worktree under another of the location's in the
   sidebar, such as a stacked branch under the one it builds on. A task an
   agent starts, or hands its work off to, nests under that agent's worktree

@@ -26,6 +26,9 @@ export type TranscriptItem =
   // its own word for what it does (label, from its status line) with what
   // else that line says (meta: tokens); since is when it began.
   | { kind: "thinking"; id: string; since: number; label?: string; elapsed?: string; meta?: string; step?: { verb: string; target: string } }
+  // Its turn ended while its work runs on (derive's onItsWork): not at work
+  // itself, so no spinner and no timer.
+  | { kind: "on-its-work"; id: string }
   // A command typed to the agent rather than a prompt: one of its own
   // ("/model", with what followed it) or a shell command ("!"), and the
   // output its program printed (Markdown when it wrote it so).
@@ -160,6 +163,7 @@ export function toolSummary(t: Extract<TranscriptItem, { kind: "tools" }>): stri
   if (t.verb === "Read") return `Read ${n} file${n === 1 ? "" : "s"}`;
   if (t.verb === "Search") return `Searched ${n} time${n === 1 ? "" : "s"}`;
   if (t.verb === "Run") return `Ran ${n} command${n === 1 ? "" : "s"}`;
+  if (t.verb === "Skill") return n === 1 && t.items?.[0] ? `Used the ${t.items[0].target} skill` : `Used ${n} skills`;
   return `${t.verb} ${n}`;
 }
 

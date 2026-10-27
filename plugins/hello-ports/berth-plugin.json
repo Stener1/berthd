@@ -4,5 +4,8 @@
   "version": "0.1.0",
   "description": "An example plugin to copy from: every dev server on every box, one click from your browser. Off until you turn it on.",
   "main": "dist/index.js",
-  "defaultEnabled": false
+  "defaultEnabled": false,
+  "author": "Shipyard",
+  "homepage": "https://github.com/cosscom/shipyard/tree/main/plugins/hello-ports",
+  "marketplace": true
 }

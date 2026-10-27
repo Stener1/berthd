@@ -34,6 +34,33 @@ export function mainOf(manifest: Uint8Array): string {
   return typeof m.main === "string" && m.main !== "" ? cleanPath(m.main) : "";
 }
 
+// A program a plugin carries for boxes: berth-plugin.json's "box.helper".
+// The laptop agent installs it on a box only when the plugin asks, for a
+// box the person turned it on for.
+export interface PluginHelper {
+  name: string;
+  version?: string;
+}
+
+// helperOf reads the helper a manifest names, if it names one. A manifest
+// that can't be read names none: mainOf has already refused it.
+export function helperOf(manifest: Uint8Array): PluginHelper | undefined {
+  try {
+    const m = JSON.parse(new TextDecoder().decode(manifest)) as { box?: { helper?: { name?: unknown; version?: unknown } } };
+    const h = m.box?.helper;
+    if (!h || typeof h.name !== "string" || h.name === "") return undefined;
+    return { name: h.name, version: typeof h.version === "string" && h.version !== "" ? h.version : undefined };
+  } catch {
+    return undefined;
+  }
+}
+
+// helperPower is the line that says so, before the user allows the plugin
+// and beside it in Settings.
+export function helperPower(h: PluginHelper): string {
+  return `Install and run a program, ${h.name}, on the boxes you turn it on for`;
+}
+
 // hashPluginFiles is
 // sha256("berth-plugin-v1\n" + len(manifest) + "\n" + manifest + "\n" + len(main) + "\n" + main)
 // as "sha256:<hex>", lengths in bytes.

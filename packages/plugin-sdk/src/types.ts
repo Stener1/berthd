@@ -93,6 +93,35 @@ export interface Status {
   forwards: ForwardStatus[];
   routes: Route[];
   proxy: { port: number; url_port: number; error?: string };
+  // Orgs of the person's projects that publish a team setup they haven't
+  // accepted; older agents leave it out.
+  team_suggestions?: TeamSuggestion[];
+}
+
+// A team setup the laptop noticed: <org>/.berth, which the person can
+// read, from the org one or more of their projects come from.
+export interface TeamSuggestion {
+  org: string;
+  // The setup's own name ("Acme").
+  name: string;
+  // "<org>/.berth".
+  repo: string;
+  projects: TeamSuggestProject[];
+}
+
+export interface TeamSuggestProject {
+  box: string;
+  location: string;
+  repo: string;
+  // team.json names the repository.
+  listed: boolean;
+  // What its setup brings, in a few words: "per-worktree databases",
+  // "services", "Log in as…", "review links".
+  sets_up: string[];
+  // team.json gives the repo a kit, which can be taken on its own ("Just
+  // the kit"); kit_applied: the project follows it already.
+  kit?: boolean;
+  kit_applied?: boolean;
 }
 
 export interface Worktree {
@@ -110,6 +139,9 @@ export interface Worktree {
   // The path of the worktree whose agent handed this one off, to nest it
   // under; another worktree of the same location.
   parent?: string;
+  // A worktree the repo had before Team setup adopted it: its setup runs
+  // the first time a terminal or an agent starts there.
+  setup_on_open?: boolean;
 }
 
 export interface Scripts {
@@ -172,6 +204,18 @@ export interface Session {
   // What the agent waits on, from its own hooks ("ask" capability), while
   // agent_state is "waiting".
   ask?: Ask;
+  // Set on a finished agent that turn check read as still at work without
+  // it: a delegated task, a build, a deploy or a watcher still running, to
+  // pick up by itself. The app shows it as working.
+  unfinished?: boolean;
+  // Set on a finished agent that turn check read as parked: nothing runs
+  // and nothing is asked of you while it waits on someone else's reply or
+  // a later time ("check again in 24 hours"). The app shows it as idle.
+  parked?: boolean;
+  // Set on a waiting agent that turn check read as asking in its last
+  // message: the reply box answers it, and its screen shows only its
+  // prompt, with no question there to read options from.
+  soft_wait?: boolean;
   // What the work is called: the first line of the prompt it started with
   // (or the first it was sent), about 48 characters, or what someone renamed
   // it to. Absent until there is one; api.renameSession names it.
@@ -180,6 +224,14 @@ export interface Session {
   // true, from boxes with the "service.terminal" capability): the service's
   // name. It never runs an agent, and closing its tab never stops it.
   service?: string;
+  // How the box reaches the agent ("driver" capability): "terminal", its
+  // own screen in tmux, or "claude", Claude Code driven through its stream
+  // ("driver.claude" capability).
+  driver?: "terminal" | "claude" | "codex" | "acp" | string;
+  // Where a structured session can switch ("driver.switch" capability):
+  // "terminal", to Claude Code's own screen, or "chat", back from it. POST
+  // sessions/{name}/switch with { to } switches it.
+  switch?: "terminal" | "chat";
   // The systemd scope its processes run in, on boxes where sessions get
   // one (Linux with systemd), and what they use: memory (bytes, page cache
   // included), its ceiling if the box sets one (Settings → Boxes), processor
@@ -193,11 +245,53 @@ export interface Session {
 // tool, a short summary of its input (the command, or the file's path;
 // never what it would write), its reason, and the message it showed. Each
 // is at most 300 characters.
+// A structured agent's conversation, kept on the box past its session
+// ("conversations" capability): GET conversations lists them, newest first.
+export interface Conversation {
+  id: string;
+  agent: string;
+  location?: string;
+  dir: string;
+  // The session it last ran in, and whether that one is running.
+  session?: string;
+  live?: boolean;
+  agent_session_id?: string;
+  mode?: string;
+  // Its first prompt's first line.
+  title?: string;
+  created: string;
+  updated?: string;
+}
+
+// One of a structured agent's own conversations in a session's folder,
+// which its chat's /resume can carry on (GET sessions/{name}/past,
+// "sessions.past" capability): Claude Code's, including those had in its
+// terminal, or what an ACP agent lists.
+export interface PastSession {
+  id: string;
+  title?: string;
+  updated?: string;
+  // The one the session runs now; or another live session that runs it.
+  current?: boolean;
+  session?: string;
+}
+
+export interface PastSessions {
+  agent: string;
+  sessions: PastSession[];
+  // Why the list is empty, when the agent can't give one.
+  note?: string;
+}
+
 export interface Ask {
   tool?: string;
   input?: string;
   why?: string;
   message?: string;
+  // The answers a structured session offers, by the key that picks one
+  // (POST sessions/{name}/send with that key); a terminal's are on its
+  // screen instead.
+  choices?: { key: string; label: string }[];
 }
 
 // A prompt the box holds for an agent until it is idle: the start of its
@@ -336,6 +430,9 @@ export interface AgentPreset {
   // it has them). Leaving one out means the CLI's default.
   models?: string[];
   efforts?: string[];
+  // What starts its Agent Client Protocol server ("acp", "--acp"): with it,
+  // the agent can run structured on boxes listing "driver.acp".
+  acp?: string;
 }
 
 // AgentPath is where a box found an agent CLI: through the person's shell
@@ -412,6 +509,12 @@ export interface TaskRequest {
   // Asks the app to show the new agent: as a tab of its worktree when the
   // person is looking at it, otherwise as a toast that opens it.
   open?: "split" | "tab";
+  // How berthd runs the agent: "terminal" (the default) or "claude", Claude
+  // Code structured ("driver.claude" capability); mode is a structured
+  // agent's permission mode to start in ("bypassPermissions": berthd allows
+  // what it asks, questions and plans aside).
+  driver?: "terminal" | "claude" | "codex" | "acp";
+  mode?: string;
 }
 
 export interface TaskResult {
@@ -469,6 +572,9 @@ export interface PluginInfo {
   allowed?: string;
   // Allowed once, but changed since: off until it is reviewed again.
   changed?: boolean;
+  // "marketplace" for a plugin installed from the listing in Settings →
+  // Plugins, which the app can update and remove.
+  source?: "marketplace";
   hooks?: PluginHook[];
   // The titles of the Home widgets it adds, from berth-plugin.json's
   // "homeWidgets", so Home's picker can offer them while it is off.
@@ -618,6 +724,11 @@ export interface RunGate {
   pick?: boolean;
   // The candidate a pick approves without naming one (0-based).
   default?: number;
+  // The two ways on when they aren't approve and reject: "Retry
+  // publishing" and "Finish without a pull request" at a pull request
+  // that didn't open.
+  approve_label?: string;
+  reject_label?: string;
 }
 
 export interface RunStep {

@@ -9,16 +9,20 @@ import { useActiveTheme } from "@/hooks/use-theme";
 import { ApiError, type TerminalConnection } from "@/lib/api";
 import { attachable, localPaths, named, onThisComputer, pastedFiles, shrinkImage, uploadAttachment, uploadLocalFile } from "@/lib/attachments";
 import { copyText } from "@/lib/clipboard";
-import { IS_LINUX } from "@/lib/platform";
+import { IS_LINUX, IS_MAC, platformKeys } from "@/lib/platform";
 import { usePrefs } from "@/lib/prefs";
 import { tryNow } from "@/lib/reconnect";
 import { useStore } from "@/lib/store";
 import { openEditor } from "@/components/editors/open";
 import { findPaths, resolveIn } from "@/lib/editor-paths";
+import { openFile } from "@/lib/files";
+import { isMarkdown } from "@/lib/md-links";
 import { OVERLAYS } from "@/lib/overlays";
 import { EchoPredictor } from "@/lib/predict-overlay";
 import { createTerminal, type TermHandle } from "@/lib/terminal";
+import { terminalKeyInput } from "@/lib/terminal-keys";
 import { cn } from "@/lib/utils";
+import { hereRef } from "@/lib/workspaces";
 import { WheelBatcher, wheelPixels } from "@/lib/wheel";
 
 type ConnState = "connecting" | "open" | "reconnecting" | "offline" | "ended";
@@ -53,6 +57,9 @@ interface Props {
 // session keeps running on the box, and attaching again redraws it.
 export function TerminalView({ box, session, agent, command, wsKey, tab, pane, visible, focused, predict = false, onFocus, onClose }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  // Where the pointer rests on a link, to say ⌘-click opens it (lib/terminal).
+  const [linkHint, setLinkHint] = useState<{ x: number; y: number; left: boolean; up: boolean }>();
   const [term, setTerm] = useState<TermHandle>();
   const predictor = useRef<EchoPredictor>(null);
   const conn = useRef<TerminalConnection>(null);
@@ -114,9 +121,21 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
     let disposed = false;
     let t: TermHandle | undefined;
     let echo: EchoPredictor | undefined;
+    let input: ((d: string) => void) | undefined;
     const mount = document.createElement("div");
     mount.className = "relative h-full w-full";
-    host.current!.appendChild(mount);
+    const el = host.current!;
+    el.appendChild(mount);
+    // ⇧↵, and on a Mac ⌘←/→/⌫ and ⌥←/→, send what a Mac terminal sends
+    // (lib/terminal-keys), ahead of the renderer's own handling.
+    const onKey = (e: KeyboardEvent) => {
+      const d = input && terminalKeyInput(e, IS_MAC);
+      if (d === undefined) return;
+      e.preventDefault();
+      e.stopPropagation();
+      input?.(d);
+    };
+    el.addEventListener("keydown", onKey, true);
     void createTerminal(mount, themeRef.current.terminal, prefs).then((made) => {
       if (disposed) {
         made.dispose();
@@ -125,7 +144,7 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
       t = made;
       echo = new EchoPredictor(made, mount, themeRef.current.terminal, prefsRef.current);
       predictor.current = echo;
-      t.onData((d) => {
+      input = (d) => {
         if (!open.current) {
           const h = held.current;
           if (!h.data.length) h.at = Date.now();
@@ -138,9 +157,16 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
         echo?.typed(d);
         conn.current?.send(d);
         if (!typedAt.current || typedAt.current <= heardAt.current) typedAt.current = Date.now();
-      });
+      };
+      t.onData(input);
       t.onResize(({ cols, rows }) => conn.current?.resize(cols, rows));
-      // ⌘-click a file path to open it at its line in your editor.
+      t.onLinkHint((at) => {
+        const r = root.current?.getBoundingClientRect();
+        setLinkHint(at && r ? { x: at.x - r.left, y: at.y - r.top, left: at.x - r.left > r.width - 160, up: at.y - r.top > r.height - 48 } : undefined);
+      });
+      // ⌘-click a file path to open it at its line in your editor, or a
+      // Markdown file of the worktree as a page in a File tab (⌘⇧-click
+      // takes that to your editor too).
       t.registerLinkFinder((line) => {
         const dir = dirRef.current;
         if (!dir) return [];
@@ -153,7 +179,11 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
               end: m.end,
               activate: (e: MouseEvent) => {
                 if (!e.metaKey && !e.ctrlKey) return;
-                void openEditor({ box, path: dir, file, line: m.line, col: m.col });
+                const ref = hereRef();
+                const top = ref?.box === box ? ref.path.replace(/\/$/, "") : undefined;
+                const rel = top && file.startsWith(`${top}/`) ? file.slice(top.length + 1) : undefined;
+                if (rel && isMarkdown(rel) && !e.shiftKey) openFile(rel, "tab");
+                else void openEditor({ box, path: dir, file, line: m.line, col: m.col });
               },
             },
           ];
@@ -163,11 +193,13 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
     });
     return () => {
       disposed = true;
+      el.removeEventListener("keydown", onKey, true);
       echo?.dispose();
       if (predictor.current === echo) predictor.current = null;
       t?.dispose();
       mount.remove();
       setTerm(undefined);
+      setLinkHint(undefined);
     };
     // xterm takes a new theme in place (below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -434,19 +466,31 @@ export function TerminalView({ box, session, agent, command, wsKey, tab, pane, v
 
   const blocked = state === "offline" || state === "ended";
   return (
-    <div className="relative min-h-0 flex-1" style={{ background: theme.terminal.background }} onMouseDown={onFocus}>
+    <div ref={root} className="relative min-h-0 flex-1" style={{ background: theme.terminal.background }} onMouseDown={onFocus}>
       <div ref={host} data-terminal className={cn("absolute inset-0 overflow-hidden px-3 pt-2 pb-1 transition-opacity [&_canvas]:block", blocked && "pointer-events-none", state === "offline" && "opacity-40", state === "ended" && "invisible")} />
       {state === "offline" && <BoxOffline box={box} state={boxState} onRetry={() => setRetry((n) => n + 1)} />}
       {stoppedService && state !== "ended" && state !== "offline" && <ServiceStopped box={box} session={stoppedService} />}
       {state === "ended" && <SessionEnded box={box} session={session} agent={agent} command={command} wsKey={wsKey} tab={tab} pane={pane} onClose={onClose} />}
       {state === "open" && stalled && (
-        <div data-testid="terminal-stalled" className="pointer-events-none absolute top-2 right-3 flex items-center gap-2 rounded-md border bg-popover/90 px-2 py-1 text-muted-foreground text-xs shadow-sm">
+        <div data-testid="terminal-stalled" className="pointer-events-none absolute top-2 right-3 flex items-center gap-2 rounded-md border bg-popover/90 px-2 py-1 text-muted-foreground text-meta shadow-sm">
           <Spinner className="size-3" />
           {`Waiting for ${box} to answer… what you type may not arrive`}
         </div>
       )}
+      {linkHint && (
+        <div
+          data-testid="terminal-link-hint"
+          className="pointer-events-none absolute z-20 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-popover-foreground text-meta shadow-md/5"
+          style={{
+            ...(linkHint.up ? { bottom: `calc(100% - ${linkHint.y - 8}px)` } : { top: linkHint.y + 18 }),
+            ...(linkHint.left ? { right: `calc(100% - ${linkHint.x}px)` } : { left: linkHint.x + 8 }),
+          }}
+        >
+          {platformKeys("⌘-click to open")}
+        </div>
+      )}
       {(state === "connecting" || state === "reconnecting") && (
-        <div className="pointer-events-none absolute top-2 right-3 flex items-center gap-2 rounded-md border bg-popover/90 px-2 py-1 text-muted-foreground text-xs shadow-sm">
+        <div className="pointer-events-none absolute top-2 right-3 flex items-center gap-2 rounded-md border bg-popover/90 px-2 py-1 text-muted-foreground text-meta shadow-sm">
           <Spinner className="size-3" />
           {state === "reconnecting" ? `Reconnecting to ${box}…` : "Attaching…"}
         </div>

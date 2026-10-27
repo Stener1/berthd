@@ -1,5 +1,5 @@
 import { ChevronRightIcon, PencilIcon, ServerOffIcon, SquareArrowOutUpRightIcon } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { ContextRow } from "@/components/sidebar/actions";
@@ -8,7 +8,7 @@ import { RowLayer } from "@/components/sidebar/row-layer";
 import { Tip } from "@/components/tip";
 import { useTones } from "@/components/workspace/worktree-tone";
 import type { Location, Session, Worktree } from "@/lib/api";
-import { agentLabel, agentOf, type SessionState, sessionState } from "@/lib/derive";
+import { agentLabel, agentOf, ON_ITS_WORK, onItsWork, type SessionState, sessionState } from "@/lib/derive";
 import { ago } from "@/lib/format";
 import { usePrefs } from "@/lib/prefs";
 import { useProjects } from "@/lib/project-groups";
@@ -24,6 +24,7 @@ import { renameWorktree, worktreeLabel } from "@/lib/worktree-names";
 
 export type Lane = "waiting" | "running" | "finished" | "away";
 export const LANES: Lane[] = ["waiting", "running", "finished", "away"];
+const NO_SESSIONS: Session[] = [];
 
 export interface RailAgent {
   id: string;
@@ -61,10 +62,18 @@ export function useRailAgents(): RailAgent[] {
     for (const b of boxes) {
       const d = data[b.name];
       const away = b.state === "online" ? undefined : BOX_WORDS[boxState(b, d)].lower;
+      // A box's sessions by where they run, so each worktree finds its own
+      // without going through them all.
+      const byDir = new Map<string, Session[]>();
+      for (const s of d?.sessions ?? []) {
+        if (s.service || s.exited || !s.dir) continue;
+        const list = byDir.get(s.dir);
+        if (list) list.push(s);
+        else byDir.set(s.dir, [s]);
+      }
       for (const loc of d?.locations ?? []) {
         for (const wt of loc.worktrees ?? []) {
-          for (const s of d?.sessions ?? []) {
-            if (s.dir !== wt.path || s.service || s.exited) continue;
+          for (const s of byDir.get(wt.path) ?? NO_SESSIONS) {
             const agent = agentOf(s);
             if (!agent) continue;
             const state = sessionState(s, d?.stats);
@@ -131,16 +140,17 @@ export function AgentCard({ e }: { e: RailAgent }) {
             </>
           ) : (
             <>
-              <StateGlyph state={e.state} className="size-3" />
+              <StateGlyph state={e.state} session={e.session} noTip className="size-3" />
               <span className={cn(e.state === "waiting" && "text-warning-foreground", e.state === "running" && "text-info-foreground", e.state === "finished" && "text-success-foreground")}>{sessionWord(e.state)}</span>
               {since && <span>· {since}</span>}
             </>
           )}
         </span>
       </span>
-      <span className="font-medium text-[13px] text-foreground leading-snug">{e.session.title ?? (e.wt.main ? "Main checkout" : worktreeLabel(e.wt))}</span>
+      <span className="text-desc font-medium text-foreground">{e.session.title ?? (e.wt.main ? "Main checkout" : worktreeLabel(e.wt))}</span>
+      {e.state === "running" && !e.away && onItsWork(e.session) && <span className="text-muted-foreground">{ON_ITS_WORK}</span>}
       {ask && (ask.input || ask.message) && (
-        <span className="line-clamp-2 break-words rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
+        <span className="line-clamp-2 break-words rounded bg-muted/60 px-1.5 py-0.5 font-mono text-tag text-foreground/80">
           {ask.tool ? `${ask.tool}: ` : ""}
           {ask.input ?? ask.message}
         </span>
@@ -148,11 +158,11 @@ export function AgentCard({ e }: { e: RailAgent }) {
       <span className="flex items-center gap-1 text-muted-foreground">
         {e.tone && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: e.tone }} />}
         <span className="truncate">{e.wt.main ? `${e.project} · main checkout` : place(e)}</span>
-        <span className="ml-auto shrink-0 font-mono text-[11px]">{e.box}</span>
+        <span className="ml-auto shrink-0 font-mono text-tag">{e.box}</span>
       </span>
       {/* A renamed worktree's own name, which its branch and folder keep. */}
-      {!e.wt.main && e.wt.title && <span className="truncate font-mono text-[11px] text-muted-foreground">{e.wt.name}</span>}
-      {!e.wt.main && !e.away && <span className="text-[11px] text-muted-foreground/80">Right-click or F2 to rename the worktree</span>}
+      {!e.wt.main && e.wt.title && <span className="truncate font-mono text-tag text-muted-foreground">{e.wt.name}</span>}
+      {!e.wt.main && !e.away && <span className="text-tag text-muted-foreground/80">Right-click or F2 to rename the worktree</span>}
       {e.away && <span className="text-muted-foreground">Last seen {sessionWord(e.state, true)}. It may have moved on.</span>}
     </span>
   );
@@ -253,7 +263,12 @@ function tileActions(e: RailAgent) {
   ];
 }
 
-function AgentTile({ e }: { e: RailAgent }) {
+// A tile draws again only when what it shows changed: the list is made afresh
+// whenever any agent changes, and the others keep their objects (a session,
+// a worktree) and their words.
+const sameAgent = (a: RailAgent, b: RailAgent) => a === b || (Object.keys(a).length === Object.keys(b).length && (Object.keys(a) as (keyof RailAgent)[]).every((k) => a[k] === b[k]));
+
+const AgentTile = memo(function AgentTile({ e }: { e: RailAgent }) {
   return (
     <li className="relative">
       {/* On screen: a bar at the rail's edge, in its tab group's colour. */}
@@ -282,7 +297,7 @@ function AgentTile({ e }: { e: RailAgent }) {
               <Ring e={e} />
             </span>
             <span
-              className={cn("line-clamp-2 w-full text-center text-[10px] leading-[11px] [overflow-wrap:anywhere]", e.selected ? "font-medium text-foreground" : "text-muted-foreground group-hover:text-foreground", e.away && "opacity-70")}
+              className={cn("line-clamp-2 w-full text-center text-tag leading-[13px] [overflow-wrap:anywhere]", e.selected ? "font-medium text-foreground" : "text-muted-foreground group-hover:text-foreground", e.away && "opacity-70")}
               style={e.tone ? { color: e.tone } : undefined}
             >
               {wtName(e)}
@@ -292,7 +307,7 @@ function AgentTile({ e }: { e: RailAgent }) {
       </ContextRow>
     </li>
   );
-}
+}, (a, b) => sameAgent(a.e, b.e));
 
 // LaneHead heads a lane with its glyph and count, so how many need you
 // stays in sight however far the rail scrolls. It folds the lane away.
@@ -309,7 +324,7 @@ function LaneHead({ lane, count, folded, onFold }: { lane: Lane; count: number; 
         aria-expanded={!folded}
         aria-label={`${LANE_WORDS[lane]}: ${count}`}
         onClick={onFold}
-        className="sticky top-0 z-10 flex h-6 w-full items-center justify-center gap-1 rounded-md bg-sidebar font-medium text-[10px] tabular-nums outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+        className="sticky top-0 z-10 flex h-6 w-full items-center justify-center gap-1 rounded-md bg-sidebar font-medium text-tag tabular-nums outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
       >
         {lane === "away" ? <ServerOffIcon className="size-3 text-muted-foreground" /> : <StateGlyph state={lane} className="size-3" />}
         <span className={cn(lane === "waiting" ? "text-warning-foreground" : "text-muted-foreground")}>{count}</span>

@@ -1,28 +1,35 @@
-import { AsteriskIcon, CheckIcon, HexagonIcon, SparkleIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { AsteriskIcon, CheckIcon, HexagonIcon, HourglassIcon, SparkleIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 
 import { Tip } from "@/components/tip";
-import type { SessionState } from "@/lib/derive";
+import type { Session } from "@/lib/api";
+import { ON_ITS_WORK, onItsWork, type SessionState } from "@/lib/derive";
 import { useOutdated } from "@/lib/outdated";
 import { BOX_WORDS, type BoxState, boxState, boxWhy, sessionWord } from "@/lib/state-model";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 // AgentIcon marks which agent a session runs, in the agent's own colour.
-export function AgentIcon({ agent, className }: { agent?: string; className?: string }) {
+// Muted, it takes the colour of the text around it (currentColor), for
+// lists where every row has one and state should carry the colour.
+export function AgentIcon({ agent, className, muted }: { agent?: string; className?: string; muted?: boolean }) {
   const cls = cn("size-3.5 shrink-0", className);
+  const tone = (c: string) => (muted ? undefined : c);
   switch (agent) {
     case "claude":
-      return <AsteriskIcon className={cn(cls, "text-[#d97757]")} strokeWidth={2.75} />;
+      return <AsteriskIcon className={cn(cls, tone("text-[#d97757]"))} strokeWidth={2.75} />;
     case "codex":
-      return <HexagonIcon className={cn(cls, "text-foreground/80")} strokeWidth={2.25} />;
+      return <HexagonIcon className={cn(cls, tone("text-foreground/80"))} strokeWidth={2.25} />;
     case "gemini":
-      return <SparkleIcon className={cn(cls, "text-[#6f9bff]")} strokeWidth={2.25} />;
+      return <SparkleIcon className={cn(cls, tone("text-[#6f9bff]"))} strokeWidth={2.25} />;
     case "pi":
-      return <span className={cn("shrink-0 font-semibold text-[#a78bfa] text-xs leading-none", className)}>π</span>;
+      return <span className={cn("shrink-0 font-semibold text-label leading-none", tone("text-[#a78bfa]"), className)}>π</span>;
+    case "omp":
+      return <span className={cn("shrink-0 font-semibold text-label leading-none", tone("text-[#f472b6]"), className)}>π</span>;
     case "opencode":
-      return <SquareTerminalIcon className={cn(cls, "text-foreground/80")} />;
+      return <SquareTerminalIcon className={cn(cls, tone("text-foreground/80"))} />;
     default:
-      return <TerminalIcon className={cn(cls, "text-muted-foreground")} />;
+      return <TerminalIcon className={cn(cls, tone("text-muted-foreground"))} />;
   }
 }
 
@@ -40,9 +47,14 @@ export function stateText(state: SessionState) {
 // reduced motion the spinner stands still as a broken ring and the dot does
 // not ping. The sidebar, the rail, tabs, panes, zen, the dashboard and the
 // palette all draw states with it, so they agree. It is named for screen
-// readers; the row or card around it says it in words.
-export function StateGlyph({ state, className }: { state: SessionState; className?: string }) {
+// readers; the row or card around it says it in words. Given its session,
+// one whose turn ended while its work runs on (onItsWork) wears an
+// hourglass that says so, not the spinner of a turn still going. Inside
+// another tooltip's trigger (a tab, a pane's header) it takes noTip, and
+// that tooltip says why.
+export function StateGlyph({ state, session, noTip, className }: { state: SessionState; session?: Session; noTip?: boolean; className?: string }) {
   const box = cn("inline-flex size-3.5 shrink-0 items-center justify-center", className);
+  if (state === "running" && onItsWork(session)) return <WorkGlyph className={box} noTip={noTip} />;
   switch (state) {
     case "running":
       return (
@@ -80,6 +92,29 @@ export function StateGlyph({ state, className }: { state: SessionState; classNam
     default:
       return null;
   }
+}
+
+// WorkGlyph is a turn that ended while its work runs on: an hourglass, with
+// why in its tip unless noTip.
+export function WorkGlyph({ className, noTip }: { className?: string; noTip?: boolean }) {
+  const glyph = (
+    <span data-testid="on-its-work" className={cn("inline-flex shrink-0 items-center justify-center text-muted-foreground", className)} role="img" aria-label="Waiting on its work">
+      <HourglassIcon className="size-full max-h-3 max-w-3" aria-hidden />
+    </span>
+  );
+  return noTip ? glyph : <Tip label={ON_ITS_WORK}>{glyph}</Tip>;
+}
+
+// withWork is a tooltip's label, and when its session's glyph is the
+// hourglass drawn with noTip, why.
+export function withWork(label: string, state: SessionState | undefined, session: Session | undefined): ReactNode {
+  if (state !== "running" || !onItsWork(session)) return label;
+  return (
+    <span className="flex max-w-72 flex-col gap-0.5">
+      <span>{label}</span>
+      <span>{ON_ITS_WORK}</span>
+    </span>
+  );
 }
 
 // StatusDot is a box's state (lib/state-model.ts): green online, faded

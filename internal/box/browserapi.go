@@ -13,10 +13,12 @@ import (
 	"time"
 )
 
-// The browser API, per worktree:
+// The browser API, per worktree. Every route takes ?tab=NAME, a tab of the
+// worktree's browser of its own (browsertabs.go); without it, the main tab:
 //
-//	POST /v1/worktrees/{loc}/{wt}/browser/open      {url, size, scale}: a path, a URL, or "" for the
-//	     worktree's own; size (1280x800, phone) and scale resize it first
+//	POST /v1/worktrees/{loc}/{wt}/browser/open      {url, size, scale, as}: a path, a URL, or "" for the
+//	     worktree's own; size (1280x800, phone) and scale resize it first; as
+//	     logs it in as that email first (login.go)
 //	POST /v1/worktrees/{loc}/{wt}/browser/resize    {size, scale}: kept for the worktree, applied now
 //	     if its browser runs
 //	POST /v1/worktrees/{loc}/{wt}/browser/act       {action, target, value}
@@ -27,7 +29,8 @@ import (
 //	GET  /v1/worktrees/{loc}/{wt}/browser/console?all=1
 //	GET  /v1/worktrees/{loc}/{wt}/browser/network
 //	GET  /v1/worktrees/{loc}/{wt}/browser/status
-//	POST /v1/worktrees/{loc}/{wt}/browser/close
+//	GET  /v1/worktrees/{loc}/{wt}/browser/tabs
+//	POST /v1/worktrees/{loc}/{wt}/browser/close     the browser, or with ?tab= that tab
 //	GET  /v1/worktrees/{loc}/{wt}/browser/screencast  NDJSON frames while you watch
 //	GET  /v1/worktrees/{loc}/{wt}/browser/shots/{name}
 //	GET  /v1/browsers, POST /v1/browser/allow {origin}
@@ -53,21 +56,38 @@ func (b *Box) browserTarget(r *http.Request) (Location, Worktree, error) {
 	return Location{}, Worktree{}, ErrUnknownWorktree
 }
 
-// browserFor returns the worktree's running browser, or starts one when
-// start (open does; reading commands don't).
+// browserTab is the tab a request is for: ?tab=NAME, or "" for the main
+// tab.
+func browserTab(r *http.Request) (string, error) {
+	tab := r.URL.Query().Get("tab")
+	if err := CheckTabName(tab); err != nil {
+		return "", badRequest("%v", err)
+	}
+	return tab, nil
+}
+
+// browserFor returns the worktree's open tab, or opens it (and the browser)
+// when start (open does; reading commands don't).
 func (b *Box) browserFor(r *http.Request, start bool) (*browser, Location, Worktree, error) {
 	loc, wt, err := b.browserTarget(r)
 	if err != nil {
 		return nil, loc, wt, err
 	}
-	if br := b.Browsers.Lookup(wt.Path); br != nil {
+	tab, err := browserTab(r)
+	if err != nil {
+		return nil, loc, wt, err
+	}
+	if br := b.Browsers.Lookup(wt.Path, tab); br != nil {
 		br.touch()
 		return br, loc, wt, nil
 	}
 	if !start {
+		if tab != "" {
+			return nil, loc, wt, httpError{http.StatusConflict, "no tab " + tab + " is open for " + loc.Name + "/" + wt.Name + "; open it first (browser open --tab " + tab + ")"}
+		}
 		return nil, loc, wt, httpError{http.StatusConflict, "no browser is open for " + loc.Name + "/" + wt.Name + "; open one first (browser open)"}
 	}
-	br, err := b.Browsers.get(r.Context(), loc, wt)
+	br, err := b.Browsers.get(r.Context(), loc, wt, tab)
 	return br, loc, wt, err
 }
 
@@ -76,15 +96,20 @@ func (b *Box) browserOpen(w http.ResponseWriter, r *http.Request) error {
 		URL   string `json:"url"`
 		Size  string `json:"size"`
 		Scale string `json:"scale"`
+		As    string `json:"as"`
 	}
 	decode(r, &req)
 	loc, wt, err := b.browserTarget(r)
 	if err != nil {
 		return err
 	}
+	tab, err := browserTab(r)
+	if err != nil {
+		return err
+	}
 	var size *Viewport
 	if req.Size != "" || req.Scale != "" {
-		v, err := b.Browsers.Viewport(wt.Path).Resolve(req.Size, req.Scale)
+		v, err := b.Browsers.Viewport(wt.Path, tab).Resolve(req.Size, req.Scale)
 		if err != nil {
 			return badRequest("%v", err)
 		}
@@ -106,18 +131,34 @@ func (b *Box) browserOpen(w http.ResponseWriter, r *http.Request) error {
 	if _, err := url.Parse(target); err != nil {
 		return badRequest("%q is not a URL", target)
 	}
-	if err := b.before(r, "browser.open", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path, "url": target}); err != nil {
+	if err := b.before(r, "browser.open", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path, "tab": tab, "url": target}); err != nil {
 		return err
 	}
 	// The size first: a browser that starts, starts at it.
 	if size != nil {
-		if _, err := b.Browsers.Resize(r.Context(), wt.Path, *size); err != nil {
+		if _, err := b.Browsers.Resize(r.Context(), wt.Path, tab, *size); err != nil {
 			return err
 		}
 	}
 	br, _, _, err := b.browserFor(r, true)
 	if err != nil {
 		return err
+	}
+	if req.As != "" {
+		// Logged in first, as the laptop's login route does: the
+		// worktree's login runs, its cookies go in for the worktree's
+		// host, and the page opens (where the login says, without a path).
+		site := worktreeURL(b.Name, loc.Name, wt)
+		login, err := b.loginIn(r.Context(), origin(r), loc, wt, req.As)
+		if err != nil {
+			return err
+		}
+		if err := setLoginCookies(r.Context(), br.cdp, br.session, site, login.Cookies); err != nil {
+			return err
+		}
+		if strings.TrimSpace(req.URL) == "" && login.Redirect != "" {
+			target = strings.TrimSuffix(site, "/") + login.Redirect
+		}
 	}
 	res, err := br.Open(r.Context(), target)
 	if err != nil {
@@ -141,11 +182,15 @@ func (b *Box) browserResize(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	v, err := b.Browsers.Viewport(wt.Path).Resolve(req.Size, req.Scale)
+	tab, err := browserTab(r)
+	if err != nil {
+		return err
+	}
+	v, err := b.Browsers.Viewport(wt.Path, tab).Resolve(req.Size, req.Scale)
 	if err != nil {
 		return badRequest("%v", err)
 	}
-	br, err := b.Browsers.Resize(r.Context(), wt.Path, v)
+	br, err := b.Browsers.Resize(r.Context(), wt.Path, tab, v)
 	if err != nil {
 		return err
 	}
@@ -250,7 +295,7 @@ func (b *Box) browserEval(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := b.before(r, "browser.eval", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path}); err != nil {
+	if err := b.before(r, "browser.eval", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path, "tab": br.tab}); err != nil {
 		return err
 	}
 	res, err := br.Eval(r.Context(), req.JS)
@@ -284,24 +329,78 @@ func (b *Box) browserStatus(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	br := b.Browsers.Lookup(wt.Path)
+	tab, err := browserTab(r)
+	if err != nil {
+		return err
+	}
+	c := b.Browsers.lookupChromium(wt.Path)
+	var br *browser
+	if c != nil {
+		br = c.lookup(tab)
+	}
 	if br == nil {
 		// Why one can't start, if it can't: cheap, without starting it.
-		v := b.Browsers.Viewport(wt.Path)
-		res := map[string]any{"running": false, "viewport": v, "size": v.String(), "text": "no browser open; it opens at " + v.String()}
-		if h := b.Browsers.Health(); h.State != "ok" {
+		v := b.Browsers.Viewport(wt.Path, tab)
+		what := "no browser open"
+		if c != nil {
+			what = "no tab " + tab + " open"
+		}
+		res := map[string]any{"running": false, "viewport": v, "size": v.String(), "text": what + "; it opens at " + v.String()}
+		if c != nil {
+			res["tabs"] = c.status().Tabs
+		}
+		if h := b.Browsers.Health(); h.State != "ok" && c == nil {
 			res["health"], res["text"] = h, "no browser open; "+h.Text
 		}
 		writeJSON(w, res)
 		return nil
 	}
-	st := br.status()
+	st := c.status()
+	ts := br.tabStatus()
+	// The status's page is the tab asked for.
+	st.URL, st.Viewport, st.Size = ts.URL, ts.Viewport, ts.Size
 	text := "open: " + st.URL + " · " + st.Size
 	if st.RSS > 0 {
 		text += " (" + strconvMB(st.RSS) + ")"
 	}
-	writeJSON(w, map[string]any{"running": true, "status": st, "viewport": st.Viewport, "size": st.Size, "text": text})
+	if len(st.Tabs) > 1 || tab != "" {
+		text += "\n" + tabsText(st.Tabs)
+	}
+	writeJSON(w, map[string]any{"running": true, "status": st, "viewport": st.Viewport, "size": st.Size, "tabs": st.Tabs, "text": text})
 	return nil
+}
+
+// browserTabs lists a worktree's tabs.
+func (b *Box) browserTabs(w http.ResponseWriter, r *http.Request) error {
+	_, wt, err := b.browserTarget(r)
+	if err != nil {
+		return err
+	}
+	c := b.Browsers.lookupChromium(wt.Path)
+	if c == nil {
+		writeJSON(w, map[string]any{"tabs": []TabStatus{}, "text": "no browser open"})
+		return nil
+	}
+	st := c.status()
+	writeJSON(w, map[string]any{"tabs": st.Tabs, "text": tabsText(st.Tabs)})
+	return nil
+}
+
+// tabsText is tabs as an agent reads them: one a line.
+func tabsText(tabs []TabStatus) string {
+	var b strings.Builder
+	b.WriteString("tabs:")
+	for _, t := range tabs {
+		name := t.Name
+		if name == "" {
+			name = "(main)"
+		}
+		fmt.Fprintf(&b, "\n  %s  %s  %s", name, t.URL, t.Size)
+		if t.Busy {
+			b.WriteString("  busy")
+		}
+	}
+	return b.String()
 }
 
 func strconvMB(n uint64) string { return fmt.Sprintf("%.0f MB", float64(n)/(1<<20)) }
@@ -310,6 +409,15 @@ func (b *Box) browserClose(w http.ResponseWriter, r *http.Request) error {
 	_, wt, err := b.browserTarget(r)
 	if err != nil {
 		return err
+	}
+	tab, err := browserTab(r)
+	if err != nil {
+		return err
+	}
+	if tab != "" {
+		closed := b.Browsers.CloseTab(wt.Path, tab, "closed")
+		writeJSON(w, map[string]any{"closed": closed, "text": map[bool]string{true: "closed tab " + tab, false: "no tab " + tab + " was open"}[closed]})
+		return nil
 	}
 	closed := b.Browsers.Close(wt.Path, "closed")
 	writeJSON(w, map[string]any{"closed": closed, "text": map[bool]string{true: "closed", false: "no browser was open"}[closed]})
@@ -323,11 +431,18 @@ func (b *Box) browserScreencast(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := b.before(r, "browser.watch", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path}); err != nil {
+	tab, err := browserTab(r)
+	if err != nil {
 		return err
 	}
-	br := b.Browsers.Lookup(wt.Path)
+	if err := b.before(r, "browser.watch", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path, "tab": tab}); err != nil {
+		return err
+	}
+	br := b.Browsers.Lookup(wt.Path, tab)
 	if br == nil {
+		if tab != "" {
+			return httpError{http.StatusConflict, "no tab " + tab + " is open for " + loc.Name + "/" + wt.Name}
+		}
 		return httpError{http.StatusConflict, "no browser is open for " + loc.Name + "/" + wt.Name}
 	}
 	frames, stop := br.Watch(r.Context())
@@ -454,9 +569,11 @@ func (b *Box) mountBrowser(route func(string, func(http.ResponseWriter, *http.Re
 	route("GET "+p+"network", b.browserNetwork)
 	route("GET "+p+"devtools", b.browserDevtools)
 	route("GET "+p+"status", b.browserStatus)
+	route("GET "+p+"tabs", b.browserTabs)
 	route("POST "+p+"close", b.browserClose)
 	route("GET "+p+"screencast", b.browserScreencast)
 	route("GET "+p+"shots/{name}", b.browserShotFile)
+	route("POST /v1/worktrees/{loc}/{wt}/login", b.postLogin)
 	route("GET /v1/browsers", b.listBrowsers)
 	route("POST /v1/browser/allow", b.browserAllow)
 	route("GET /v1/browser/health", b.browserHealth)

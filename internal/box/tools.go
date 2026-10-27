@@ -23,6 +23,9 @@ type WorktreeRequest struct {
 	// Parent names another worktree of the location to nest this one
 	// under, like a stacked branch under the one it builds on.
 	Parent string `json:"parent,omitempty"`
+	// NoSetup skips the location's setup script and its autostart services
+	// for now; the worktree reports setup_pending until `worktree setup`.
+	NoSetup bool `json:"no_setup,omitempty"`
 }
 
 // toolPath finds a tool on PATH or in ~/.local/bin, where agent CLIs install

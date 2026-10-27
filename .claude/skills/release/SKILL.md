@@ -7,10 +7,13 @@ description: Cut a Shipyard release (vX.Y.Z) - version bump, changelog, tag, and
 
 The tag is the release. Pushing `vX.Y.Z` runs `.github/workflows/release.yml`:
 
-1. **checks:** calls `ci.yml`: Go with `-race` and a real Chromium, shellcheck, the app's checks, tests and build, and the docs build. A tag skips the e2e suite. Nothing is built if any check fails.
-2. **tmux:** static tmux for Linux boxes (Docker, on a hosted runner). It runs in parallel with checks.
+1. **checks:** calls `ci.yml`: Go with `-race` and a real Chromium, shellcheck, the app's checks, tests and build, and the docs build. A tag skips the e2e suite. It runs alongside the builds; nothing is published if any check fails (the release stays a draft).
+2. **tmux:** static tmux for Linux boxes (Docker, on a hosted runner).
 3. **release:** builds `berth`/`berthd` archives for darwin and linux, amd64 and arm64, and makes a **draft** release.
-4. **macos:** the universal app, signed, notarized and stapled. It uploads the dmg and updater archive, then `latest.json` last, then publishes the release as Latest. This takes about 30 minutes.
+4. **macos** and **linux:** the universal Mac app (signed, notarized, stapled) and the Linux alpha. They upload their bundles and `latest.json` to the draft.
+5. **feed:** once the apps are built and the checks pass, merges the Linux entries into `latest.json` and publishes the release as Latest. About 15 minutes from the tag when the caches are warm.
+
+The builds restore caches `release-cache.yml` keeps warm on `main` (a tag's run reads only `main`'s caches): the Mac's Go build cache and the Mac and Linux apps' Rust dependencies. It runs when Go or Rust dependencies change and twice a week; run it by hand (`gh workflow run release-cache.yml`) before a release if it hasn't run in a week.
 
 Only people the "Release tags" ruleset lets through can push `v*` tags. An agent usually can't push a tag; prepare everything and give the user the command.
 
@@ -27,10 +30,10 @@ git commit -am "release: v$V"
 
 If the release has an entry in `app/src/lib/whats-new-releases.ts`, its version must match.
 
-Check CI is green on the commit (`gh pr checks` or `gh run list`). Then the user runs:
+The release PR runs no CI of its own (no `run-ci` label needed): the tag's run checks everything before anything is published. Once it is merged, the user tags the merged commit:
 
 ```sh
-git push origin main && git tag -a "v$V" -m "Shipyard v$V" && git push origin "v$V"
+git fetch origin && git tag -a "v$V" -m "Shipyard v$V" origin/main && git push origin "v$V"
 ```
 
 ## Retag after a failure

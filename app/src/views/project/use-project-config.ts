@@ -19,6 +19,10 @@ export function clean(c: RepoConfig): RepoConfig {
   if (c.agents?.length) out.agents = c.agents;
   if (c.hooks?.length) out.hooks = c.hooks;
   if (c.flows?.length) out.flows = c.flows;
+  // Not edited here, but kept: saving must not drop the box's own login.
+  if (c.login) out.login = c.login;
+  if (typeof c.review_button === "boolean") out.review_button = c.review_button;
+  if (typeof c.keep_main === "boolean") out.keep_main = c.keep_main;
   return out;
 }
 

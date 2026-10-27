@@ -42,6 +42,9 @@ type Command struct {
 	// Screen commands open the agent's own interactive screen (a picker or
 	// a dialog), which the chat shows as a live terminal.
 	Screen bool `json:"screen,omitempty"`
+	// App commands are answered by the app itself, never sent: a
+	// structured chat's /resume is its own picker.
+	App bool `json:"app,omitempty"`
 	// Source is where a custom command or skill was found: user, project
 	// or the plugin's name.
 	Source string `json:"source,omitempty"`
@@ -319,7 +322,7 @@ func (b *Box) listCommands(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	agent := sessionAgent(sess)
-	key := agent + "\x00" + sess.Dir
+	key := agent + "\x00" + sess.Dir + "\x00" + sess.Driver
 	if v, ok := commandsCache.Load(sess.Name); ok {
 		if e := v.(commandsEntry); e.key == key && time.Since(e.at) < commandsTTL && r.URL.Query().Get("fresh") == "" {
 			writeJSON(w, e.cat)
@@ -328,9 +331,27 @@ func (b *Box) listCommands(w http.ResponseWriter, r *http.Request) error {
 	}
 	home, _ := os.UserHomeDir()
 	cat := Catalog(agent, home, sess.Dir)
+	if sess.Driver == DriverClaude || sess.Driver == DriverACP {
+		cat = withResumePicker(cat)
+	}
 	commandsCache.Store(sess.Name, commandsEntry{at: time.Now(), key: key, cat: cat})
 	writeJSON(w, cat)
 	return nil
+}
+
+// withResumePicker is a structured chat's catalog: its agent has no screen
+// for its own /resume, so the app's picker answers it (pastsessions.go).
+func withResumePicker(cat CommandCatalog) CommandCatalog {
+	resume := Command{Name: "/resume", Description: "Pick a past conversation and carry it on here", Kind: "builtin", Args: "[conversation]", Local: true, App: true}
+	for i, c := range cat.Commands {
+		if c.Name == resume.Name {
+			resume.Aliases = c.Aliases
+			cat.Commands[i] = resume
+			return cat
+		}
+	}
+	cat.Commands = append([]Command{resume}, cat.Commands...)
+	return cat
 }
 
 // Catalog is what agent takes after a "/" in dir, for the user whose home

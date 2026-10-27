@@ -28,7 +28,7 @@ export function HomeTabs() {
   const onHome = !front;
 
   return (
-    <div data-tauri-drag-region data-tab-bar className="flex h-10 shrink-0 items-stretch border-b bg-sidebar">
+    <div data-tauri-drag-region data-tab-bar className="flex h-bar shrink-0 items-stretch border-b bg-sidebar">
       {homes.length > 0 && (
         <div data-tauri-drag-region data-tab-strip role="tablist" aria-label="Home tabs" className="flex min-w-0 items-stretch overflow-x-auto [scrollbar-width:none]">
           <Tip label="Home" side="bottom">
@@ -102,7 +102,7 @@ function BoxHomeChip({ box }: { box: string }) {
   return (
     <Tip label={`Terminals in ${box}'s home folder${home ? `, ${home}` : ""}. They belong to no worktree.`} side="bottom">
       <span data-tauri-drag-region data-home-box={box} className="flex shrink-0 items-center pr-1.5 pl-2.5">
-        <span className="rounded bg-accent/70 px-1.5 py-px font-mono text-[10px] text-muted-foreground">{box} · ~</span>
+        <span className="rounded bg-accent/70 px-1.5 py-px font-mono text-tag text-muted-foreground">{box} · ~</span>
       </span>
     </Tip>
   );

@@ -215,11 +215,19 @@ type ghInline struct {
 type ghState struct {
 	Init bool            `json:"init"`
 	Seen map[string]bool `json:"seen"`
+	// Closed is when the flow last saw the PR merged or closed with nothing
+	// left to start. It skips the PR until ghRecheck later, so finished PRs
+	// don't use up a poll's gh calls.
+	Closed time.Time `json:"closed,omitzero"`
 }
 
 // maxGHCalls bounds the gh calls one poll makes, so many worktrees cannot
 // exhaust the GitHub API.
 const maxGHCalls = 20
+
+// ghRecheck is how often a flow looks at a merged or closed PR again: one
+// can be reopened, or commented on after it merged.
+const ghRecheck = time.Hour
 
 func (f *Flows) loadGH() {
 	if f.gh != nil {
@@ -284,6 +292,9 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 	if f.lastPoll == nil {
 		f.lastPoll = map[string]time.Time{}
 	}
+	if f.cursor == nil {
+		f.cursor = map[string]int{}
+	}
 	f.mu.Unlock()
 	for _, sf := range all {
 		gt := sf.Flow.Trigger.GitHub
@@ -310,7 +321,18 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 			calls += c
 			continue
 		}
-		for _, tg := range b.flowTargets(ctx, sf, false) {
+		// Each look starts where the last one ran out of calls, so with more
+		// worktrees than calls every one still gets its turn.
+		targets := b.flowTargets(ctx, sf, false)
+		f.mu.Lock()
+		start, next := f.cursor[key], 0
+		f.mu.Unlock()
+		if start >= len(targets) {
+			start = 0
+		}
+		for i := range targets {
+			j := (start + i) % len(targets)
+			tg := targets[j]
 			if sf.autofix != nil && !samePath(tg.Wt.Path, sf.autofix.path) {
 				continue
 			}
@@ -318,9 +340,14 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 				continue
 			}
 			pk := tg.Loc.Path + "|" + tg.Wt.Branch
+			seenKey := key + "|" + pk
+			if b.closedRecently(seenKey, now) {
+				continue
+			}
 			pr, ok := prs[pk]
 			if !ok {
 				if calls >= maxGHCalls {
+					next = j
 					break
 				}
 				calls++
@@ -346,7 +373,7 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 					inline[ik] = lines
 				}
 			}
-			seenKey := key + "|" + pk
+			left := false
 			for _, it := range b.pendingOnGitHub(seenKey, gt.On, pr, lines) {
 				if !authorAllowed(sf.Flow.Trigger.Where.Author, gt.On, it.data) {
 					b.markSeen(seenKey, it.id) // never runs: not worth looking at again
@@ -359,12 +386,18 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 				admitted, seen := b.admitGitHub(ctx, sf, e, fmt.Sprintf("github:%s:%d:%s", key, pr.Number, it.id), it.data)
 				if seen {
 					b.markSeen(seenKey, it.id)
+				} else {
+					left = true
 				}
 				if admitted {
 					started++
 				}
 			}
+			b.noteClosed(seenKey, pr, left, now)
 		}
+		f.mu.Lock()
+		f.cursor[key] = next
+		f.mu.Unlock()
 	}
 	f.mu.Lock()
 	f.saveGH()
@@ -529,6 +562,34 @@ func (b *Box) pendingItems(key string, items []ghItem) []ghItem {
 	}
 	st.Init = true
 	return out
+}
+
+// closedRecently says the flow saw this PR merged or closed less than
+// ghRecheck ago.
+func (b *Box) closedRecently(key string, now time.Time) bool {
+	f := b.Flows
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadGH()
+	st := f.gh[key]
+	return st != nil && !st.Closed.IsZero() && now.Sub(st.Closed) < ghRecheck
+}
+
+// noteClosed records whether the PR is finished: merged or closed, with no
+// item left waiting for a run. A reopened PR is looked at every poll again.
+func (b *Box) noteClosed(key string, pr *ghPR, left bool, now time.Time) {
+	done := !left && (pr.State == "MERGED" || pr.State == "CLOSED" || pr.MergedAt != "")
+	f := b.Flows
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loadGH()
+	if st := f.gh[key]; st != nil {
+		if done {
+			st.Closed = now
+		} else {
+			st.Closed = time.Time{}
+		}
+	}
 }
 
 func (b *Box) markSeen(key, id string) {

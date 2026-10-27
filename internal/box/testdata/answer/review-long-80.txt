@@ -1,0 +1,28 @@
+❯ Ask me about the acme checkout rollout with AskUserQuestion.
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Rollout  ☒ Owner  ☒ Notes  ✔ Submit  →
+
+Review your answers
+                                                                                
+ │ ● How should acme roll out the new checkout?
+ │   1. The old flow stays behind a flag for a week.
+ │   2. Support wants a heads-up before any change customers can see, and     
+ │   release notes go out on Mondays.                                  
+ │   3. Mobile ships on its own schedule.                                       
+   → Flag first, but keep the flag on for staff only until the support team has 
+   had a full Monday with the new flow. If the error rate on payment            
+   confirmation goes above half a percent at any point, turn the flag off and 
+   tell the channel before anything else.
+ │ ● Who owns the rollout?                                                    
+ │   1. Alex wrote most of the change.                                          
+ │   2. Sam is on call that week.                                              
+   → Sam                                   
+ ● Anything else the team should know before starting?
+   → The staging database was restored from last week's backup, so some fixtures
+   may be stale. Release notes are drafted in the shared folder; please add a 
+   line about the flag and who to ask.
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

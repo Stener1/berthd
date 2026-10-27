@@ -1,8 +1,10 @@
 import { ApiError, type BerthEvent, type Run, type RunCandidate, type RunStep, type RunSummary } from "@/lib/api";
 
 // Runs in the demo: the shop world on devl has a loop going, an attempts run
-// of three agents waiting for you to pick one in Review's Compare, a flow's
-// run, a review and a finished broadcast. Deciding, cancelling and starting
+// of three agents waiting for you to pick one in Review's Compare, one whose
+// pick's pull request didn't open (retry, or finish without one), one on a
+// Gitea repository that finished with its branch pushed and no pull
+// request, a flow's run, a review and a finished broadcast. Deciding, cancelling and starting
 // runs work, so the loops panel, Automations → Runs, Compare and the phone
 // all have something to show.
 
@@ -155,12 +157,81 @@ const gpuAttempts = (): Run => ({
   steps: [step("1", "judge", "succeeded", 10, 8, { id: "judge", output: "Winner: attempt 1. passes; adds a migration it doesn't need" })],
 });
 
+// An attempts run's candidate in another task's worktrees.
+const renamed = (c: RunCandidate, name: string, picked?: boolean): RunCandidate => {
+  const wt = `${name}-a${c.index + 1}`;
+  return { ...c, worktree: wt, path: `/home/me/work/shop-${wt}`, branch: wt, session: `${wt}-${c.agent}-x7k2-0i${c.index}0`, picked };
+};
+
+// The steps of an attempts run of two that got as far as its pull request.
+const pickedSteps = (name: string, start: number, pr: RunStep, tidy?: RunStep): RunStep[] => [
+  step("0", "map", "succeeded", start, start - 30, { id: "attempts", output: "1. attempt 1 (claude): check passed\n2. attempt 2 (codex): check passed" }),
+  step("1", "judge", "succeeded", start - 30, start - 31, { id: "judge", output: "Winner: attempt 1. passes with the smaller diff" }),
+  step("2", "if", "succeeded", start - 31, start - 33, { id: "choose", children: [step("2.t", "then", "", start - 31, start - 33, { children: [step("2.t.0", "gate", "succeeded", start - 31, start - 33, { id: "pick", output: `Pick the best attempt at ${name}` })] })] }),
+  step("3", "if", pr.status === "failed" ? "running" : "succeeded", start - 33, pr.status === "failed" ? undefined : start - 34, { id: "pr", children: [step("3.t", "then", "", start - 33, undefined, { children: [pr] })] }),
+  ...(tidy ? [tidy] : []),
+];
+
+// Picked, but its pull request didn't open (GitHub said no): publishing
+// failed, not the agents' work, and it waits to retry or finish without one.
+const publishRun = (): Run => ({
+  id: "r_mshp9pb4x",
+  template: "attempts",
+  title: "search: 2 attempts",
+  status: "waiting_gate",
+  origin: "laptop:mac",
+  cursor: "3.t.0",
+  created: at(60),
+  updated: at(4),
+  params: { location: "shop", name: "search", prompt: "Make catalog search fast for 100k products.", then: { pr: { draft: true } } },
+  gate: {
+    path: "3.t.0.publish1",
+    title: "The pull request didn't open",
+    text: "The agents' work is done and your pick is kept; only publishing failed: gh pr create failed.\n\nHTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n\nRetry once it's fixed, or finish without a pull request: the run goes on and archives the other attempts.",
+    approve_label: "Retry publishing",
+    reject_label: "Finish without a pull request",
+  },
+  candidates: [
+    renamed(candidate(0, "claude", true, 64, 12, 1, "passes with the smaller diff", "perf: index the catalog for search"), "search", true),
+    renamed(candidate(1, "codex", true, 118, 40, 2, "passes, but caches more than it needs to", "perf: cache search results"), "search"),
+  ],
+  steps: pickedSteps("search", 60, step("3.t.0", "pr", "failed", 26, 25.9, { id: "open", attempt: 1, exit_code: 1, error: "gh pr create failed", output: "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login" })),
+});
+
+// Picked on a repository hosted on Gitea: gh can't open a pull request
+// there, so the branch is pushed, the step says so, and the run finished.
+const giteaRun = (): Run => ({
+  id: "r_mshp9gt3a",
+  template: "attempts",
+  title: "invoices: 2 attempts",
+  status: "succeeded",
+  origin: "laptop:mac",
+  created: at(150),
+  updated: at(110),
+  finished: at(110),
+  params: { location: "shop", name: "invoices", prompt: "Add PDF invoices.", then: { pr: { draft: true } } },
+  candidates: [
+    renamed(candidate(0, "claude", true, 88, 6, 1, "passes with a test for the PDF", "feat: PDF invoices"), "invoices", true),
+    renamed(candidate(1, "codex", false, 140, 20, 2, "its check fails on the totals", "feat: invoices as PDF"), "invoices"),
+  ],
+  steps: pickedSteps(
+    "invoices",
+    150,
+    step("3.t.0", "pr", "skipped", 116, 115.9, {
+      id: "open",
+      output:
+        "This repository is on git.acme.dev, not GitHub, so Shipyard didn't open a pull request. The branch invoices-a1 is pushed to origin; open one there: https://git.acme.dev/acme/shop/compare/main...invoices-a1. (If git.acme.dev is GitHub Enterprise, run \"gh auth login --hostname git.acme.dev\" on this box.)",
+    }),
+    step("4", "if", "succeeded", 115.9, 110, { id: "tidy", children: [step("4.t", "then", "", 115.9, 110, { children: [step("4.t.0", "cleanup", "succeeded", 115.9, 110, { id: "archive", output: "archived invoices-a2" })] })] }),
+  ),
+});
+
 let gpuRuns: Run[] | undefined;
 let runs: Run[] | undefined;
 let round = 2;
 
 function world(): Run[] {
-  if (!runs) runs = [attemptsRun(), loopRun(round), flowRun(), reviewRun()];
+  if (!runs) runs = [attemptsRun(), publishRun(), loopRun(round), flowRun(), reviewRun(), giteaRun()];
   return runs;
 }
 
@@ -202,6 +273,23 @@ export function runsCall(box: string, method: string, path: string, body: unknow
     const r = all.find((x) => x.id === m![1]);
     const d = body as { approve: boolean; pick?: number };
     if (!r?.gate) return Promise.reject(new ApiError("that run is not waiting at a gate", 409));
+    if (r.gate.approve_label) {
+      // The publish gate: a retry opens it this time; finishing without
+      // one is a skip. Either way the run archives the rest and is done.
+      const pr = r.steps.find((s) => s.kind === "if" && s.id === "pr")?.children?.[0]?.children?.[0];
+      if (pr)
+        Object.assign(
+          pr,
+          d.approve
+            ? { status: "succeeded", attempt: 2, error: undefined, output: "https://github.com/acme/shop/pull/318", ended: new Date().toISOString() }
+            : { status: "skipped", error: undefined, output: "Finished without a pull request (gh pr create failed).", ended: new Date().toISOString() },
+        );
+      const loser = r.candidates?.find((c) => !c.picked)?.worktree;
+      r.steps.push(step("4", "if", "succeeded", 0, 0, { id: "tidy", children: [step("4.t", "then", "", 0, 0, { children: [step("4.t.0", "cleanup", "succeeded", 0, 0, { id: "archive", output: `archived ${loser}` })] })] }));
+      Object.assign(r, { status: "succeeded", finished: new Date().toISOString(), updated: new Date().toISOString(), gate: undefined });
+      emit({ type: "run.finished", box, data: { run: r.id, status: r.status } });
+      return delay({ decided: r.id, approve: d.approve });
+    }
     const pick = d.pick ?? r.gate.default ?? 0;
     for (const c of r.candidates ?? []) c.picked = d.approve && c.index === pick;
     Object.assign(r, { status: d.approve ? "succeeded" : "failed", finished: new Date().toISOString(), gate: undefined, error: d.approve ? undefined : "rejected" });
@@ -248,7 +336,8 @@ export function runsCall(box: string, method: string, path: string, body: unknow
       { path: "src/ledger/entry.ts", code: "M", added: Math.round(c.diff.added * 0.2), removed: Math.round(c.diff.removed * 0.6) },
       { path: "test/refunds.test.ts", code: "M", added: Math.round(c.diff.added * 0.25), removed: Math.round(c.diff.removed * 0.4) },
     ];
-    return delay({ run: summary(r), gate: r.gate, judge: r.steps.find((s) => s.kind === "judge")?.output, candidates: (r.candidates ?? []).map((c) => ({ ...c, review: { files: files(c) } })) });
+    const pr = r.steps.find((s) => s.kind === "if" && s.id === "pr")?.children?.[0]?.children?.[0];
+    return delay({ run: summary(r), gate: r.gate, judge: r.steps.find((s) => s.kind === "judge")?.output, pr, candidates: (r.candidates ?? []).map((c) => ({ ...c, review: { files: files(c) } })) });
   }
   if (method === "GET" && path === "autofix") return delay([{ path: "/home/me/work/shop-checkout-fix", ci: true, review: false, max: 3 }]);
   if (method === "PUT" && path === "autofix") return delay([body]);

@@ -9,7 +9,7 @@ func TestAgentBrowserDevtoolsLeaveTheAgentsLinesUnseen(t *testing.T) {
 	br := &browser{reqs: map[string]string{}, inflight: map[string]bool{}}
 	ev := func(method string, params any) {
 		raw, _ := json.Marshal(params)
-		br.onEvent(method, "", raw)
+		br.onEvent(method, raw)
 	}
 	ev("Runtime.consoleAPICalled", map[string]any{"type": "error", "args": []map[string]any{{"value": "cart total is"}, {"description": "undefined"}}})
 	ev("Runtime.consoleAPICalled", map[string]any{"type": "error", "args": []map[string]any{{"value": "cart total is"}, {"description": "undefined"}}})

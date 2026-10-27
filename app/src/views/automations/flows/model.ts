@@ -42,6 +42,10 @@ const TRIGGER_PHRASE: Record<string, string> = {
   "worktree.setup.finished": "setup finishes",
   "worktree.setup.failed": "setup fails",
   "worktree.archive.finished": "a worktree is archived",
+  "review.opened": "a PR review opens",
+  "review.updated": "a PR review is updated",
+  "review.removed": "a PR review is removed",
+  "review.waiting": "a PR review waits for you",
   "task.created": "a task starts",
   "session.started": "a session starts",
   "session.stopped": "a session stops",
@@ -52,7 +56,7 @@ const TRIGGER_PHRASE: Record<string, string> = {
   "box.upgraded": "the box is upgraded",
 };
 
-const AGENT_NAME: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", gemini: "Gemini", cursor: "Cursor" };
+const AGENT_NAME: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", gemini: "Gemini", omp: "oh-my-pi", cursor: "Cursor" };
 export const agentName = (id?: string) => (id ? (AGENT_NAME[id] ?? id) : "an agent");
 
 export const GITHUB_ONS: { on: GitHubOn; label: string; phrase: string; fields: string[] }[] = [

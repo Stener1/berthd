@@ -40,8 +40,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <svg width="52" height="52" viewBox="100 100 824 824">
             <rect x="100" y="100" width="824" height="824" rx="185" fill="#121417" />
-            <path d="M332 268 H556 a118 118 0 0 1 0 236 H332 Z M332 504 H584 a128 128 0 0 1 0 256 H332 Z" fill="none" stroke="#ecebe7" strokeWidth="84" strokeLinejoin="round" />
-            <circle cx="548" cy="386" r="34" fill={amber} />
+            <path d="M304.6 314.5H719.4Q702.1 566.3 512.0 628.0Q321.9 566.3 304.6 314.5Z" fill="none" stroke="#ecebe7" strokeWidth="74.1" strokeLinecap="round" strokeLinejoin="round" /><rect x="366.3" y="694.7" width="71.6" height="54.3" rx="11.1" fill="#ecebe7" /><rect x="476.2" y="694.7" width="71.6" height="54.3" rx="11.1" fill="#ecebe7" /><rect x="586.1" y="694.7" width="71.6" height="54.3" rx="11.1" fill="#ecebe7" />
+            <circle cx="512.0" cy="430.5" r="37.0" fill={amber} />
           </svg>
           <div style={{ display: 'flex', fontSize: 30, fontWeight: 600, color: fg }}>
             shipyard<span style={{ color: muted, fontWeight: 400, marginLeft: 10 }}>docs</span>

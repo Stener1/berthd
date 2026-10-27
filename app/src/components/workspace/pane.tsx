@@ -3,17 +3,16 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 
 
 import { Tip } from "@/components/tip";
-import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
-import { BrowserPane } from "@/components/browser-pane";
-import { PreviewPane } from "@/components/preview-pane";
+import { AgentIcon, StateGlyph, withWork } from "@/components/agent-glyph";
 import { FileGlyph } from "@/components/files/file-bits";
 import { EmptySide } from "@/components/workspace/compare-view";
+import { CrashProbe } from "@/components/workspace/pane-guard";
 import { CompareSideContext, type CompareSide, pageLoading } from "@/lib/compare-actions";
 import { openChatBackgroundSettings } from "@/components/conversation/chat-background";
 import { ConversationPane } from "@/components/conversation/conversation-pane";
 import { HelperPane } from "@/components/conversation/helper-pane";
 import { helperKey, useHelperInfo } from "@/components/conversation/subagent-view";
-import { ErrorText } from "@/components/error-note";
+import { ErrorText, toastError } from "@/components/error-note";
 import { SessionActionItems } from "@/components/orchestrate/session-actions";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "@/components/ui/menu";
@@ -26,19 +25,27 @@ import { armDrag, useTabDrag } from "@/components/workspace/tab-drag";
 import { TerminalView } from "@/components/workspace/terminal-view";
 import { openWorktreePicker } from "@/components/workspace/worktree-picker";
 import { useLabel, useTone, WtChip } from "@/components/workspace/worktree-tone";
-import { agentPresets, closePane, openBrowserAt, openPreviewAt, startSession } from "@/lib/actions";
+import { agentPresets, closePane, openBrowserAt, openPreviewAt, resumeSession, startAgent, startSession } from "@/lib/actions";
+import { boxApi } from "@/lib/api";
 import { agentLabel, agentOf, restartCommand, sessionAgent, sessionName, sessionState } from "@/lib/derive";
 import { nameFromKey } from "@/lib/groups";
 import { type Leaf, leaves, paneWorktree } from "@/lib/layout";
 import { PaneContext } from "@/lib/pane-context";
 import { usePrefs } from "@/lib/prefs";
+import { isStructured } from "@/lib/structured";
 import { useRemoval } from "@/lib/removing";
 import { useStore } from "@/lib/store";
 import { startRenaming } from "@/lib/session-title";
 import { memory, memoryNote } from "@/lib/processes";
 import { cn } from "@/lib/utils";
+import { lazyView } from "@/lib/lazy-view";
 import { focusPane, paneBeside, paneToTab, setPaneContent, splitKey, useWorkspaces, useWorktreeRef } from "@/lib/workspaces";
 import { platformKeys } from "@/lib/platform";
+
+// Browser and preview panes (and their devtools) load after the app has
+// started, with the other pages (lib/lazy-view.tsx).
+const BrowserPane = lazyView(() => import("@/components/browser-pane").then((m) => m.BrowserPane));
+const PreviewPane = lazyView(() => import("@/components/preview-pane").then((m) => m.PreviewPane));
 
 export { agentLabel };
 
@@ -90,6 +97,7 @@ export function Pane({ wsKey, tab, pane, visible, focused, split, mixed, compare
   // once the session itself is gone.
   const agent = session ? agentOf(session) : undefined;
   const view = usePaneView(pane);
+  const terminal = useTerminalShown(pane);
   // Lifted: being dragged by its header, so it fades while it moves.
   const lifted = useTabDrag((s) => s.source?.kind === "pane" && s.source.pane === pane.id);
   useEffect(() => {
@@ -111,7 +119,7 @@ export function Pane({ wsKey, tab, pane, visible, focused, split, mixed, compare
           // the pane's worktree, and the focus line is in that one's colour.
           <div
             onPointerDown={(e) => armDrag(e, { kind: "pane", key: wsKey, tab, pane: pane.id }, (c.kind === "terminal" && (session?.title?.trim() || c.title)) || paneLabel(c, agent), <PaneIcon content={c} agent={agent} className="size-3" />)}
-            className={cn("group/header flex h-7 shrink-0 items-center gap-1.5 border-b px-2 text-xs", focused ? "bg-accent/50 text-foreground shadow-[inset_0_2px_0_var(--ring)]" : "text-muted-foreground")}
+            className={cn("group/header flex h-bar-pane shrink-0 items-center gap-1.5 border-b px-edge text-meta", focused ? "bg-accent/50 text-foreground shadow-[inset_0_2px_0_var(--ring)]" : "text-muted-foreground")}
             style={tone ? { boxShadow: focused ? `inset 0 2px 0 ${tone}` : `inset 0 1px 0 color-mix(in oklab, ${tone} 50%, transparent)` } : undefined}
           >
             {tone && <WtChip wsKey={owner} />}
@@ -136,11 +144,24 @@ export function Pane({ wsKey, tab, pane, visible, focused, split, mixed, compare
           {/* The terminal stays connected underneath, so switching back is instant. */}
           {c.kind === "terminal" && view === "conversation" && (
             <div className="absolute inset-0 z-10 flex flex-col">
-              <ConversationPane box={c.box} session={c.session} agent={c.agent} visible={visible} onStartAgain={() => void startSession(restartCommand(c.command) ?? c.agent ?? "", { kind: "replace", tab, pane: pane.id }, c.agent ? agentLabel(c.agent) : "Agent")} onShowTerminal={() => setPaneContent(wsKey, tab, pane.id, { ...c, view: "terminal" })} />
+              <CrashProbe session={c.session} />
+              <ConversationPane box={c.box} session={c.session} agent={c.agent} visible={visible} onStartAgain={() =>
+                  useStore.getState().boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch
+                    ? void resumeSession(c.box, c.session)
+                    : void startSession(restartCommand(c.command) ?? c.agent ?? "", { kind: "replace", tab, pane: pane.id }, c.agent ? agentLabel(c.agent) : "Agent")
+                } onShowTerminal={terminal ? () => showTerminal(wsKey, tab, pane) : undefined} />
             </div>
           )}
-          {c.kind === "browser" && <BrowserPane id={pane.id} url={c.url} visible={visible} worktree={owner} onNavigate={(url) => setPaneContent(wsKey, tab, pane.id, { kind: "browser", url })} onLoading={compare ? (l) => pageLoading(pane.id, l) : undefined} />}
-          {c.kind === "preview" && <PreviewPane url={c.url} visible={visible} worktree={owner} onNavigate={(url) => setPaneContent(wsKey, tab, pane.id, { kind: "preview", url })} />}
+          {c.kind === "browser" && (
+            <Suspense fallback={<div className="flex-1" />}>
+              <BrowserPane id={pane.id} url={c.url} visible={visible} worktree={owner} onNavigate={(url) => setPaneContent(wsKey, tab, pane.id, { kind: "browser", url })} onLoading={compare ? (l) => pageLoading(pane.id, l) : undefined} watch={c.watch} onUnwatch={() => setPaneContent(wsKey, tab, pane.id, { kind: "browser", url: c.url })} />
+            </Suspense>
+          )}
+          {c.kind === "preview" && (
+            <Suspense fallback={<div className="flex-1" />}>
+              <PreviewPane url={c.url} visible={visible} worktree={owner} onNavigate={(url) => setPaneContent(wsKey, tab, pane.id, { kind: "preview", url })} />
+            </Suspense>
+          )}
           {c.kind === "file" && (
             <Suspense fallback={<div className="flex flex-1 items-center justify-center"><Spinner className="size-4 text-muted-foreground" /></div>}>
               <FilePane path={c.path} owner={owner} visible={visible} onClose={close} />
@@ -156,15 +177,15 @@ export function Pane({ wsKey, tab, pane, visible, focused, split, mixed, compare
           {c.kind === "log" && <LogView box={c.box} location={c.location} worktree={c.worktree} service={c.service} visible={visible} />}
           {c.kind === "panel" && <PanelPane wsKey={owner} plugin={c.plugin} panel={c.panel} />}
           {c.kind === "starting" && (
-            <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground text-sm">
+            <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground text-body">
               <Spinner className="size-4" />
               Starting {c.label}…
             </div>
           )}
           {c.kind === "error" && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm">
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-body">
               <p className="font-medium">Couldn't start it</p>
-              <ErrorText className="max-w-md items-center text-muted-foreground text-xs" text={c.message} />
+              <ErrorText className="max-w-md items-center text-desc text-muted-foreground" text={c.message} />
               <Button size="sm" variant="outline" onClick={close}>
                 Close pane
               </Button>
@@ -191,10 +212,10 @@ function useGuestGone(wsKey: string, pane: Leaf): string | undefined {
 // GonePane stands in for a guest pane whose worktree was archived.
 function GonePane({ name, onClose }: { name: string; onClose(): void }) {
   return (
-    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-sm">
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-body">
       <ArchiveIcon className="size-5 text-muted-foreground" />
       <p className="font-medium">{name} was archived</p>
-      <p className="max-w-xs text-muted-foreground text-xs">Its agents stopped with it, so there is nothing left to show here.</p>
+      <p className="max-w-xs text-desc text-muted-foreground">Its agents stopped with it, so there is nothing left to show here.</p>
       <Button size="sm" variant="outline" onClick={onClose}>
         Close pane
       </Button>
@@ -202,8 +223,11 @@ function GonePane({ name, onClose }: { name: string; onClose(): void }) {
   );
 }
 
-// usePaneView is how an agent's pane shows: its terminal, or (Labs) its
-// conversation. Shells and other panes are always what they are.
+// usePaneView is how an agent's pane shows: its terminal, or its
+// conversation. An agent in chat (structured) is its conversation, Labs or
+// not, and a Claude moved to its own terminal keeps the switch back; for an
+// agent that runs in its terminal the Terminal | Conversation switch is
+// Labs. Shells and other panes are always what they are.
 export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined {
   const c = pane.content;
   const labs = usePrefs((p) => p.labs);
@@ -216,8 +240,47 @@ export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined
     const s = st.boxes[c.box]?.sessions?.find((x) => x.name === c.session);
     return !!(s && agentOf(s));
   });
-  if (c.kind !== "terminal" || !labs || !runsAgent) return undefined;
+  // A structured agent has no screen of its own to read: its conversation,
+  // whatever the pane last showed. Claude Code's terminal is a move
+  // (showTerminal), after which the session isn't structured.
+  const structured = useStore((st) => c.kind === "terminal" && isStructured(st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.driver));
+  const backToChat = useStore((st) => c.kind === "terminal" && st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch === "chat");
+  if (c.kind !== "terminal" || !runsAgent) return undefined;
+  if (structured) return "conversation";
+  if (!labs) return backToChat ? "terminal" : undefined;
   return c.view ?? fallback;
+}
+
+// showTerminal turns an agent's pane to its terminal. A structured Claude
+// session moves there (switch.go): Claude Code's own TUI on the same
+// conversation, not the host that runs its stream.
+function showTerminal(wsKey: string, tab: string, pane: Leaf) {
+  const c = pane.content;
+  if (c.kind !== "terminal") return;
+  if (useStore.getState().boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch !== "terminal") {
+    setPaneContent(wsKey, tab, pane.id, { ...c, view: "terminal" });
+    return;
+  }
+  const client = useStore.getState().client;
+  if (!client) return;
+  void boxApi
+    .switchSession(client, c.box, c.session, "terminal")
+    .then(() => {
+      setPaneContent(wsKey, tab, pane.id, { ...c, view: "terminal" });
+      void useStore.getState().refreshBox(c.box, ["sessions"]);
+    })
+    .catch((err) => toastError(err, { title: "Couldn't open Claude Code's terminal", box: c.box }));
+}
+
+// useTerminalShown is whether an agent's pane has a terminal to show: a
+// structured agent other than Claude (Codex, ACP) has none of its own.
+function useTerminalShown(pane: Leaf): boolean {
+  const c = pane.content;
+  return useStore((st) => {
+    if (c.kind !== "terminal") return false;
+    const s = st.boxes[c.box]?.sessions?.find((x) => x.name === c.session);
+    return !isStructured(s?.driver) || s?.switch === "terminal";
+  });
 }
 
 // ViewSwitch flips an agent's pane between its terminal and its
@@ -225,7 +288,11 @@ export function usePaneView(pane: Leaf): "terminal" | "conversation" | undefined
 export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; pane: Leaf }) {
   const view = usePaneView(pane);
   const c = pane.content;
-  if (!view || c.kind !== "terminal") return null;
+  // A structured session's terminal and chat are two ways of running it,
+  // not two views of one: the switch moves it (switch.go).
+  const moves = useStore((st) => (c.kind === "terminal" ? st.boxes[c.box]?.sessions?.find((x) => x.name === c.session)?.switch : undefined));
+  const terminal = useTerminalShown(pane);
+  if (!view || c.kind !== "terminal" || !terminal) return null;
   return (
     <ToggleGroup
       size="sm"
@@ -234,6 +301,19 @@ export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; p
       onValueChange={(v) => {
         const next = v[0] as "terminal" | "conversation" | undefined;
         if (!next) return;
+        if (moves === "terminal" && next === "terminal") return showTerminal(wsKey, tab, pane);
+        if (moves === "chat" && next === "conversation") {
+          const client = useStore.getState().client;
+          if (!client) return;
+          void boxApi
+            .switchSession(client, c.box, c.session, "chat")
+            .then(() => {
+              setPaneContent(wsKey, tab, pane.id, { ...c, view: next });
+              void useStore.getState().refreshBox(c.box, ["sessions"]);
+            })
+            .catch((err) => toastError(err, { title: "Couldn't go back to the chat", box: c.box }));
+          return;
+        }
         setPaneContent(wsKey, tab, pane.id, { ...c, view: next });
         // The way you last chose to see an agent is how new ones open.
         usePrefs.setState({ agentView: next });
@@ -241,12 +321,12 @@ export function ViewSwitch({ wsKey, tab, pane }: { wsKey: string; tab: string; p
       aria-label="Show the agent as"
       className="mr-1"
     >
-      <Tip label="Terminal">
+      <Tip label={moves === "terminal" ? "Open in Claude Code's terminal" : "Terminal"}>
         <ToggleGroupItem value="terminal" aria-label="Terminal" className="h-6! min-w-7! px-1!">
           <SquareTerminalIcon className="size-3.5" />
         </ToggleGroupItem>
       </Tip>
-      <Tip label="Conversation">
+      <Tip label={moves === "chat" ? "Back to the chat" : "Conversation"}>
         <ToggleGroupItem value="conversation" aria-label="Conversation" className="h-6! min-w-7! px-1!">
           <MessagesSquareIcon className="size-3.5" />
         </ToggleGroupItem>
@@ -318,14 +398,14 @@ function PaneTitle({ pane }: { pane: Leaf }) {
   // Near the box's per-session memory ceiling: said here and in its chat.
   const near = away ? undefined : memoryNote(session?.usage);
   return (
-    <Tip label={c.kind === "terminal" ? `${c.session} on ${c.box}${away ? ` · ${c.box} is offline` : ""}${near ? ` · ${near}` : ""}` : undefined} align="start">
+    <Tip label={c.kind === "terminal" ? withWork(`${c.session} on ${c.box}${away ? ` · ${c.box} is offline` : ""}${near ? ` · ${near}` : ""}`, state, session) : undefined} align="start">
       <span className="flex min-w-0 items-center gap-1.5">
         <PaneIcon content={c} agent={agent} />
         <span className="truncate">{label}</span>
         {secondary && <span className="shrink-0 text-muted-foreground">{secondary}</span>}
-        {state && <StateGlyph state={state} className="size-3" />}
+        {state && <StateGlyph state={state} session={session} noTip className="size-3" />}
         {near && session?.usage && (
-          <span data-testid="pane-memory" className="flex shrink-0 items-center gap-1 text-[11px] text-warning-foreground tabular-nums dark:text-warning">
+          <span data-testid="pane-memory" className="flex shrink-0 items-center gap-1 text-tag text-warning-foreground tabular-nums dark:text-warning">
             <GaugeIcon className="size-3" aria-hidden />
             {memory(session.usage.memory)} of {memory(session.usage.memory_high ?? 0)}
           </span>
@@ -393,7 +473,7 @@ export function PaneActions({ wsKey, tab, pane, onClose, closable, focused = tru
             <MenuGroupLabel>Open beside</MenuGroupLabel>
             {ref &&
               agentPresets(ref.box, ref.location).map((p) => (
-                <MenuItem key={p.id} onClick={() => void startSession(p.command, beside("row"), p.name)}>
+                <MenuItem key={p.id} onClick={() => void startAgent(p, beside("row"), p.name)}>
                   <span className="flex size-4 items-center justify-center">
                     <AgentIcon agent={p.id} />
                   </span>

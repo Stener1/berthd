@@ -109,7 +109,8 @@ announces `task.created`.
 
 An agent is a preset: an id, a name and a command. The box offers each
 built-in whose command it finds on its `PATH` (ids `claude`, `codex`,
-`opencode`, `gemini`, and `cursor`, which runs `cursor-agent`), plus any a
+`opencode`, `gemini`, `omp` (oh-my-pi), and `cursor`, which runs
+`cursor-agent`), plus any a
 repository's config adds or replaces. `berth agents BOX` lists the
 built-ins the box has; a repository's own presets come with its location
 (`agents` in `berth locations BOX --json`).
@@ -121,7 +122,7 @@ A first prompt is passed as the command's last argument, or after its
 Shipyard knows what an agent is doing from the agent's own hooks, which
 `berthd install` sets up for the agent CLIs it finds on the box (later,
 `berthd integrations install claude`, or `codex`, `cursor`, `gemini`,
-`opencode`, `all`; an upgrade brings hooks Shipyard installed before up to
+`opencode`, `omp`, `all`; an upgrade brings hooks Shipyard installed before up to
 date):
 
 | State | In the app | Meaning | From |
@@ -145,7 +146,59 @@ Code's "trust this folder" question at startup and reports it as `waiting`.
 Claude Code's reminder a minute after a finished turn (`idle_prompt`) and its
 login notice are not questions, so they never read as `waiting`; after you
 approve a permission, the tool it allowed running says the agent is working
-again.
+again. A Claude Code helper (subagent) left running in the background goes
+on using tools after the agent's turn ends; those don't start a turn.
+
+An agent's hooks say its turn finished whether it is done or asks you
+something ("go ahead?"). **Turn check**, off by default and turned on per
+box in Settings → Agents, tells these apart for Claude Code and Codex: when
+a turn ends normally, berthd sends the turn's last prompt (looking back past
+a long turn's tool calls) and reply from the agent's transcript, and the
+session's title as its objective, to the decision model you pick. Nothing
+is picked for you:
+
+| Provider | Where turns go | Key | Model |
+| --- | --- | --- | --- |
+| **Jev on AI Gateway** | Vercel AI Gateway's evaluate endpoint, prompt training disallowed | Your AI Gateway key | `typesafe-ai/jev` |
+| **OpenAI Decisions** | OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions) (public beta) | Your OpenAI API key | `gpt-6-luna` |
+| **Laya, your own server** | [Laya](https://huggingface.co/convaiinnovations/laya)'s `laya-serve` (`pip install "laya[serve]"`), or another server that answers Jev's request, at the address you give | None | Optional: `english`, `multilingual` or `typed-decisions`; Laya picks one by itself |
+
+The prompt is capped at 4,000 characters, the reply at its last 12,000, and
+what looks like a secret is taken out of all three first. An agent that
+asks you something, or is blocked, shows as **Needs you**
+(`agent.waiting` with `source: "turncheck"` and the model's `choice`), and
+notifications follow; it still takes prompts as if done, so held prompts
+and other agents' reports are delivered. The session carries
+`soft_wait: true`: its question is in its last message, which you answer
+from the reply box, and the chat draws no question card for it, since its
+screen shows only its prompt. Its mode can still be switched. Unfinished work that needs
+nothing from you is one of two kinds, and neither notifies. **Working**:
+something it started is still running and it acts when that ends (a
+delegated task, a build, a deploy, a test run, or a watcher or background
+task it started); the session stays `finished` with `unfinished: true`.
+Its chat ends on an hourglass, **Waiting on its work**, with no spinner
+or Stop, and what you type there starts a new turn. A reply that only says
+how another session is getting on and offers to follow it up is done; it
+is working when the agent says it will act once that session reports back.
+**Parked**: nothing runs for it, and it waits on someone else (a reply, a
+review, another team, a vendor) or a later time, such as a check-in it
+scheduled for itself ("tomorrow morning I'll check the numbers", "check
+again in 24 hours", "continue on Thursday"), even with the machine kept
+awake for it; the session stays `finished` with `parked: true` and shows
+as **Idle**. Both are `agent.ready` with `source: "turncheck"` and the
+model's `choice` (`working` or `parked`); both take prompts and end waits
+as done, and stay out of Review, so Done holds only work that is done. A
+dev server or shell left running after the agent is done is not work in
+progress, and anything that waits on you is **Needs you**. Anything else (done, an answer under 65%
+sure, a failed request, no answer in 10 seconds, or you prompting again
+first) leaves it **Done**; no other model is asked.
+
+Settings → Agents, which only a paired laptop can change, keeps a key per
+provider on the box, readable by you alone, and sends each only to its own
+provider; a [secret reference](/guides/secrets) (`op://…`, or `env://NAME`
+from berthd's own environment) is the alternative. Laya gets no key. A Laya
+server on the box itself or on a private address needs that address in
+`allow_outbound` in `~/.berth/network.json`.
 
 ### Turns
 
@@ -187,7 +240,11 @@ berth session turns devl/SESSION                            # the last ten
 said when it started and ended), `partial` (the agent cannot say when it
 starts, so its turn starts when Shipyard sends the prompt) or `screen` (no hooks
 reported: Shipyard reads the terminal every two seconds, and a screen that stops
-changing ends the turn).
+changing ends the turn). A prompt sent before the agent's hooks said anything,
+such as the first prompt of a task, starts a `screen` turn; once its hooks
+report a start or a wait for it, it becomes `partial` and its own Stop ends
+it. A wait the agent's hooks reported is ended only by them, whatever the
+screen shows.
 
 | Agent | Ready | Started | Waiting | Finished | Through |
 | --- | --- | --- | --- | --- | --- |
@@ -196,6 +253,7 @@ changing ends the turn).
 | Cursor Agent | ✓ | ✓ | screen | ✓ | hooks in `~/.cursor/hooks.json` |
 | Gemini CLI | ✓ | ✓ | ✓ | ✓ | hooks in `~/.gemini/settings.json` |
 | OpenCode | | ✓ | ✓ | ✓ | a plugin in `~/.config/opencode/plugin/berth.js` |
+| oh-my-pi | ✓ | ✓ | ✓ | ✓ | an extension in `~/.omp/agent/extensions/berth.ts` |
 | anything else | screen | screen | screen | screen | the terminal |
 
 The box lists these as `adapters` in `GET /v1/info`, with `capabilities`
@@ -215,7 +273,11 @@ the agent that called it.
 ### In the app
 
 - **Agent Dashboard** (⌘J): every agent on every box, by what it needs:
-  **Needs you**, **Working**, **Done**, **Ready**.
+  **Needs you**, **Working**, **Done**, **Ready**. A project whose work you
+  follow elsewhere, such as on a plugin's own board, can be kept off it in
+  **Settings → Agents → Agent Dashboard**. Its agents then leave the board
+  and its counts, but still show in the sidebar, on Home and in
+  notifications.
 - **Review**: agents' finished work on every box, to approve, send back or
   discard.
 - **Notifications**: when an agent waits for you, on this laptop, and on your

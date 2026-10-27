@@ -57,16 +57,29 @@ type TeamProjectPlan struct {
 	// Init, a path inside the bundle's files, runs once in the clone.
 	Init      string `json:"init,omitempty"`
 	FirstTask string `json:"first_task,omitempty"`
+	// ReviewButton is team.json's review_button: PRs opened from the
+	// project's worktrees get a "Review in Shipyard" button, unless the
+	// box's own config or the repository's says otherwise.
+	ReviewButton bool `json:"review_button,omitempty"`
 	// Env is laid into the project's own config on this box: secret
 	// references for shared keys, and the values the engineer typed.
 	Env map[string]string `json:"env,omitempty"`
 	// Keys are the names of every key the team lists for the project
 	// (shared and asked), so the box can say which are still missing.
 	Keys []string `json:"keys,omitempty"`
+	// Ask are the keys each engineer has their own of (team.json's "ask"):
+	// a pull request opened for review never gets them.
+	Ask []string `json:"ask,omitempty"`
 	// Deferred are the shared keys' 1Password references, name → op://…,
 	// when the engineer skipped 1Password: not in the project's config, so
 	// nothing reads them with op, until Use 1Password lays them in.
 	Deferred map[string]string `json:"deferred,omitempty"`
+	// Use is a clone already on the box to use instead of cloning, as the
+	// engineer chose it on the page; the box checks its origin again first.
+	Use string `json:"use,omitempty"`
+	// Fresh asks for a fresh clone at Path even when a Shipyard location is
+	// a clone of the repository already.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 // Team step and project states.
@@ -142,4 +155,11 @@ type TeamProjectStatus struct {
 	Missing []string `json:"missing,omitempty"`
 	// Deferred are the keys 1Password would give it, while skipped.
 	Deferred []string `json:"deferred,omitempty"`
+	// Adopted says it uses a clone that was already on the box, at Path,
+	// rather than a fresh one; Note says which and why when there was a
+	// choice. FirstOpen counts its git worktrees set up on first open.
+	Adopted   bool   `json:"adopted,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Note      string `json:"note,omitempty"`
+	FirstOpen int    `json:"first_open,omitempty"`
 }

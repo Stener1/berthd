@@ -2,8 +2,10 @@ package box
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,122 @@ func TestGitHubFlowsStartOnWhatIsNewSinceTheLastLook(t *testing.T) {
 			t.Fatalf("runs wrote:\n%s", s)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// fakeGHByBranch puts a gh on PATH that answers `gh pr view <branch>` from
+// dir/<branch>.json and logs each branch it is asked about to dir/calls.
+func fakeGHByBranch(t *testing.T) (dir string, calls func() []string) {
+	t.Helper()
+	dir = t.TempDir()
+	script := `#!/bin/sh
+echo "$3" >> "` + dir + `/calls"
+cat "` + dir + `/$3.json"
+`
+	os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir, func() []string {
+		b, _ := os.ReadFile(filepath.Join(dir, "calls"))
+		return strings.Fields(string(b))
+	}
+}
+
+func writePR(t *testing.T, dir, branch string, number int, state string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"number":%d,"url":"https://github.com/acme/cal/pull/%d","title":"%s","state":"%s","comments":[],"reviews":[],"statusCheckRollup":[]}`, number, number, branch, state)
+	if err := os.WriteFile(filepath.Join(dir, branch+".json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitHubLooksPickUpWhereTheLastOneRanOutOfCalls(t *testing.T) {
+	ctx := context.Background()
+	gh, calls := fakeGHByBranch(t)
+	out := filepath.Join(t.TempDir(), "ran")
+	b, _, _ := flowBox(t, []Flow{
+		{ID: "merged", Name: "Merged", Enabled: true, Trigger: Trigger{GitHub: &GitHubTrigger{On: "pr_merged"}},
+			Steps: []Step{{Kind: "run", Command: "echo 'merged {{event.branch}}' >> " + out}}},
+	})
+	branches := []string{"billing"}
+	for i := range maxGHCalls + 5 {
+		name := fmt.Sprintf("wt%02d", i)
+		if _, err := b.Locations.CreateWorktree(ctx, "cal", name, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		branches = append(branches, name)
+	}
+	for i, br := range branches {
+		writePR(t, gh, br, i+1, "OPEN")
+	}
+
+	now := time.Now()
+	b.pollGitHub(ctx, now)
+	first := calls()
+	if len(first) != maxGHCalls {
+		t.Fatalf("the first look made %d gh calls, want the cap of %d", len(first), maxGHCalls)
+	}
+	b.pollGitHub(ctx, now.Add(3*time.Minute))
+	looked := map[string]bool{}
+	for _, br := range calls() {
+		looked[br] = true
+	}
+	var late string // a worktree the first look ran out of calls before
+	for _, br := range branches {
+		if !looked[br] {
+			t.Fatalf("%s was never looked at in two polls of %d worktrees", br, len(branches))
+		}
+		if !slices.Contains(first, br) {
+			late = br
+		}
+	}
+
+	// A merge on a worktree past the first 20 still starts its run.
+	writePR(t, gh, late, 99, "MERGED")
+	if n := b.pollGitHub(ctx, now.Add(6*time.Minute)); n != 1 {
+		t.Fatalf("started %d runs, want 1 for %s's merge", n, late)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, _ := os.ReadFile(out)
+		if strings.Contains(string(got), "merged "+late) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("runs wrote:\n%s", got)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestGitHubSkipsAFinishedPRUntilTheHourlyRecheck(t *testing.T) {
+	ctx := context.Background()
+	gh, calls := fakeGHByBranch(t)
+	b, _, _ := flowBox(t, []Flow{
+		{ID: "merged", Name: "Merged", Enabled: true, Trigger: Trigger{GitHub: &GitHubTrigger{On: "pr_merged"}},
+			Steps: []Step{{Kind: "run", Command: "true"}}},
+	})
+	writePR(t, gh, "billing", 42, "OPEN")
+	now := time.Now()
+	b.pollGitHub(ctx, now)
+	writePR(t, gh, "billing", 42, "MERGED")
+	if n := b.pollGitHub(ctx, now.Add(3*time.Minute)); n != 1 {
+		t.Fatalf("started %d runs for the merge, want 1", n)
+	}
+	b.pollGitHub(ctx, now.Add(6*time.Minute))
+	if n := len(calls()); n != 2 {
+		t.Fatalf("made %d gh calls; a merged PR should not be looked at again within the hour", n)
+	}
+
+	// After an hour it looks once more, and a reopened PR is watched every
+	// poll again.
+	writePR(t, gh, "billing", 42, "OPEN")
+	recheck := now.Add(3*time.Minute + ghRecheck + time.Minute)
+	if n := b.pollGitHub(ctx, recheck); n != 0 {
+		t.Fatalf("the recheck started %d runs; the merge already had its run", n)
+	}
+	b.pollGitHub(ctx, recheck.Add(3*time.Minute))
+	if n := len(calls()); n != 4 {
+		t.Fatalf("made %d gh calls, want 4: the recheck found the PR reopened and kept looking", n)
 	}
 }
 

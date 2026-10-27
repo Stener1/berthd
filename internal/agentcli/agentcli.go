@@ -78,6 +78,9 @@ var Catalog = []Agent{
 	{ID: "gemini", Name: "Gemini CLI", Command: "gemini",
 		Install: "npm install -g @google/gemini-cli",
 		Why:     "it installs with npm and needs Node.js 20 or newer, which Shipyard doesn't install; install Node, then run the command"},
+	{ID: "omp", Name: "oh-my-pi", Command: "omp",
+		Install: "bun install -g @oh-my-pi/pi-coding-agent",
+		Why:     "it installs with bun, which Shipyard doesn't install; install bun, then run the command"},
 }
 
 // ByID finds an agent in the catalog.

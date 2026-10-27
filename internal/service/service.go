@@ -152,7 +152,7 @@ func Render(s Spec) ([]byte, error) {
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>5</integer>
-<key>ProcessType</key><string>Background</string>
+<key>ProcessType</key><string>Interactive</string>
 `)
 		if s.KeepChildren {
 			b.WriteString("<key>AbandonProcessGroup</key><true/>\n")
@@ -191,6 +191,44 @@ func Render(s Spec) ([]byte, error) {
 
 func esc(s string) string { return html.EscapeString(s) }
 
+// Lines older releases wrote, and what Render writes in their place now.
+var migrations = []struct{ old, new string }{
+	// Background throttles the CPU and disk of the service and of everything
+	// it starts, agents and their builds included, as they inherit it.
+	{"<key>ProcessType</key><string>Background</string>\n", "<key>ProcessType</key><string>Interactive</string>\n"},
+}
+
+// Migrate brings the unit an older release wrote for s up to date in place,
+// so it is Installed again, and says whether it changed it. A unit for
+// another program or BERTH_HOME (another install, a test's) is left alone.
+// Only the file changes: launchd reads it at the next load (a login, a
+// reinstall), and a running service is never restarted for it. A berthd
+// upgraded from the app swaps its binary without reinstalling, so this is
+// how its plist catches up.
+func Migrate(s Spec) (bool, error) {
+	u, ok, err := Read(s.Name)
+	if err != nil || !ok || u.Program != s.Program || u.Env["BERTH_HOME"] != s.Env["BERTH_HOME"] {
+		return false, err
+	}
+	have, err := os.ReadFile(u.Path)
+	if err != nil {
+		return false, err
+	}
+	path := u.Path
+	data := string(have)
+	for _, m := range migrations {
+		data = strings.ReplaceAll(data, m.old, m.new)
+	}
+	if data == string(have) {
+		return false, nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(data), 0o644); err != nil {
+		return false, err
+	}
+	return true, os.Rename(tmp, path)
+}
+
 func systemdArgs(args []string) string {
 	quoted := make([]string, len(args))
 	for i, a := range args {
@@ -220,6 +258,26 @@ func Installed(s Spec) bool {
 	}
 	want, err := Render(s)
 	return err == nil && bytes.Equal(have, want)
+}
+
+// InstalledAnyPATH is Installed for a unit whose PATH was the user's when
+// it was installed (ServicePATH): their login shell's, which changes as they
+// install things, so a caller can't render it again. Every other field must
+// still match.
+func InstalledAnyPATH(s Spec) bool {
+	u, ok, err := Read(s.Name)
+	if err != nil || !ok {
+		return false
+	}
+	if p, ok := u.Env["PATH"]; ok {
+		env := make(map[string]string, len(s.Env)+1)
+		for k, v := range s.Env {
+			env[k] = v
+		}
+		env["PATH"] = p
+		s.Env = env
+	}
+	return Installed(s)
 }
 
 // InstalledByName reports whether a unit file with this name exists at all,

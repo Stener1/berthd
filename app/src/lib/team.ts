@@ -89,6 +89,30 @@ export interface PlanStep {
 
 export type ProjectSource = "repo" | "kit" | "none";
 
+// A clone of a project's repo already on the box: a Shipyard project, or
+// one the box found in the usual folders (~/code, ~/work, …), matched by
+// its origin. The page offers to use it instead of cloning a second copy.
+export interface ExistingClone {
+  path: string;
+  // The path with ~ for the box's home folder.
+  display: string;
+  branch?: string;
+  // HEAD when it is detached.
+  head?: string;
+  // Files with uncommitted changes.
+  dirty: number;
+  // Commits its upstream has that it lacks, as of its last fetch.
+  behind?: number;
+  // Its Shipyard project's name, when it is one already.
+  location?: string;
+  last_commit?: string;
+  used?: string;
+  // At the path team.json gives the project.
+  at_path?: boolean;
+  // Its git worktrees besides the main checkout.
+  worktrees?: number;
+}
+
 export interface ProjectView {
   id: string;
   repo: string;
@@ -107,6 +131,9 @@ export interface ProjectView {
   init_detail?: string;
   first_task?: string;
   commands: string[];
+  // Clones of it already on the box, the preferred first.
+  existing?: ExistingClone[];
+  existing_note?: string;
 }
 
 export interface TeamChange {
@@ -143,6 +170,7 @@ export interface OrgRepo {
   description: string;
   pushed_at: string;
   has_berth: boolean;
+  existing?: ExistingClone[];
 }
 
 // Where a setup was read: the org's <org>/.berth, or a link to any repo,
@@ -190,6 +218,8 @@ export interface TeamView {
   accepted?: { commit: string; box: string; at: string };
   update?: TeamUpdate | null;
   warnings: string[];
+  // Where the box looked for clones it already has.
+  scanned?: { looked: string[]; truncated?: boolean };
 }
 
 export type StepState = "todo" | "running" | "waiting" | "done" | "skipped" | "failed";
@@ -222,6 +252,13 @@ export interface TeamStatus {
     keys?: string[];
     missing?: string[];
     deferred?: string[];
+    // It uses a clone that was already on the box, at path, as it was;
+    // note says which and why when there was a choice. first_open counts
+    // its git worktrees set up the first time each is opened.
+    adopted?: boolean;
+    path?: string;
+    note?: string;
+    first_open?: number;
   }[];
   keys_set: string[];
   // 1Password was skipped for the shared keys; Use 1Password undoes it.
@@ -252,6 +289,41 @@ export interface SetupRequest {
   // Skip 1Password: op is never signed in or called for the shared keys,
   // which come typed in keys instead (blank ones are missing).
   skip_onepassword?: boolean;
+  // Which clone on the box each project uses, by project id (or repo for
+  // repos): a folder there, or "" for a fresh clone.
+  use?: Record<string, string>;
+}
+
+// TeamKitPlan is "Just the kit" before it runs (internal/agent/teamkit.go):
+// a project's kit from the team setup, for a project already on the box,
+// without the setup's box steps, sudo, clone or 1Password.
+export interface TeamKitPlan {
+  org: TeamOrg;
+  name: string;
+  commit: string;
+  short: string;
+  box: string;
+  location: string;
+  project: string;
+  repo: string;
+  kit: { ref: string; id: string; name: string; description?: string; hash: string };
+  sets_up: string[];
+  // The kit's tools, checked on the box (found is absent when it didn't say).
+  requires: { tool: string; hint?: string; found?: boolean }[];
+  // The project's shared keys and its init: each off unless chosen.
+  keys: { name: string; onepassword: boolean; used_by: string[] }[];
+  init?: { script: string; detail?: string };
+  replaces?: string;
+  applied?: boolean;
+  worktrees: number;
+  warnings: string[];
+}
+
+export interface TeamKitResult {
+  kit: { id: string; name: string };
+  warnings: string[];
+  first_open: number;
+  session?: string;
 }
 
 const enc = encodeURIComponent;
@@ -267,6 +339,11 @@ export const teamApi = {
     return c.laptop<TeamView>("GET", `/v1/team/${enc(org)}${qs ? `?${qs}` : ""}`);
   },
   setup: (c: Client, org: string, req: SetupRequest) => c.laptop<TeamStatus>("POST", `/v1/team/${enc(org)}/setup`, req),
+  // Fast-forwards a found clone that is behind: a button of its own, never
+  // part of using it.
+  pull: (c: Client, org: string, box: string, repo: string, path: string) => c.laptop<ExistingClone>("POST", `/v1/team/${enc(org)}/pull`, { box, repo, path }),
+  kitPlan: (c: Client, org: string, box: string, location: string) => c.laptop<TeamKitPlan>("GET", `/v1/team/${enc(org)}/kit?box=${enc(box)}&location=${enc(location)}`),
+  applyKit: (c: Client, org: string, req: { box: string; location: string; commit: string; hash: string; keys?: boolean; init?: boolean }) => c.laptop<TeamKitResult>("POST", `/v1/team/${enc(org)}/kit`, req),
   retry: (c: Client, org: string, box: string, from: string) => c.laptop<TeamStatus>("POST", `/v1/team/${enc(org)}/retry`, { box, from }),
   update: (c: Client, org: string) => c.laptop<TeamUpdate | { update: null }>("GET", `/v1/team/${enc(org)}/update`),
   accepted: async (c: Client) => (await c.laptop<Accepted[] | null>("GET", "/v1/team")) ?? [],
@@ -277,6 +354,18 @@ export const teamApi = {
   // project's config, and op signs in in the team's terminal.
   useOnePassword: (c: Client, box: string, id: string) => c.box<TeamStatus>(box, "POST", `team/${enc(id)}/onepassword`, {}),
 };
+
+// defaultUse is which clone each project uses before anyone chooses: a
+// Shipyard project of the same repo (the box's preferred one), else the
+// only clone found when it is clean; otherwise a fresh clone (""). Nothing
+// the box merely found is used unless it is that one clean clone.
+export function defaultUse(existing: ExistingClone[] | undefined): string {
+  const all = existing ?? [];
+  const loc = all.find((c) => c.location);
+  if (loc) return loc.path;
+  if (all.length === 1 && all[0].dirty === 0) return all[0].path;
+  return "";
+}
 
 // missingKeys is what a run left without a value, by project: keys left
 // blank when asked (or skipped with 1Password), to add in Project settings.
@@ -289,7 +378,7 @@ export { isLink, teamRef, validOrg } from "@/lib/team-ref";
 // ——— live state ———
 
 // Where the page was opened from, which it says (a link names the org).
-export type TeamFrom = "onboarding" | "addbox" | "link" | "sidebar" | "palette";
+export type TeamFrom = "onboarding" | "addbox" | "link" | "sidebar" | "palette" | "suggestion";
 
 interface TeamState {
   github?: GitHubState;
@@ -434,6 +523,12 @@ export function handleTeamEvent(e: BerthEvent) {
   const d = (e.data ?? {}) as { team?: string; org?: string; project?: string; state?: string; location?: string };
   if (e.type === "team.update" && d.org) {
     void loadTeams();
+    return;
+  }
+  // The laptop noticed (or stopped suggesting) an org's team setup
+  // (lib/team-suggest.ts): its status says which.
+  if (e.type === "team.suggestions") {
+    void useStore.getState().refreshStatus();
     return;
   }
   if (e.type === "box.connected") {

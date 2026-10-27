@@ -55,6 +55,14 @@ func TestFlagsMayFollowTheReference(t *testing.T) {
 	}
 }
 
+func TestWorktreeNewChecksOutAPullRequest(t *testing.T) {
+	r, _ := run(t, `{"name":"pr-7","path":"/w/cal-pr-7","branch":"alex/fix"}`,
+		"worktree", "new", "cal/pr-7", "--pr", "7", "--branch", "alex/fix", "--ref", "pull/7/merge")
+	if r.body["pr"] != float64(7) || r.body["branch"] != "alex/fix" || r.body["ref"] != "pull/7/merge" {
+		t.Fatalf("body = %v", r.body)
+	}
+}
+
 func TestSessionNewPassesTheCommandAfterDoubleDash(t *testing.T) {
 	r, _ := run(t, `{"name":"s","dir":"/w"}`, "session", "new", "cal/billing", "--name", "fix", "--", "claude", "--resume", "--model", "x")
 	if r.body["location"] != "cal/billing" || r.body["name"] != "fix" || r.body["command"] != "claude --resume --model x" {
@@ -94,6 +102,7 @@ func TestShareUsesThePort(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"worktree", "new", "no-slash"},
+		{"worktree", "new", "cal/x", "--ref", "pull/7/head"},
 		{"location", "add", "only-name"},
 		{"share", "not-a-port"},
 		{"emit"},
@@ -307,5 +316,100 @@ func TestBrowserSizesFromTheCommandLine(t *testing.T) {
 	err := Run(context.Background(), &box.Client{Doer: &recorder{}}, []string{"browser", "resize", "cal/billing", "5000x800"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "width 5000 is out of range: 320 to 3840") {
 		t.Fatalf("error: %v", err)
+	}
+}
+
+func TestLogInAsFromTheCommandLine(t *testing.T) {
+	r, _ := run(t, `{"text":"url: x"}`, "browser", "open", "shop/fix-x", "--as", "pro@acme.test", "--path", "/settings")
+	if r.path != "/v1/worktrees/shop/fix-x/browser/open" || r.body["as"] != "pro@acme.test" || r.body["url"] != "/settings" {
+		t.Fatalf("open --as: %s %v", r.path, r.body)
+	}
+	r, _ = run(t, `{"text":"visual diff"}`, "shots", "compare", "shop/fix-x", "--as", "pro@acme.test", "--pages", "/", "/billing")
+	if r.path != "/v1/worktrees/shop/fix-x/shots/compare" || r.body["as"] != "pro@acme.test" || len(r.body["pages"].([]any)) != 2 {
+		t.Fatalf("shots --as: %s %v", r.path, r.body)
+	}
+	// An email that isn't one never reaches the box.
+	for _, args := range [][]string{
+		{"browser", "open", "shop/fix-x", "--as", "a@b.c; rm -rf /"},
+		{"browser", "open", "shop/fix-x", "--as", "$(id)@acme.test"},
+		{"browser", "open", "shop/fix-x", "--path", "settings"},
+		{"browser", "open", "shop/fix-x", "/x", "--path", "/y"},
+		{"shots", "compare", "shop/fix-x", "--as", "pro"},
+	} {
+		rec := &recorder{}
+		if err := Run(context.Background(), &box.Client{Doer: rec}, args, io.Discard); err == nil || rec.path != "" {
+			t.Errorf("%v: %v (sent %q)", args, err, rec.path)
+		}
+	}
+}
+
+func TestHelpersListsWhatRunsForPlugins(t *testing.T) {
+	reply := `{"platform":"linux-arm64","helpers":[{"plugin":"leadline","state":"failed","platform":"linux-arm64","name":"berth-leadline","version":"0.1.0","error":"it ended (exit status 1); berthd tries again in 4s"}]}`
+	rec, out := run(t, reply, "helpers")
+	if rec.method != "GET" || rec.path != "/v1/helpers" {
+		t.Fatalf("called %s %q; want GET /v1/helpers", rec.method, rec.path)
+	}
+	for _, want := range []string{"leadline", "berth-leadline", "0.1.0", "failed", "exit status 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("helpers output lacks %q: %q", want, out)
+		}
+	}
+	if _, out = run(t, `{"platform":"linux-arm64","helpers":[]}`, "helpers"); !strings.Contains(out, "No plugin has a helper") {
+		t.Fatalf("with no helpers: %q", out)
+	}
+}
+
+func TestHelperRmKeepsTheDataUnlessPurged(t *testing.T) {
+	reply := `{"plugin":"leadline","state":"off","platform":"linux-arm64"}`
+	rec, out := run(t, reply, "helper", "rm", "leadline")
+	if rec.method != "DELETE" || rec.path != "/v1/helpers/leadline" || !strings.Contains(out, "its data is kept") {
+		t.Fatalf("helper rm: %s %q, %q", rec.method, rec.path, out)
+	}
+	rec, out = run(t, reply, "helper", "rm", "leadline", "--purge")
+	if rec.method != "DELETE" || rec.path != "/v1/helpers/leadline?purge=1" || !strings.Contains(out, "and its data") {
+		t.Fatalf("helper rm --purge: %s %q, %q", rec.method, rec.path, out)
+	}
+	if rec, out = run(t, "started\nlistening\n", "helper", "log", "leadline"); rec.path != "/v1/helpers/leadline/log?limit=1048576" || out != "started\nlistening\n" {
+		t.Fatalf("helper log: %q, %q", rec.path, out)
+	}
+	for _, args := range [][]string{{"helper", "rm"}, {"helper", "log"}, {"helper", "rm", "a", "b"}} {
+		if err := Run(context.Background(), &box.Client{Doer: &recorder{reply: reply}}, args, io.Discard); err == nil {
+			t.Errorf("%v accepted", args)
+		}
+	}
+}
+
+func TestBrowserTabsFromTheCommandLine(t *testing.T) {
+	reply := `{"text":"ok"}`
+	// --tab goes anywhere, and on every command.
+	r, _ := run(t, reply, "browser", "open", "--tab", "signup-a", "cal/billing", "/cart")
+	if r.path != "/v1/worktrees/cal/billing/browser/open?tab=signup-a" || r.body["url"] != "/cart" {
+		t.Fatalf("open: %s %v", r.path, r.body)
+	}
+	r, _ = run(t, reply, "browser", "click", "cal/billing", "@e3", "--tab=signup-a")
+	if r.path != "/v1/worktrees/cal/billing/browser/act?tab=signup-a" || r.body["target"] != "@e3" {
+		t.Fatalf("click: %s %v", r.path, r.body)
+	}
+	r, _ = run(t, reply, "browser", "console", "cal/billing", "--all", "--tab", "signup-a")
+	if r.path != "/v1/worktrees/cal/billing/browser/console?all=1&tab=signup-a" {
+		t.Fatalf("console: %s", r.path)
+	}
+	// $BERTH_BROWSER_TAB is the default, and --tab beats it.
+	t.Setenv("BERTH_BROWSER_TAB", "onboarding")
+	r, _ = run(t, reply, "browser", "snapshot", "cal/billing")
+	if r.path != "/v1/worktrees/cal/billing/browser/snapshot?tab=onboarding" {
+		t.Fatalf("from the environment: %s", r.path)
+	}
+	r, _ = run(t, reply, "browser", "close", "cal/billing", "--tab", "signup-b")
+	if r.method != "POST" || r.path != "/v1/worktrees/cal/billing/browser/close?tab=signup-b" {
+		t.Fatalf("close: %s %s", r.method, r.path)
+	}
+	t.Setenv("BERTH_BROWSER_TAB", "")
+	r, _ = run(t, reply, "browser", "tabs", "cal/billing")
+	if r.method != "GET" || r.path != "/v1/worktrees/cal/billing/browser/tabs" {
+		t.Fatalf("tabs: %s %s", r.method, r.path)
+	}
+	if err := Run(context.Background(), &box.Client{Doer: &recorder{reply: reply}}, []string{"browser", "open", "cal/billing", "--tab", "a b"}, io.Discard); err == nil {
+		t.Fatal("a tab named \"a b\"")
 	}
 }

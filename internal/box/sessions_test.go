@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -194,6 +195,87 @@ func TestAttachShowsTheSessionAndCarriesKeystrokes(t *testing.T) {
 	}
 }
 
+// A program's OSC 8 hyperlink (fx's "Authorize with Codex", say) reaches
+// the app attached: tmux sent the text alone, underlined, until berth's
+// tmux said its clients take hyperlinks.
+func TestAttachPassesOSC8Hyperlinks(t *testing.T) {
+	out, err := exec.Command("tmux", "-V").Output()
+	if err != nil {
+		t.Skip("tmux not installed")
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(string(out)), "tmux "), "%d.%d", &major, &minor); err == nil && (major < 3 || major == 3 && minor < 4) {
+		t.Skipf("%s keeps no hyperlinks", strings.TrimSpace(string(out)))
+	}
+	s := testSessions(t)
+	ctx := context.Background()
+	link := `printf '  Open   \033[4m\033]8;id=acme-auth;https://auth.example.com/oauth/authorize?client_id=app_acme\033\\Authorize with Acme\033]8;;\033\\\033[0m\n'; sleep 30`
+	if _, err := s.Create(ctx, "linked", "", t.TempDir(), link, nil); err != nil {
+		t.Fatal(err)
+	}
+	master, cmd, err := s.Attach(ctx, "linked", 100, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	defer master.Close()
+	var screen syncBuffer
+	go io.Copy(&screen, master)
+	want := ";https://auth.example.com/oauth/authorize?client_id=app_acme\x1b\\Authorize with Acme\x1b]8;;\x1b\\"
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(screen.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no OSC 8 hyperlink in what the client got: %q", screen.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Shift+Enter, which the app sends as CSI 13;2u, reaches a program that
+// asked for modified keys (Claude Code, where it is a newline) as Shift and
+// Enter, not as the plain Enter tmux made of it before extended-keys.
+func TestAttachPassesShiftEnter(t *testing.T) {
+	out, err := exec.Command("tmux", "-V").Output()
+	if err != nil {
+		t.Skip("tmux not installed")
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(string(out)), "tmux "), "%d.%d", &major, &minor); err == nil && (major < 3 || major == 3 && minor < 2) {
+		t.Skipf("%s has no extended keys", strings.TrimSpace(string(out)))
+	}
+	s := testSessions(t)
+	ctx := context.Background()
+	// Asks for modifyOtherKeys, then shows the first 7 bytes it reads in hex.
+	dump := `printf '\033[>4;2mready\n'; stty raw -echo; head -c 7 | od -An -tx1; sleep 30`
+	if _, err := s.Create(ctx, "keys", "", t.TempDir(), dump, nil); err != nil {
+		t.Fatal(err)
+	}
+	master, cmd, err := s.Attach(ctx, "keys", 100, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	defer master.Close()
+	var screen syncBuffer
+	go io.Copy(&screen, master)
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(screen.String(), "ready") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the program never started: %q", screen.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	master.Write([]byte("\x1b[13;2u......."))
+	// tmux writes it in xterm's form (CSI 27;2;13~) or as CSI 13;2u.
+	xterm, csiu := "1b 5b 32 37 3b 32 3b", "1b 5b 31 33 3b 32 75"
+	for !strings.Contains(screen.String(), xterm) && !strings.Contains(screen.String(), csiu) {
+		if time.Now().After(deadline.Add(5 * time.Second)) {
+			t.Fatalf("Shift+Enter didn't reach the program as Shift+Enter: %q", screen.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // syncBuffer is a bytes.Buffer safe to poll while another goroutine copies
 // terminal output into it.
 type syncBuffer struct {
@@ -232,5 +314,97 @@ func TestScreenShowsTheSessionsOutput(t *testing.T) {
 			t.Fatalf("screen = %q", text)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// getAndCapture reads a session as Get does, and its pane, in one tmux
+// command.
+func TestGetAndCaptureIsGetAndAScreen(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+	// Set before any list starts the background sweep, which reads it.
+	var mu sync.Mutex
+	asked := map[string]int{}
+	s.trace = func(args []string) { mu.Lock(); asked[args[0]]++; mu.Unlock() }
+	if _, err := s.create(ctx, "both", "acme", t.TempDir(), "printf 'acme ready\\n'; sleep 30", "claude", nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want, err := s.Get(ctx, "both")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, raw, err := s.getAndCapture(ctx, "both", "-J", "-e")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("session = %+v, want %+v", got, want)
+		}
+		if strings.Contains(string(raw), "acme ready") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("screen = %q", raw)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// One read is one display-message, the capture riding along in it.
+	mu.Lock()
+	clear(asked)
+	mu.Unlock()
+	s.getAndCapture(ctx, "both")
+	mu.Lock()
+	if asked["display-message"] != 1 || asked["capture-pane"] != 0 {
+		t.Fatalf("one read asked tmux %v", asked)
+	}
+	mu.Unlock()
+	if _, _, err := s.getAndCapture(ctx, "gone"); !errors.Is(err, ErrUnknownSession) {
+		t.Fatalf("gone: %v", err)
+	}
+}
+
+// A session's environment never changes, so EnvVar asks tmux once per
+// variable, an unset one included: every chat poll asks it for each agent
+// in the folder.
+func TestEnvVarAsksTmuxOnce(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+	// Set before any list starts the background sweep, which reads it.
+	var mu sync.Mutex
+	asked := 0
+	s.trace = func(args []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(args) > 0 && args[0] == "show-environment" {
+			asked++
+		}
+	}
+	sess, err := s.Create(ctx, "envs", "acme", t.TempDir(), "sleep 30", []string{"ACME_HOME=/srv/acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if v := s.EnvVar(ctx, sess, "ACME_HOME"); v != "/srv/acme" {
+			t.Fatalf("ACME_HOME = %q", v)
+		}
+		if v := s.EnvVar(ctx, sess, "ACME_UNSET"); v != "" {
+			t.Fatalf("ACME_UNSET = %q", v)
+		}
+	}
+	mu.Lock()
+	if asked != 2 {
+		t.Fatalf("asked tmux %d times, want 2", asked)
+	}
+	mu.Unlock()
+	// A session that is gone is not remembered as having it unset.
+	gone := Session{Name: "gone", Created: sess.Created}
+	s.EnvVar(ctx, gone, "ACME_HOME")
+	s.EnvVar(ctx, gone, "ACME_HOME")
+	mu.Lock()
+	defer mu.Unlock()
+	if asked != 4 {
+		t.Fatalf("asked tmux %d times for a gone session, want 2 more", asked-2)
 	}
 }

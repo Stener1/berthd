@@ -190,7 +190,7 @@ test("below 1100px the panel floats over the tabs, and goes on esc or a pick", a
   await app.page.getByTestId("files-panel-button").click();
   await expect(panel(app.page)).toBeVisible();
   await row(app.page, "README.md").click();
-  await expect(app.page.locator('[data-testid=file-pane][data-path="README.md"] .cm-content')).toBeVisible();
+  await expect(app.page.locator('[data-testid=file-pane][data-path="README.md"] [data-testid=file-markdown]')).toBeVisible();
   await expect(panel(app.page)).toHaveCount(0);
   // The docked pref is left as it was.
   expect(((await app.stored("berth.prefs")) as { filesPanel?: boolean }).filesPanel).toBe(true);

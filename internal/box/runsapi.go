@@ -309,10 +309,13 @@ func (b *Box) reviewRun(w http.ResponseWriter, r *http.Request, id string) error
 		Review *ReviewItem `json:"review,omitempty"`
 	}
 	out := struct {
-		Run        runs.Summary `json:"run"`
-		Gate       *runs.Gate   `json:"gate,omitempty"`
-		Judge      string       `json:"judge,omitempty"`
-		Candidates []compared   `json:"candidates"`
+		Run   runs.Summary `json:"run"`
+		Gate  *runs.Gate   `json:"gate,omitempty"`
+		Judge string       `json:"judge,omitempty"`
+		// PR is the pull request step: opened, skipped (a host without
+		// them) or failed, with what it said.
+		PR         *runs.StepRun `json:"pr,omitempty"`
+		Candidates []compared    `json:"candidates"`
 	}{Gate: run.Gate, Candidates: []compared{}}
 	out.Run = runs.Summary{ID: run.ID, Template: run.Template, Title: run.Title, Status: run.Status, Created: run.Created, Updated: run.Updated, Usage: run.Usage}
 	for _, st := range run.Steps {
@@ -320,6 +323,19 @@ func (b *Box) reviewRun(w http.ResponseWriter, r *http.Request, id string) error
 			out.Judge = st.Output
 		}
 	}
+	var findPR func([]runs.StepRun)
+	findPR = func(steps []runs.StepRun) {
+		for i := range steps {
+			// A pr step skipped by its when rule says nothing: not that one.
+			if steps[i].Kind == "pr" && (steps[i].Status != runs.Skipped || steps[i].Output != "") {
+				st := steps[i]
+				st.Children = nil
+				out.PR = &st
+			}
+			findPR(steps[i].Children)
+		}
+	}
+	findPR(run.Steps)
 	for _, c := range run.Candidates {
 		item := compared{Candidate: c}
 		if loc, wt, ok := b.worktreeAt(r.Context(), c.Path); ok {

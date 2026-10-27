@@ -35,7 +35,8 @@ test("first run: Joining a team? opens the team setup in the whole window", asyn
 test("Add a box offers to set the box up for a team", async ({ app }) => {
   const { page } = app;
   await app.open({ params: { team: "acme" } });
-  await page.getByLabel("Projects options").click();
+  // The sidebar's More menu has its ways to add a project or a box.
+  await page.getByTestId("nav-more").click();
   await page.getByRole("menuitem", { name: /Add a box/ }).click();
   await page.getByTestId("addbox-team").click();
   await expect(page.getByRole("heading", { name: "Which GitHub org?" })).toBeVisible();
@@ -56,6 +57,7 @@ test("a berth://team link opens the org's setup, read like its repo on GitHub", 
   await expect(checklist(page)).toContainText("You have access to all 3 repos");
   // The new box is picked: the one with no projects yet.
   await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
 });
 
 test("without the GitHub CLI, the page says how to install it", async ({ app }) => {
@@ -276,6 +278,86 @@ test("an org without .berth: its repos, the Shipyard-configured ones picked", as
   await expect(checklist(page).getByTestId("team-run")).toHaveText("Set up 2 repos");
   await box("northwind/api").click();
   await expect(checklist(page).getByTestId("team-run")).toHaveText("Set up 1 repo");
+});
+
+// Clones the box already has (&team-clones=1): acme/shop at ~/work/acme-shop
+// with uncommitted changes, acme/website at ~/src/website, clean. The page
+// decides which a repo uses; nothing found is used without a choice but
+// the one clean clone it starts on.
+test("a repo already cloned on the box: Found … · Use this, or Clone a fresh copy", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
+  const shop = page.getByTestId("found-shop");
+  await expect(shop).toContainText("Found ~/work/acme-shop, a clone of acme/shop (on branch feat/x, 3 uncommitted changes)");
+  // Uncommitted changes: a fresh clone until you say otherwise.
+  await expect(page.getByTestId("fresh-shop")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("found-review-shop")).toHaveCount(0);
+  // One clean clone: used, and the review says where the init runs.
+  await expect(page.getByTestId("use-website")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("found-review-website")).toContainText("Runs in your existing checkout ~/src/website");
+  await expect(page.locator("section", { has: page.locator("#plan-repos") })).toContainText("3 repos, 1 from a clone you have, the rest cloned as you");
+  // Use this on shop: in place, its changes and branch left alone.
+  await page.getByTestId("use-shop").click();
+  const review = page.getByTestId("found-review-shop");
+  await expect(review).toContainText("Runs in your existing checkout ~/work/acme-shop: .env from .env.example");
+  await expect(review).toContainText("Your uncommitted changes stay as they are.");
+  await expect(review).toContainText("nothing is checked out, stashed, reset or pulled, and an existing .env keeps its values");
+  await expect(review).toContainText("Its other worktree shows in the sidebar, set up the first time you open it");
+  await repo(page, "shop").getByRole("button").first().click();
+  await expect(repo(page, "shop")).toContainText("# uses your existing checkout ~/work/acme-shop");
+  await expect(repo(page, "shop")).not.toContainText("git clone https://github.com/acme/shop");
+  // Clone a fresh copy on website instead.
+  await page.getByTestId("fresh-website").click();
+  await expect(page.getByTestId("found-review-website")).toHaveCount(0);
+  await expect(page.getByTestId("use-website")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("a found clone that is behind offers Pull as a button of its own", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
+  const review = page.getByTestId("found-review-website");
+  await expect(review).toContainText("2 commits behind its upstream");
+  await review.getByRole("button", { name: "Pull" }).click();
+  await expect(page.getByText("Pulled ~/src/website")).toBeVisible();
+  await expect(review).not.toContainText("behind its upstream");
+});
+
+test("a repo set up from a clone you have runs in place, and its worktree waits for its first open", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "acme" } });
+  // The new box is picked once the boxes' projects are in: its clones are the ones offered.
+  await expect(checklist(page).getByRole("combobox")).toContainText("sean-dev");
+  await expect(page.getByTestId("team-page")).not.toContainText("the Shipyard project");
+  await page.getByTestId("use-shop").click();
+  await page.getByTestId("fresh-website").click();
+  await startRun(page);
+  await advance(page, "sudo");
+  await expect(repo(page, "shop")).toHaveAttribute("data-state", "ready", { timeout: 20_000 });
+  await expect(page.getByTestId("adopted-shop")).toHaveText("In your existing checkout ~/work/acme-shop, as it was · 1 worktree set up on first open");
+  await expect(page.getByTestId("adopted-website")).toHaveCount(0);
+  // Its worktree is in the sidebar (past shop's busier ones), set up the
+  // first time it's opened.
+  await page.getByRole("button", { name: /^Show \d+ older$/ }).first().click();
+  await expect(page.getByTestId("setup-on-open").first()).toHaveText("set up on first open");
+});
+
+test("an org without .berth offers the clones the box has too", async ({ app }) => {
+  const { page } = app;
+  await app.open({ params: { team: "acme", "team-clones": "1", "team-page": "northwind" } });
+  const found = page.getByTestId("found-storefront");
+  await expect(found).toContainText("Found ~/work/storefront, a clone of northwind/storefront (on branch main, no uncommitted changes)");
+  await expect(page.getByTestId("use-storefront")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("fresh-storefront").click();
+  await expect(page.getByTestId("use-storefront")).toHaveAttribute("aria-pressed", "false");
+  // Not picked: nothing to choose.
+  await page.getByRole("checkbox", { name: /^northwind\/storefront\b/ }).click();
+  await expect(found).toHaveCount(0);
 });
 
 test("in the background, a toast says when a repo is ready", async ({ app }) => {

@@ -147,8 +147,10 @@ export const onImagesChanged = (fn: () => void) => {
 };
 const notifyImages = () => imageListeners.forEach((fn) => fn());
 
-// keepImage shrinks a picture, keeps it, and forgets the oldest past KEEP.
-export async function keepImage(file: Blob, meta: { name: string; prompt?: string }): Promise<StoredImageInfo> {
+// keepImage shrinks a picture, keeps it, and forgets the oldest past KEEP,
+// but never one in use: the chat background and the header picture
+// (lib/header-picture.ts) choose from the same pictures, each its own.
+export async function keepImage(file: Blob, meta: { name: string; prompt?: string }, inUse: (string | undefined)[] = []): Promise<StoredImageInfo> {
   if (file.size > 60 << 20) throw new Error("That file is over 60 MB; pick a smaller picture.");
   let bmp: ImageBitmap;
   try {
@@ -169,7 +171,7 @@ export async function keepImage(file: Blob, meta: { name: string; prompt?: strin
   const bytes = await blob.arrayBuffer();
   await tx("readwrite", (s) => s.put({ ...info, bytes, type: blob.type, at: Date.now() } satisfies StoredImage));
   const all = await tx<StoredImage[]>("readonly", (s) => s.getAll());
-  for (const old of all.sort((a, b) => b.at - a.at).slice(KEEP)) await tx("readwrite", (s) => s.delete(old.id));
+  for (const old of all.sort((a, b) => b.at - a.at).filter((s) => !inUse.includes(s.id)).slice(KEEP)) await tx("readwrite", (s) => s.delete(old.id));
   notifyImages();
   return info;
 }

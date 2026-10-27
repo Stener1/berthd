@@ -316,6 +316,9 @@ func (a *Agent) manageRoutes(mux *http.ServeMux) {
 			return
 		}
 		var err error
+		// What became of its helper on each box, when turning it off took
+		// one away (helpercleanup.go).
+		var helpers []HelperRemoved
 		switch action {
 		case "enable":
 			// A plugin runs with the app's access and its hooks run here, so
@@ -341,8 +344,16 @@ func (a *Agent) manageRoutes(mux *http.ServeMux) {
 					err = nil
 				}
 			}
+			if err == nil {
+				a.noteHelperGrant(id)
+			}
 		case "disable":
-			err = hooks.ForbidPlugin(dir)
+			// A helper does not outlive its plugin: turning the plugin off
+			// stops its helper on the boxes, and keeps what it recorded.
+			carries := pluginIDPattern.MatchString(id) && a.carriesHelper(id)
+			if err = hooks.ForbidPlugin(dir); err == nil && carries {
+				helpers = a.removeHelpers(id, false, "its plugin was turned off", helperRemovalWait)
+			}
 		default:
 			writeError(w, http.StatusNotFound, "use enable or disable")
 			return
@@ -353,7 +364,10 @@ func (a *Agent) manageRoutes(mux *http.ServeMux) {
 		}
 		for _, p := range a.plugins() {
 			if p.ID == id {
-				writeJSON(w, http.StatusOK, p)
+				writeJSON(w, http.StatusOK, struct {
+					PluginInfo
+					Helpers []HelperRemoved `json:"helpers,omitempty"`
+				}{p, helpers})
 				return
 			}
 		}

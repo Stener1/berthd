@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cosscom/shipyard/internal/box/runs"
@@ -55,6 +56,23 @@ type Box struct {
 	// Turns is the turn ledger: what every agent session is doing, turn by
 	// turn. Without it agents read as running.
 	Turns *Turns
+	// Drivers replace a driver by kind (driver.go); nil, or a kind not in
+	// it, is the built-in one.
+	Drivers map[string]Driver
+	// ConversationsDir holds structured agents' logs, a folder each
+	// (claudedriver.go); AgentHost is the command that runs `berthd
+	// agent-host` (nil is this program's own).
+	ConversationsDir string
+	AgentHost        []string
+	claudeOnce       sync.Once
+	claudeDrv        *claudeDriver
+	codexOnce        sync.Once
+	codexDrv         *codexDriver
+	acpOnce          sync.Once
+	acpDrv           *acpDriver
+	// AgentDefaults is how agents start when what starts them names no
+	// driver (agentdefaults.go); nil is in their terminals.
+	AgentDefaults *AgentDefaultsStore
 	// Hooks, when set, may refuse actions through "before:" hooks.
 	Hooks *hooks.Runner
 	// Flows runs the box's and its repositories' automations.
@@ -70,6 +88,9 @@ type Box struct {
 	Phone *Phone
 	// Guard, when set, keeps the box usable when memory runs short.
 	Guard *Guard
+	// TurnCheck, when turned on, asks Jev whether a finished turn needs
+	// you (turncheck.go).
+	TurnCheck *TurnCheck
 	// Secrets resolves secret references in worktree environments; nil
 	// uses a shared one.
 	Secrets *Secrets
@@ -99,6 +120,16 @@ type Box struct {
 	// Artifacts keeps what agents made for the person to look at
 	// (artifacts.go); nil on a box without them.
 	Artifacts *ArtifactStore
+	// Reviews keeps the box's review settings (prreview.go); nil uses the
+	// defaults.
+	Reviews *ReviewStore
+	// ReviewButtons adds the "Review in Shipyard" button to PRs opened from
+	// worktrees of projects that turn it on (reviewbutton.go); nil on a box
+	// without it.
+	ReviewButtons *ReviewButtons
+	// Helpers runs the helper programs plugins bring (helpers.go); nil on a
+	// box without them.
+	Helpers *Helpers
 }
 
 func (b *Box) own(path string) {
@@ -111,11 +142,12 @@ func (b *Box) own(path string) {
 // laptops and, through ServeLocal, by the box's own user.
 func (b *Box) Mount(s *wire.Server) {
 	route := func(pattern string, h func(http.ResponseWriter, *http.Request) error) {
-		s.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Large JSON answers go gzipped to a client that asks (gzip.go).
+		s.Handle(pattern, gzipJSON(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if err := h(w, r); err != nil {
 				writeErr(w, err)
 			}
-		}))
+		})))
 	}
 	route("GET /v1/ports", b.ports)
 	route("GET /v1/locations", b.listLocations)
@@ -124,11 +156,21 @@ func (b *Box) Mount(s *wire.Server) {
 	route("PUT /v1/locations/{name}/scripts", b.setScripts)
 	route("POST /v1/locations/{name}/worktrees", b.addWorktree)
 	route("POST /v1/locations/clone", b.cloneLocation)
+	route("GET /v1/locations/{name}/review-setup", b.reviewSetup)
+	route("GET /v1/reviews", b.listReviews)
+	route("POST /v1/reviews", b.postReview)
+	route("POST /v1/reviews/update", b.postReviewUpdate)
+	route("GET /v1/reviews/settings", b.getReviewSettings)
+	route("PUT /v1/reviews/settings", b.putReviewSettings)
+	route("GET /v1/worktrees/{loc}/{wt}/review-button", b.getReviewButton)
+	route("PUT /v1/worktrees/{loc}/{wt}/review-button", b.putReviewButton)
 	route("GET /v1/team", b.listTeams)
 	route("POST /v1/team", b.postTeam)
 	route("GET /v1/team/{id}", b.getTeam)
 	route("POST /v1/team/{id}/retry", b.retryTeam)
 	route("POST /v1/team/{id}/onepassword", b.useOnePassword)
+	route("GET /v1/team/{id}/existing", b.getExisting)
+	route("POST /v1/team/{id}/pull", b.pullExisting)
 	route("POST /v1/locations/new", b.newLocation)
 	route("POST /v1/locations/{name}/resolve", b.resolve)
 	route("GET /v1/locations/{name}/branches", b.listBranches)
@@ -147,11 +189,15 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/locations/{name}/worktrees/{worktree}/file", b.getWorktreeFile)
 	route("PUT /v1/locations/{name}/worktrees/{worktree}/file", b.putWorktreeFile)
 	route("GET /v1/locations/{name}/worktrees/{worktree}/touched", b.worktreeTouched)
+	route("POST /v1/locations/{name}/worktrees/{worktree}/setup", b.setupWorktree)
 	route("POST /v1/locations/{name}/worktrees/{worktree}/{action}", b.pauseAction)
 	route("GET /v1/phone", b.getPhone)
 	route("PUT /v1/phone", b.putPhone)
+	route("GET /v1/turncheck", b.getTurnCheck)
+	route("PUT /v1/turncheck", b.putTurnCheck)
 	route("GET /v1/kits", b.listKits)
 	route("PUT /v1/locations/{name}/kit", b.putKit)
+	route("POST /v1/locations/{name}/team-kit", b.postTeamKit)
 	route("DELETE /v1/locations/{name}/kit", b.deleteKit)
 	route("GET /v1/env", b.getBoxEnv)
 	route("PUT /v1/env", b.putBoxEnv)
@@ -183,6 +229,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("POST /v1/sessions/{name}/interrupt", b.interruptSession)
 	route("GET /v1/sessions/{name}/controls", b.sessionControls)
 	route("POST /v1/sessions/{name}/mode", b.setMode)
+	route("POST /v1/sessions/{name}/switch", b.switchSession)
 	route("GET /v1/sessions/{name}/wait", b.waitForSession)
 	route("GET /v1/sessions/{name}/turns", b.listTurns)
 	route("GET /v1/sessions/{name}/queue", b.listQueue)
@@ -220,15 +267,19 @@ func (b *Box) Mount(s *wire.Server) {
 	route("GET /v1/agents", b.listAgentCLIs)
 	route("POST /v1/agents/install", b.installAgentCLIs)
 	route("POST /v1/agents/refresh", b.lookAgainForAgents)
+	route("GET /v1/agents/defaults", b.getAgentDefaults)
+	route("PUT /v1/agents/defaults", b.putAgentDefaults)
 	route("POST /v1/upgrade", b.handleUpgrade)
 	route("GET /v1/events", b.streamEvents)
 	route("POST /v1/events", b.emit)
 	b.mountRuns(route)
 	b.mountHistory(route)
 	b.mountAnswer(route)
+	b.mountConversations(route)
 	b.mountBrowser(route)
 	b.mountNotify(route)
 	b.mountArtifacts(route)
+	b.mountHelpers(s, route)
 	b.mountPairing(s, route)
 }
 
@@ -245,9 +296,12 @@ func badRequest(format string, args ...any) error {
 
 func statusFor(err error) int {
 	var he httpError
+	var rc reviewCode
 	switch {
 	case errors.As(err, &he):
 		return he.status
+	case errors.As(err, &rc):
+		return rc.status
 	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare), errors.Is(err, ErrUnknownUnit), errors.Is(err, ErrUnknownArtifact):
 		return http.StatusNotFound
 	case errors.Is(err, ErrSessionExists), errors.Is(err, ErrSessionExited):
@@ -365,9 +419,17 @@ func (b *Box) removeLocation(w http.ResponseWriter, r *http.Request) error {
 	if err := b.before(r, "location.remove", map[string]any{"location": name}); err != nil {
 		return err
 	}
+	// Its worktrees, while they can still be listed: plugins' helpers are
+	// told of each once the location is gone (helperdetach.go).
+	var loc Location
+	if b.Helpers != nil {
+		loc, _ = b.Locations.Get(r.Context(), name)
+	}
 	if err := b.Locations.Remove(name); err != nil {
 		return err
 	}
+	loc.Name = name
+	b.detachLocation(loc)
 	b.publish(r, "location.removed", map[string]any{"location": name})
 	writeJSON(w, map[string]string{"removed": name})
 	return nil
@@ -423,17 +485,32 @@ func (b *Box) createWorktree(r *http.Request, loc Location, req WorktreeRequest)
 	if loc.RepoTrust == RepoTrustUntrusted || loc.RepoTrust == RepoTrustChanged {
 		created["repo_config"] = loc.RepoTrust
 	}
+	if wt.MainRefresh != nil {
+		created["main"] = wt.MainRefresh
+	}
 	b.publish(r, "worktree.created", created)
-	// Services start once setup has made the worktree ready for them.
+	if req.NoSetup {
+		if err := b.Locations.setSetupPending(loc.Name, wt.Path, true); err == nil {
+			wt.SetupPending = true
+		}
+		return wt, nil
+	}
+	b.runSetup(origin(r), loc, wt.Path, wt.Name)
+	return wt, nil
+}
+
+// runSetup runs the location's setup script in the background, then starts
+// the services that start with every worktree; without a script it only
+// starts them. Services start once setup has made the worktree ready.
+func (b *Box) runSetup(from string, loc Location, dir, name string) {
 	if loc.Scripts.Setup != "" {
-		go b.lifecycle(origin(r), "setup", loc, wt.Path, wt.Name, loc.Scripts.Setup, func() error {
-			go b.startAutostart(loc.Name, wt.Name)
+		go b.lifecycle(from, "setup", loc, dir, name, loc.Scripts.Setup, func() error {
+			go b.startAutostart(loc.Name, name)
 			return nil
 		})
-	} else {
-		go b.startAutostart(loc.Name, wt.Name)
+		return
 	}
-	return wt, nil
+	go b.startAutostart(loc.Name, name)
 }
 
 // lifecycle runs a setup or archive script in the background, announcing its
@@ -485,38 +562,91 @@ func (b *Box) removeWorktree(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	}
-	b.stopServices(location, name)
-	from := origin(r)
-	removed := func(ctx context.Context) {
-		b.stopSessionsIn(from, dir)
-		b.Locations.Ports.Release(dir)
-		if branch != "" {
-			git(ctx, "-C", loc.Path, "branch", "-D", branch)
-		}
+	async, err := b.dropWorktree(origin(r), loc, name, dir, branch, force, "removed", nil)
+	if err != nil {
+		return err
 	}
-	// A worktree with an archive script is torn down in the background: the
-	// script may take minutes, and removal only follows if it succeeds.
-	if loc.Scripts.Archive != "" {
-		go b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
-			if err := b.Locations.RemoveWorktree(context.Background(), location, name, force); err != nil {
-				return err
-			}
-			removed(context.Background())
-			b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: from, Data: map[string]any{"location": location, "name": name, "path": dir}})
-			return nil
-		})
+	if async {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, map[string]string{"removing": name, "archive": loc.Scripts.Archive})
 		return nil
 	}
-	if err := b.Locations.RemoveWorktree(r.Context(), location, name, force); err != nil {
-		return err
-	}
-	removed(context.WithoutCancel(r.Context()))
-	b.publish(r, "worktree.removed", map[string]any{"location": location, "name": name, "path": dir})
 	writeJSON(w, map[string]string{"removed": name})
 	return nil
+}
+
+// dropWorktree removes a worktree: its services stop, and with an archive
+// script the script runs in the background and the removal follows if it
+// succeeds (async); without one it goes at once. Unless forced, a worktree
+// with uncommitted or untracked files is refused before any of that, in
+// git's words. done, when set, hears how it ended. A review worktree's
+// removal is journaled as review.removed, with why.
+func (b *Box) dropWorktree(from string, loc Location, name, dir, branch string, force bool, reason string, done func(error)) (async bool, err error) {
+	_, mark := b.Locations.reviewAt(dir)
+	if mark != nil && branch == "" {
+		// A review's branch is Shipyard's own, made for it: it goes too.
+		if out, err := git(context.Background(), "-C", dir, "symbolic-ref", "--short", "HEAD"); err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "review/") {
+			branch = strings.TrimSpace(string(out))
+		}
+	}
+	finish := func(err error) {
+		if done != nil {
+			done(err)
+		}
+	}
+	// git refuses a worktree with uncommitted or untracked files unless
+	// forced. Ask before anything is torn down, so an archive script never
+	// runs on work that git will then keep.
+	if !force {
+		if dirtyWorktree(dir) {
+			return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
+		}
+	}
+	b.stopServices(loc.Name, name)
+	removed := func(ctx context.Context) {
+		if b.Sessions != nil {
+			b.stopSessionsIn(from, dir)
+		}
+		b.Locations.Ports.Release(dir)
+		if branch != "" {
+			git(ctx, "-C", loc.Path, "branch", "-D", branch)
+		}
+		b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: from, Data: map[string]any{"location": loc.Name, "name": name, "path": dir}})
+		if mark != nil {
+			git(ctx, "-C", loc.Path, "update-ref", "-d", reviewRef(mark.PR))
+			b.Events.Publish(events.Event{Type: "review.removed", Box: b.Name, Origin: from, Data: map[string]any{
+				"location": loc.Name, "name": name, "path": dir, "repo": mark.Repo, "pr": mark.PR, "reason": reason,
+			}})
+		}
+	}
+	// A worktree with an archive script is torn down in the background: the
+	// script may take minutes, and removal only follows if it succeeds.
+	if loc.Scripts.Archive != "" {
+		go func() {
+			ran := false
+			var removeErr error
+			b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
+				ran = true
+				if removeErr = b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); removeErr != nil {
+					return removeErr
+				}
+				removed(context.Background())
+				return nil
+			})
+			if !ran {
+				removeErr = fmt.Errorf("%s's archive script failed, so it was left as it was", name)
+			}
+			finish(removeErr)
+		}()
+		return true, nil
+	}
+	if err := b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force); err != nil {
+		return false, err
+	}
+	removed(context.Background())
+	finish(nil)
+	return false, nil
 }
 
 // stopSessionsIn ends the sessions working in a removed worktree: their
@@ -564,6 +694,14 @@ type SessionRequest struct {
 	// location: a terminal on the box, tied to no worktree. It takes a
 	// command or a shell, never an agent preset, and no location.
 	Home bool `json:"home,omitempty"`
+	// Driver, with an agent, is how berthd runs it: "terminal" (its own
+	// screen) or "claude" (Claude Code structured, claudedriver.go). None
+	// is the box's default (agentdefaults.go): the terminal, unless the
+	// person turned structured agents on. Mode is a structured agent's
+	// permission mode to start in: "bypassPermissions" has berthd allow
+	// what it asks.
+	Driver string `json:"driver,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
@@ -597,9 +735,31 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		if !ok {
 			return badRequest("unknown agent %q", req.Agent)
 		}
+		// No driver named (the berth tools, the CLI): the box's default.
+		if kind, mode, err := b.startDriver(p, req.Driver, req.Mode); err != nil {
+			return err
+		} else if kind != "" {
+			l, err := b.launchStructured(kind, p, req.Model, req.Effort, mode)
+			if err != nil {
+				return err
+			}
+			if req.Name == "" {
+				req.Name = defaultSessionName(req.Location, p.Command)
+			}
+			sess, err := b.startStructuredSession(r, req.Name, req.Location, dir, req.Agent, l, req.Prompt)
+			if err != nil {
+				return err
+			}
+			sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+			b.announceOpen(r, sess, req.Open)
+			writeJSON(w, sess)
+			return nil
+		}
 		if req.Command, err = AgentCommandWith(p, req.Prompt, req.Model, req.Effort); err != nil {
 			return err
 		}
+	} else if req.Driver != "" && req.Driver != DriverTerminal {
+		return badRequest("a driver needs an agent, not a command")
 	} else if req.Model != "" || req.Effort != "" {
 		return badRequest("a model or an effort needs an agent, not a command")
 	}
@@ -670,11 +830,72 @@ func (b *Box) startSession(r *http.Request, name, location, dir, command, preset
 		data["agent"] = a
 	}
 	b.publish(r, "session.started", data)
+	// A worktree the repository had before Team setup adopted it is set
+	// up now, the first time anyone works in it.
+	b.setUpOnFirstOpen(origin(r), dir)
 	if prompted {
 		b.startupPrompt(origin(r), gateOrigin(r), Session{Name: sess.Name, Agent: agentFor(sess)})
 	}
 	sess = b.enrich(r.Context(), []Session{sess})[0]
 	b.beginStartup(origin(r), sess)
+	return sess, nil
+}
+
+// wantStructured is the structured driver a request asks for, or "".
+func wantStructured(driver string) (string, error) {
+	switch driver {
+	case "", DriverTerminal:
+		return "", nil
+	case DriverClaude, DriverCodex, DriverACP:
+		return driver, nil
+	}
+	return "", badRequest("unknown driver %q: terminal, claude, codex or acp", driver)
+}
+
+// launchStructured is what starts preset p under a structured driver, in a
+// new conversation.
+func (b *Box) launchStructured(kind string, p AgentPreset, model, effort, mode string) (structuredLaunch, error) {
+	if kind == DriverClaude {
+		return b.launchClaude(p, model, effort, mode, "")
+	}
+	if kind == DriverACP {
+		dir, sock, err := b.newConversation()
+		if err != nil {
+			return structuredLaunch{}, err
+		}
+		l, err := b.launchACPIn(p, mode, dir, sock)
+		l.model = model
+		return l, err
+	}
+	if p.ID != "codex" {
+		return structuredLaunch{}, badRequest("the codex driver runs Codex; %s runs in its terminal", p.Name)
+	}
+	dir, sock, err := b.newConversation()
+	if err != nil {
+		return structuredLaunch{}, err
+	}
+	l, err := b.launchCodexIn(p, mode, dir, sock)
+	l.model, l.effort = model, effort
+	return l, err
+}
+
+// startStructuredSession starts a structured agent (claudedriver.go) and
+// gives it its first prompt once its host listens.
+func (b *Box) startStructuredSession(r *http.Request, name, location, dir, preset string, l structuredLaunch, prompt string) (Session, error) {
+	data := map[string]any{"name": name, "location": location, "path": dir, "command": l.command}
+	if err := b.before(r, "session.start", data); err != nil {
+		return Session{}, err
+	}
+	sess, err := b.createAgentSessionWith(r.Context(), name, location, dir, l.command, preset, l.env, l.labels)
+	if err != nil {
+		return Session{}, err
+	}
+	data["agent"], data["driver"] = agentFor(sess), sess.Driver
+	b.publish(r, "session.started", data)
+	noteStarted(l, location, dir, sess.Name, prompt)
+	b.setUpOnFirstOpen(origin(r), dir)
+	sess = b.enrich(r.Context(), []Session{sess})[0]
+	b.startStructured(origin(r), gateOrigin(r), sess, prompt)
 	return sess, nil
 }
 
@@ -972,32 +1193,38 @@ func (b *Box) emit(w http.ResponseWriter, r *http.Request) error {
 	if err := b.before(r, "event.emit", map[string]any{"type": req.Type}); err != nil {
 		return err
 	}
-	// A tool use while the agent is already working changes nothing, and
-	// agents use tools constantly: keep them out of the journal.
-	// A prompt's title (adapters.Title) names the session; it is never
-	// published, so the journal and hooks never see it.
-	title, _ := req.Data["title"].(string)
-	delete(req.Data, "title")
-	// What a waiting agent asks for (its hook's tool and a summary of its
-	// input) is never published: it goes on the turn's wait, in the
-	// ledger's private file, once the event has made that wait.
-	ask, hasAsk := req.Data[adapters.AskKey]
-	delete(req.Data, adapters.AskKey)
-	if b.Turns != nil && b.Turns.Redundant(req.Type, req.Data) {
-		writeJSON(w, map[string]bool{"ok": true})
-		return nil
-	}
-	b.publish(r, req.Type, req.Data)
-	if title != "" && req.Type == adapters.Started && b.Turns != nil {
-		if name := b.Turns.SessionOf(req.Data); name != "" {
-			b.nameAfter(r.Context(), name, adapters.Clip(title, adapters.TitleMax))
+	private := map[string]any{}
+	for _, k := range []string{"title", adapters.AskKey} {
+		if v, ok := req.Data[k]; ok {
+			private[k] = v
+			delete(req.Data, k)
 		}
 	}
-	if hasAsk && b.Turns != nil && req.Type == adapters.Waiting {
-		b.Turns.NoteAsk(req.Data, ask)
-	}
+	b.agentEvent(r.Context(), origin(r), req.Type, req.Data, private)
 	writeJSON(w, map[string]bool{"ok": true})
 	return nil
+}
+
+// agentEvent publishes what an agent does, from its hooks or its driver.
+// private holds what is never published: a prompt's title (adapters.Title),
+// which names the session, and what a waiting agent asks for (its tool and
+// a summary of its input), which goes on the turn's wait, in the ledger's
+// private file, once the event has made that wait.
+func (b *Box) agentEvent(ctx context.Context, origin, typ string, data, private map[string]any) {
+	// A tool use while the agent is already working changes nothing, and
+	// agents use tools constantly: keep them out of the journal.
+	if b.Turns != nil && b.Turns.Redundant(typ, data) {
+		return
+	}
+	b.Events.Publish(events.Event{Type: typ, Box: b.Name, Origin: origin, Data: data})
+	if title, _ := private["title"].(string); title != "" && typ == adapters.Started && b.Turns != nil {
+		if name := b.Turns.SessionOf(data); name != "" {
+			b.nameAfter(ctx, name, adapters.Clip(title, adapters.TitleMax))
+		}
+	}
+	if ask, ok := private[adapters.AskKey]; ok && b.Turns != nil && typ == adapters.Waiting {
+		b.Turns.NoteAsk(data, ask)
+	}
 }
 
 var validEventType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9-]{0,31}$`)

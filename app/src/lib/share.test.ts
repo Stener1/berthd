@@ -52,3 +52,27 @@ test("anything but plain data is next's", () => {
   assert.equal(share({ a: [1] }, { a: 1 }).a, 1);
   assert.equal(share(NaN, NaN), NaN);
 });
+
+test("a list read again in another order keeps the items nothing changed", async () => {
+  const { shareByKey } = await import("./share.ts");
+  const item = (key: string, head: string, files = [{ path: "a.ts", added: 1 }]) => ({ key, head, files });
+  const prev = [item("devl|/srv/shop/a", "111"), item("devl|/srv/shop/b", "222")];
+
+  // Nothing changed: the list itself is the one it was.
+  assert.equal(shareByKey(prev, [item("devl|/srv/shop/a", "111"), item("devl|/srv/shop/b", "222")]), prev);
+
+  // Sorted differently, and one item moved on: the other is still the same
+  // object, and so is what the changed one kept.
+  const next = shareByKey(prev, [item("devl|/srv/shop/b", "333"), item("devl|/srv/shop/a", "111")]);
+  assert.notEqual(next, prev);
+  assert.equal(next[1], prev[0]);
+  assert.notEqual(next[0], prev[1]);
+  assert.equal(next[0].head, "333");
+  assert.equal(next[0].files, prev[1].files);
+
+  // A new item, and one gone.
+  const added = shareByKey(prev, [item("devl|/srv/shop/a", "111"), item("devl|/srv/shop/c", "444")]);
+  assert.equal(added[0], prev[0]);
+  assert.equal(added[1].key, "devl|/srv/shop/c");
+  assert.equal(added.length, 2);
+});

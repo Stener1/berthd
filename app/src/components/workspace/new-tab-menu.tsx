@@ -6,7 +6,7 @@ import { AgentIcon } from "@/components/agent-glyph";
 import { Command, CommandCollection, CommandEmpty, CommandGroup, CommandGroupLabel, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
 import { Kbd } from "@/components/ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover";
-import { agentPresets, openBrowserAt, openPreviewAt, resolveUrl, startSession } from "@/lib/actions";
+import { agentPresets, openBrowserAt, openPreviewAt, resolveUrl, startAgent, startSession } from "@/lib/actions";
 import { guessSessionName, sessionName } from "@/lib/derive";
 import { focusNewPane } from "@/lib/focus-home";
 import { leaves } from "@/lib/layout";
@@ -78,7 +78,7 @@ export function NewTabMenu() {
         : []),
     ];
     const agents: Item[] = ws
-      ? agentPresets(ws.ref.box, ws.ref.location).map((p) => ({ value: `agent:${p.id}`, label: p.name, icon: <AgentIcon agent={p.id} />, run: done(() => void startSession(p.command, { kind: "tab" }, p.name)) }))
+      ? agentPresets(ws.ref.box, ws.ref.location).map((p) => ({ value: `agent:${p.id}`, label: p.name, icon: <AgentIcon agent={p.id} />, run: done(() => void startAgent(p, { kind: "tab" }, p.name)) }))
       : [];
     const panelItems: Item[] = ws
       ? panels.map(({ plugin, item }) => ({
@@ -164,7 +164,7 @@ export function NewTabMenu() {
       </Tip>
       <PopoverPopup aria-label="New tab" align="start" sideOffset={2} className="w-88 p-0 [&_[data-slot=popover-viewport]]:p-0">
         <Command items={groups} value={query} onValueChange={setQuery} itemToStringValue={(i: unknown) => `${(i as Item).label} ${(i as Item).detail ?? ""} ${(i as Item).search ?? ""}`}>
-          <CommandInput aria-label="Search open tabs, history, URLs and agents" placeholder="Search open tabs, history, URLs, agents…" className="text-sm" />
+          <CommandInput aria-label="Search open tabs, history, URLs and agents" placeholder="Search open tabs, history, URLs, agents…" className="text-body" />
           <CommandSeparator className="my-0" />
           <CommandEmpty>Nothing matches. Type a port or a URL to open it.</CommandEmpty>
           <CommandList className="max-h-96">
@@ -173,10 +173,10 @@ export function NewTabMenu() {
                 {group.label && <CommandGroupLabel>{group.label}</CommandGroupLabel>}
                 <CommandCollection>
                   {(item: Item) => (
-                    <CommandItem key={item.value} value={item} onClick={() => item.run()} className="gap-2.5 text-sm [&_svg]:size-4 [&_svg]:text-muted-foreground">
+                    <CommandItem key={item.value} value={item} onClick={() => item.run()} className="gap-2.5 text-body [&_svg]:size-4 [&_svg]:text-muted-foreground">
                       {item.icon}
                       <span className="truncate">{item.label}</span>
-                      {item.detail && <span className="ml-auto max-w-40 truncate text-muted-foreground text-xs">{item.detail}</span>}
+                      {item.detail && <span className="ml-auto max-w-40 truncate text-muted-foreground text-meta">{item.detail}</span>}
                       {item.shortcut && <Kbd className="ml-auto">{item.shortcut}</Kbd>}
                     </CommandItem>
                   )}

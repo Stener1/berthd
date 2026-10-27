@@ -196,6 +196,25 @@ func TestParseWarnsOnUnknownFields(t *testing.T) {
 	}
 }
 
+func TestAProjectCanTurnTheReviewButtonOn(t *testing.T) {
+	doc := strings.Replace(minimal, `"kit":"./kits/web"}`, `"kit":"./kits/web","review_button":true}`, 1)
+	s, warnings, err := Parse([]byte(doc))
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("err %v, warnings %v", err, warnings)
+	}
+	if p, _ := s.Project("web"); !p.ReviewButton {
+		t.Fatal("review_button not read")
+	}
+	if p, _ := s.Project("api"); p.ReviewButton {
+		t.Fatal("review_button is on by default")
+	}
+	old, _, _ := Parse([]byte(minimal))
+	changes := Diff(old, s, nil, nil)
+	if len(changes) != 1 || !strings.Contains(changes[0].Detail, "review button on") {
+		t.Fatalf("diff = %+v", changes)
+	}
+}
+
 func TestParseKitRef(t *testing.T) {
 	cases := map[string]KitRef{
 		"./kits/web":                       {Path: "kits/web"},

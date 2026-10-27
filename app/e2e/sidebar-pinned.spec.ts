@@ -52,8 +52,7 @@ test("a pinned worktree's pin goes once the box says the worktree went", async (
   await expect(page.getByTestId("pinned-worktrees").locator('[data-worktree="devl/search-perf"]')).toBeVisible();
 
   await row.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Remove worktree…" }).click();
-  await page.getByRole("button", { name: "Remove worktree" }).click();
+  await page.getByRole("menuitem", { name: "Remove worktree" }).click();
   await expect(row).toHaveCount(0);
   await expect(page.getByTestId("pinned-worktrees")).toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem("berth.pinnedWorktrees"))).toBe("[]");

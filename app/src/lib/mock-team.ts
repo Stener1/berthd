@@ -1,9 +1,9 @@
-import type { BerthEvent, Location, Session, Status, TerminalConnection, TerminalHandlers } from "@/lib/api";
+import type { BerthEvent, Location, Session, Status, TeamSuggestion, TerminalConnection, TerminalHandlers } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import initShop from "@/lib/fixtures/team-acme/init-shop.sh.txt?raw";
 import readme from "@/lib/fixtures/team-acme/README.md.txt?raw";
 import setupSh from "@/lib/fixtures/team-acme/setup.sh.txt?raw";
-import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
+import type { Accepted, ExistingClone, TeamKitPlan, GitHubState, OrgRepo, PlanStep, ProjectView, SetupRequest, TeamSetup, TeamSource, TeamStatus, TeamUpdate, TeamView } from "@/lib/team";
 
 // Mock mode's Team setup, behaving like the laptop agent (internal/agent
 // team.go, reading <org>/.berth with gh) and the box's runner (internal/box
@@ -26,6 +26,13 @@ import type { Accepted, GitHubState, OrgRepo, PlanStep, ProjectView, SetupReques
 // so Skip 1Password isn't offered.
 // &teamhold=init: the first repo's first-time setup stops at a question
 // in its own terminal (corepack's [Y/n]) until advance("init").
+// &team-clones=1: the box already has clones of some repos, found by
+// their origin: acme/shop at ~/work/acme-shop (on feat/x, 3 uncommitted
+// changes, one worktree of its own), acme/website at ~/src/website (clean,
+// 2 commits behind), northwind/storefront at ~/work/storefront.
+// teamsuggest=1: the laptop noticed that acme, which devl's shop comes
+// from, publishes a team setup it hasn't accepted (team_suggestions in its
+// status); Review… finds devl's shop as a clone to use.
 // &teamhold=github,repos keeps the run at those points until
 // window.__teamMock.advance(name), for screenshots; the sudo prompt always
 // waits for a password typed in its terminal (or advance("sudo")).
@@ -44,6 +51,8 @@ export interface TeamMockCtx {
 const params = new URLSearchParams(location.search);
 export const teamScenario = params.get("team") ?? "acme";
 const holds = new Set((params.get("teamhold") ?? "").split(",").filter(Boolean));
+const withClones = params.get("team-clones") === "1";
+const withSuggestion = params.get("teamsuggest") === "1";
 
 const now = Date.now();
 const ago = (min: number) => new Date(now - min * 60_000).toISOString();
@@ -214,6 +223,29 @@ function shopProjects(): ProjectView[] {
   ];
 }
 
+// The clones the box already has, with &team-clones=1, by repo.
+const CLONES: Record<string, ExistingClone[]> = {
+  "acme/shop": [{ path: "/home/me/work/acme-shop", display: "~/work/acme-shop", branch: "feat/x", dirty: 3, last_commit: ago(90), worktrees: 1 }],
+  "acme/website": [{ path: "/home/me/src/website", display: "~/src/website", branch: "main", dirty: 0, behind: 2, last_commit: ago(60 * 24 * 3) }],
+  "northwind/storefront": [{ path: "/home/me/work/storefront", display: "~/work/storefront", branch: "main", dirty: 0, last_commit: ago(60 * 5) }],
+};
+const SCANNED = { looked: ["~/code", "~/work", "~/src", "~/projects", "~/dev", "~/repos", "~/git", "~/* (one level)"] };
+// Pulled clones are up to date from then on.
+const pulled = new Set<string>();
+const clonesOf = (repo: string): ExistingClone[] | undefined => (withClones ? CLONES[repo]?.map((c) => (pulled.has(c.path) ? { ...c, behind: 0 } : c)) : undefined);
+
+// existingOn is what the box reports for a repo: its Shipyard projects of
+// it first (the box always lists those), then the clones it found.
+function existingOn(box: string | undefined, repo: string): ExistingClone[] | undefined {
+  if (!box) return undefined;
+  const own = (ctx?.locations[box] ?? [])
+    .filter((l) => l.slug?.toLowerCase() === repo.toLowerCase())
+    .map((l): ExistingClone => ({ path: l.path, display: l.path.replace(/^\/home\/me/, "~"), branch: l.worktrees?.find((w) => w.main)?.branch ?? "main", dirty: 0, location: l.name, last_commit: ago(45), worktrees: (l.worktrees ?? []).filter((w) => !w.main).length || undefined }));
+  // A folder is listed once: as the Shipyard project it is, if it is one.
+  const all = [...own, ...(clonesOf(repo) ?? []).filter((c) => !own.some((o) => o.path === c.path))];
+  return all.length ? all : undefined;
+}
+
 // A setup read from a link: a user's repo, a branch, a folder in it.
 export const TEAM_LINK = "github.com/jo-acme/acme-setup/tree/team-setup/team";
 const JO_AVATAR = svg(`<rect width="64" height="64" rx="32" fill="#7c3aed"/><text x="32" y="42" font-family="Inter,Helvetica,Arial,sans-serif" font-size="28" font-weight="600" fill="#fff" text-anchor="middle">J</text>`);
@@ -278,7 +310,7 @@ function github(): GitHubState {
 
 function acmeView(box?: string): TeamView {
   const setup = structuredClone(shopSetup);
-  const projects = shopProjects();
+  const projects = shopProjects().map((p) => (p.access && existingOn(box, p.repo) ? { ...p, existing: existingOn(box, p.repo) } : p));
   const readable = projects.filter((p) => p.access);
   const run = box ? runs[`${box}/acme`] : undefined;
   const view: TeamView = {
@@ -301,6 +333,7 @@ function acmeView(box?: string): TeamView {
     },
     warnings: [],
   };
+  if (box && withClones) view.scanned = SCANNED;
   view.source = orgSource;
   const acc = accepted.find((a) => a.org === "acme");
   if (acc) view.accepted = { commit: acc.commit, box: acc.box, at: acc.at };
@@ -370,8 +403,9 @@ function view(org: string, q: URLSearchParams): TeamView {
       projects: [],
       access: { readable: northwindRepos.length, total: northwindRepos.length, missing: [] },
       keys: { shared: 0, ask: [] },
-      repos: northwindRepos,
+      repos: northwindRepos.map((r) => (existingOn(box, r.full_name) ? { ...r, existing: existingOn(box, r.full_name) } : r)),
       warnings: [],
+      scanned: box && withClones ? SCANNED : undefined,
     };
   }
   return { org: { login: org, name: org, avatar_url: "", verified: false, type: "Organization", html_url: `https://github.com/${org}` }, state: "no-org", projects: [], access: { readable: 0, total: 0, missing: [] }, keys: { shared: 0, ask: [] }, warnings: [] };
@@ -516,15 +550,15 @@ async function project(r: TeamStatus, p: TeamStatus["projects"][number], i: numb
   if (p.state === "skipped" || p.state === "ready") return;
   await wait(i * 350);
   p.state = "cloning";
-  p.line = "Receiving objects: 38%";
+  p.line = p.adopted ? `checking ${p.path}` : "Receiving objects: 38%";
   touch(r, "team.project", { project: p.id, state: p.state });
-  await wait(600);
+  await wait(p.adopted ? 200 : 600);
   p.state = "setting-up";
   p.line = p.id === "shop" ? "box/init-shop.sh · yarn install" : p.id === "billing-api" ? "yarn install" : "pnpm install";
   addLocation(r.box, p);
   // Its first-time setup runs in a terminal of its own, in its checkout.
   p.session = `team-${r.id}-${p.id}`;
-  initSession(r.box, p.session, `/home/me/code/${p.id}`, p.location ?? p.id, `${p.id} first-time setup`);
+  initSession(r.box, p.session, p.path ?? `/home/me/code/${p.id}`, p.location ?? p.id, `${p.id} first-time setup`);
   touch(r, "team.project", { project: p.id, state: p.state, location: p.location });
   if (i === 0 && holds.has("init")) {
     p.waiting = true;
@@ -545,12 +579,14 @@ async function project(r: TeamStatus, p: TeamStatus["projects"][number], i: numb
 
 function addLocation(box: string, p: TeamStatus["projects"][number]) {
   if (!ctx) return;
-  const name = p.id;
+  const name = p.location ?? p.id;
   p.location = name;
   const list = (ctx.locations[box] ??= []);
   if (list.some((l) => l.name === name)) return;
-  const path = `/home/me/code/${name}`;
-  list.push({ name, path, repo: true, remote: `https://github.com/${p.repo}.git`, slug: p.repo, default_branch: "main", scripts: {}, worktrees: [{ name, path, branch: "main", main: true }] });
+  const path = p.path ?? `/home/me/code/${name}`;
+  const c = p.adopted ? clonesOf(p.repo)?.find((x) => x.path === path) : undefined;
+  const worktrees = [{ name, path, branch: c?.branch ?? "main", main: true }, ...(c?.worktrees ? [{ name: "review", path: `${path}-review`, branch: "review", setup_on_open: true }] : [])];
+  list.push({ name, path, repo: true, remote: `https://github.com/${p.repo}.git`, slug: p.repo, default_branch: "main", scripts: {}, worktrees });
   ctx.emit({ type: "location.added", box, data: { location: name, path, url: `https://github.com/${p.repo}.git` } });
 }
 
@@ -620,6 +656,14 @@ function setup(org: string, req: SetupRequest): Promise<TeamStatus> {
     const acc = accepted.find((a) => a.org === "acme");
     if (acc) Object.assign(acc, { commit, box, at: iso(), key: source.key, source });
     else accepted.push({ org: "acme", id: "acme", name: "Acme", commit, box, at: iso(), key: source.key, source });
+    // An accepted setup is no longer suggested.
+    if (ctx.status.team_suggestions?.some((s) => s.org === "acme")) setSuggestions(ctx.status.team_suggestions.filter((s) => s.org !== "acme"));
+  }
+  // The clones chosen on the page: used as they are, not cloned again.
+  for (const p of r.projects) {
+    const path = req.use?.[p.id] ?? req.use?.[p.repo];
+    const c = path ? existingOn(box, p.repo)?.find((x) => x.path === path) : undefined;
+    if (c) Object.assign(p, { adopted: true, path: c.path, first_open: (!c.location && c.worktrees) || undefined }, c.location ? { location: c.location } : {});
   }
   const key = `${box}/${r.id}`;
   runs[key] = r;
@@ -660,8 +704,91 @@ function seedDone() {
 
 // ——— wiring ———
 
+// The suggestion the laptop makes with ?teamsuggest=1, and those turned
+// down (Don't suggest again), kept for Undo.
+const SUGGESTION: TeamSuggestion = {
+  org: "acme",
+  name: "Acme",
+  repo: "acme/.berth",
+  projects: [{ box: "devl", location: "shop", repo: "acme/shop", listed: true, sets_up: ["per-worktree databases", "services", "Log in as…", "review links"], kit: true }],
+};
+
+// "Just the kit" (GET/POST /v1/team/{org}/kit): acme's kit for the shop,
+// for a project already on the box; pg_dump is missing there.
+function kitPlan(box: string, location: string): TeamKitPlan {
+  const loc = ctx?.locations[box]?.find((l) => l.name === location);
+  const applied = !!ctx?.status.team_suggestions?.find((s) => s.org === "acme")?.projects.some((p) => p.box === box && p.location === location && p.kit_applied);
+  return {
+    org: acmeOrg,
+    name: "Acme",
+    commit: COMMIT,
+    short: COMMIT.slice(0, 7),
+    box,
+    location,
+    project: "shop",
+    repo: "acme/shop",
+    kit: { ref: "https://github.com/acme/berth-kit-shop@5476af4", id: "shop", name: "Acme shop", hash: "a91c03e5b27d" },
+    sets_up: ["per-worktree databases", "services", "Log in as…"],
+    requires: [
+      { tool: "node", found: true },
+      { tool: "yarn", found: true },
+      { tool: "pg_dump", hint: "the full team setup installs it (its Postgres step)", found: false },
+    ],
+    keys: [
+      { name: "MAPS_API_KEY", onepassword: true, used_by: ["the Web service"] },
+      { name: "STRIPE_PUBLISHABLE_KEY", onepassword: true, used_by: ["the Web service"] },
+      { name: "STRIPE_SECRET_KEY", onepassword: true, used_by: ["scripts/seed.sh", "the Web service"] },
+      { name: "STRIPE_WEBHOOK_SECRET", onepassword: true, used_by: ["the Web service"] },
+    ],
+    init: { script: "box/init-shop.sh", detail: ".env from .env.example pointed at localhost:5433, yarn install, yarn db:migrate, yarn db:seed" },
+    applied,
+    worktrees: (loc?.worktrees ?? []).filter((w) => !w.main).length,
+    warnings: [],
+  };
+}
+
+// The kits taken on their own, as the box got them, for tests.
+export const kitsApplied: { box: string; location: string; keys: boolean; init: boolean }[] = [];
+
+function applyKit(req: { box: string; location: string; keys?: boolean; init?: boolean }) {
+  if (!ctx) return Promise.reject(new Error("mock: no context"));
+  kitsApplied.push({ box: req.box, location: req.location, keys: !!req.keys, init: !!req.init });
+  (window as unknown as Record<string, unknown>).__teamKits = kitsApplied;
+  const list = ctx.status.team_suggestions ?? [];
+  setSuggestions(list.map((s) => (s.org === "acme" ? { ...s, projects: s.projects.map((p) => (p.box === req.box && p.location === req.location ? { ...p, kit_applied: true } : p)) } : s)));
+  ctx.emit({ type: "kit.installed", box: req.box, data: { location: req.location, kit: "shop", org: "acme", commit: COMMIT, keys: !!req.keys, init: !!req.init, first_open: 0 } });
+  const loc = ctx.locations[req.box]?.find((l) => l.name === req.location);
+  return ctx.delay({ kit: { id: "shop", name: "Acme shop" }, warnings: ["pg_dump is not installed on this box: the full team setup installs it (its Postgres step)"], first_open: (loc?.worktrees ?? []).filter((w) => !w.main).length });
+}
+const dismissed: TeamSuggestion[] = [];
+
+function setSuggestions(list: TeamSuggestion[]) {
+  if (!ctx) return;
+  ctx.status.team_suggestions = list;
+  ctx.emit({ type: "team.suggestions", data: { orgs: list.map((s) => s.org) } });
+}
+
+function suggestionsCall(method: string, route: string): Promise<unknown> | undefined {
+  if (!ctx) return undefined;
+  if (method === "GET" && route === "/v1/team-suggestions") return ctx.delay(ctx.status.team_suggestions ?? []);
+  const m = /^\/v1\/team-suggestions\/([^/]+)\/dismiss$/.exec(route);
+  if (!m) return undefined;
+  const org = decodeURIComponent(m[1]).toLowerCase();
+  const list = ctx.status.team_suggestions ?? [];
+  if (method === "POST") {
+    dismissed.push(...list.filter((s) => s.org.toLowerCase() === org));
+    setSuggestions(list.filter((s) => s.org.toLowerCase() !== org));
+  } else if (method === "DELETE") {
+    const back = dismissed.filter((s) => s.org.toLowerCase() === org);
+    dismissed.splice(0, dismissed.length, ...dismissed.filter((s) => s.org.toLowerCase() !== org));
+    setSuggestions([...list, ...back]);
+  } else return undefined;
+  return ctx.delay(ctx.status.team_suggestions ?? []);
+}
+
 export function initTeamMock(c: TeamMockCtx) {
   ctx = c;
+  if (withSuggestion && !accepted.some((a) => a.org === "acme")) c.status.team_suggestions = [structuredClone(SUGGESTION)];
   // A box of the new engineer's own, set up for nothing yet.
   if (params.has("team") || [...params.keys()].some((k) => k.startsWith("team-"))) c.addBox(TEAM_BOX, "100.64.0.22:7444");
   seedDone();
@@ -682,9 +809,10 @@ export function teamLaptopCall(method: string, path: string, body: unknown, dela
     ghLoginAt = Date.now();
     return delay({ opened: true, command: "gh auth login --hostname github.com --git-protocol https --web" });
   }
+  if (route.startsWith("/v1/team-suggestions")) return suggestionsCall(method, route);
   if (!route.startsWith("/v1/team")) return undefined;
   if (method === "GET" && route === "/v1/team") return delay(accepted);
-  const m = /^\/v1\/team\/([^/]+)(?:\/(setup|retry|update))?$/.exec(route);
+  const m = /^\/v1\/team\/([^/]+)(?:\/(setup|retry|update|pull|kit))?$/.exec(route);
   if (!m) return undefined;
   const org = decodeURIComponent(m[1]);
   const gh = github().state;
@@ -692,6 +820,15 @@ export function teamLaptopCall(method: string, path: string, body: unknown, dela
   if (gh !== "ready") return Promise.reject(new ApiError("Connect GitHub first: gh is not signed in on this computer", 412, "gh_signed_out"));
   if (method === "GET" && !m[2]) return delay(view(org, q));
   if (method === "POST" && m[2] === "setup") return setup(org, body as SetupRequest);
+  if (method === "GET" && m[2] === "kit") return delay(kitPlan(q.get("box") ?? "", q.get("location") ?? ""));
+  if (method === "POST" && m[2] === "kit") return applyKit(body as { box: string; location: string; keys?: boolean; init?: boolean });
+  if (method === "POST" && m[2] === "pull") {
+    const b = body as { repo: string; path: string };
+    const c = clonesOf(b.repo)?.find((x) => x.path === b.path);
+    if (!c) return Promise.reject(new ApiError(`${b.path} is no longer a clone of ${b.repo}`, 400));
+    pulled.add(c.path);
+    return delay({ ...c, behind: 0 });
+  }
   if (method === "POST" && m[2] === "retry") {
     const r = body as { box: string; from: string };
     return retry(r.box, idOf(org), r.from);

@@ -2,7 +2,7 @@
   "id": "issues",
   "name": "Issues",
   "version": "0.1.0",
-  "description": "Open GitHub issues for your projects, and an agent on any of them in one step.",
+  "description": "Open GitHub and Linear issues for your projects, and an agent on any of them in one step.",
   "main": "dist/index.js",
   "builtin": true,
   "defaultEnabled": true

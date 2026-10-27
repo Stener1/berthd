@@ -1,14 +1,17 @@
 package box
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,10 +58,28 @@ type Session struct {
 	// hooks, when they said.
 	Queued int  `json:"queued,omitempty"`
 	Ask    *Ask `json:"ask,omitempty"`
+	// Unfinished is set on a finished agent that turn check read as still
+	// at work without it: a delegated task, a build, a deploy or a watcher
+	// still running, to pick up by itself. Parked is set on one it read as
+	// paused with nothing running: waiting on someone else's reply or a
+	// later time ("check again in 24 hours"), and on nothing from you.
+	Unfinished bool `json:"unfinished,omitempty"`
+	Parked     bool `json:"parked,omitempty"`
+	// SoftWait is set on a waiting agent that turn check read as asking in
+	// its last message: the reply box answers it, and its screen shows its
+	// prompt, with no question there to read options from.
+	SoftWait bool `json:"soft_wait,omitempty"`
 	// Service is set on a worktree service's own terminal (a service with
 	// "terminal": true): the service's name, kept as @berth_service. It is
 	// never an agent, whatever it runs.
 	Service string `json:"service,omitempty"`
+	// Switch is where a structured session can go: "terminal" (Claude
+	// Code's own screen), or "chat" for one in its terminal now
+	// (switch.go).
+	Switch string `json:"switch,omitempty"`
+	// Driver is how berthd reaches the session's agent (driver.go):
+	// "terminal" for every agent today. Empty when it runs no agent.
+	Driver string `json:"driver,omitempty"`
 	// Scope is the systemd scope unit its program runs in (@berth_scope),
 	// on boxes where sessions get one; Usage what its processes use, in
 	// the session list.
@@ -69,6 +90,11 @@ type Session struct {
 	// panePID the process its pane runs.
 	commandFile string
 	panePID     int
+	// conv and sock are a structured agent's log folder and its host's
+	// socket (@berth_conv, @berth_sock; agenthost); bypass, that berthd
+	// answers its permissions (@berth_bypass).
+	conv, sock string
+	bypass     bool
 }
 
 var (
@@ -130,7 +156,13 @@ func (s *Sessions) EnvVar(ctx context.Context, sess Session, key string) string 
 	}
 	out, err := s.tmux(ctx, "show-environment", "-t", "="+sess.Name, key)
 	if err != nil {
-		// Unset, or the session is gone: nothing to remember.
+		// Unset is remembered too: it is the usual answer (no account
+		// folder of its own), and every chat's poll asks it again for
+		// each agent in the folder. A session that is gone, or a tmux
+		// that failed, leaves nothing to remember.
+		if strings.Contains(string(out), "unknown variable") {
+			s.envs.Store(cacheKey, "")
+		}
 		return ""
 	}
 	v, ok := strings.CutPrefix(strings.TrimSpace(string(out)), key+"=")
@@ -146,12 +178,33 @@ const tmuxSocket = "berth"
 // tmuxConfig is berth's own tmux server's. The status line is off because
 // the app draws its own chrome around every terminal; focus events pass
 // through so agents know when their pane is in front.
+//
+// OSC 8 hyperlinks (text a program links somewhere, like a sign-in screen's
+// "Authorize with Codex") reach the app only if tmux knows the terminal
+// attached takes them: a client is attached as xterm-256color (Attach), and
+// tmux's defaults don't say so for xterm, nor does the app's terminal answer
+// the queries tmux would learn it from, so tmux dropped them and the app got
+// the link's text with no address. Hyperlinks came in tmux 3.4; the %if
+// leaves the line out of an older one (3.0 has no terminal-features option
+// at all), and a fixed index keeps it one entry when the file is read again.
+//
+// Shift+Enter is a newline in Claude Code. The app sends it as CSI 13;2u,
+// and tmux passes a modified key on only with extended-keys on and only to
+// a program that asked for them (xterm's modifyOtherKeys, as Claude Code
+// does); a shell that didn't gets a plain Enter, as in a Mac terminal.
+// extended-keys came in tmux 3.2.
 const tmuxConfig = `set -g remain-on-exit on
 set -g history-limit 50000
 set -g mouse on
 set -g default-terminal "tmux-256color"
 set -g status off
 set -g focus-events on
+%if "#{m/r:^(next-|[4-9]|3\.([4-9]|[1-9][0-9])),#{version}}"
+set -s terminal-features[90] "xterm*:hyperlinks"
+%endif
+%if "#{m/r:^(next-|[4-9]|3\.([2-9]|[1-9][0-9])),#{version}}"
+set -s extended-keys on
+%endif
 `
 
 func NewSessions(dir string) (*Sessions, error) {
@@ -190,7 +243,7 @@ func (s *Sessions) tmux(ctx context.Context, args ...string) ([]byte, error) {
 //
 // Sessions started since keep their command in a file (@berth_command_file)
 // and only its start in @berth_command, for older builds to show.
-const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}"
+const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}"
 
 // plainCommandMax is how much of a command the plain @berth_command keeps.
 const plainCommandMax = 1024
@@ -247,10 +300,10 @@ func parseSessions(out []byte) []Session {
 	sessions := []Session{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
-		for len(f) >= 7 && len(f) < 14 {
+		for len(f) >= 7 && len(f) < 18 {
 			f = append(f, "")
 		}
-		if len(f) != 14 {
+		if len(f) != 18 {
 			continue
 		}
 		command := f[4]
@@ -274,9 +327,13 @@ func parseSessions(out []byte) []Session {
 			Title:    f[9],
 			Service:  f[10],
 			Scope:    f[12],
+			Driver:   f[14],
 
 			commandFile: f[11],
 			panePID:     panePID,
+			conv:        f[15],
+			sock:        f[16],
+			bypass:      f[17] == "1",
 		})
 	}
 	return sessions
@@ -286,7 +343,7 @@ func parseSessions(out []byte) []Session {
 // Commands run through a login shell, so tools the user installed (claude,
 // codex) are on PATH even when berthd runs under systemd.
 func (s *Sessions) Create(ctx context.Context, name, location, dir, command string, env []string) (Session, error) {
-	return s.create(ctx, name, location, dir, command, "", env, nil)
+	return s.create(ctx, name, location, dir, command, "", env, nil, nil)
 }
 
 // create is Create with the pane's program run behind wrap, a command that
@@ -297,7 +354,10 @@ func (s *Sessions) Create(ctx context.Context, name, location, dir, command stri
 // BERTH_AGENT, so the agent's hooks can say which session they come from,
 // and agent-browser's idle timeout unless env or berthd's own environment
 // sets it.
-func (s *Sessions) create(ctx context.Context, name, location, dir, command, agent string, env, wrap []string) (Session, error) {
+//
+// labels are more of the session's tmux options (@berth_driver and the
+// like), set with the rest.
+func (s *Sessions) create(ctx context.Context, name, location, dir, command, agent string, env, wrap []string, labels map[string]string) (Session, error) {
 	if !sessionName.MatchString(name) {
 		return Session{}, fmt.Errorf("invalid session name %q: use letters, digits, - and _", name)
 	}
@@ -366,6 +426,9 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 	if scope != "" {
 		set("@berth_scope", scope)
 	}
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		set(k, labels[k])
+	}
 	for i, a := range args {
 		if a != ";" {
 			args[i] = tmuxArg(a)
@@ -420,16 +483,23 @@ func (s *Sessions) SetTitle(ctx context.Context, name, title string) error {
 }
 
 func (s *Sessions) Get(ctx context.Context, name string) (Session, error) {
+	sess, _, err := s.getWithAll(ctx, name)
+	return sess, err
+}
+
+// getWithAll is Get that also returns every session it listed, for a
+// caller that needs the others too without asking tmux again.
+func (s *Sessions) getWithAll(ctx context.Context, name string) (Session, []Session, error) {
 	all, err := s.List(ctx)
 	if err != nil {
-		return Session{}, err
+		return Session{}, nil, err
 	}
 	for _, sess := range all {
 		if sess.Name == name {
-			return sess, nil
+			return sess, all, nil
 		}
 	}
-	return Session{}, ErrUnknownSession
+	return Session{}, nil, ErrUnknownSession
 }
 
 // Kill ends a session and, in the background, everything it started
@@ -486,9 +556,48 @@ func (s *Sessions) Screen(ctx context.Context, name string, history int) (string
 	if _, err := s.Get(ctx, name); err != nil {
 		return "", err
 	}
+	return s.capture(ctx, name, history)
+}
+
+// capture is Screen for a session the caller has just found in a list:
+// without asking tmux for the list again.
+func (s *Sessions) capture(ctx context.Context, name string, history int) (string, error) {
 	out, err := s.tmux(ctx, "capture-pane", "-p", "-J", "-t", "="+name+":", "-S", "-"+strconv.Itoa(max(history, 0)))
 	if err != nil {
 		return "", tmuxError("capture-pane", out, err)
 	}
 	return strings.TrimRight(string(out), "\n") + "\n", nil
+}
+
+// getAndCapture is Get and a capture-pane of the session's pane (with
+// args, such as -e) in one tmux command rather than two: display-message
+// prints the session's line as list-sessions would, then capture-pane its
+// pane. A session that is gone, or a tmux that answers otherwise, is
+// asked again the long way, so its error is Get's.
+func (s *Sessions) getAndCapture(ctx context.Context, name string, args ...string) (Session, []byte, error) {
+	target := "=" + name + ":"
+	cmd := append([]string{"display-message", "-p", "-t", target, listFormat, ";", "capture-pane", "-p"}, args...)
+	out, err := s.tmux(ctx, append(cmd, "-t", target)...)
+	if err == nil {
+		if line, rest, ok := bytes.Cut(out, []byte("\n")); ok {
+			if all := parseSessions(line); len(all) == 1 && all[0].Name == name {
+				sess := all[0]
+				if sess.commandFile != "" {
+					if command, err := readCommand(sess.commandFile); err == nil {
+						sess.Command = command
+					}
+				}
+				return sess, rest, nil
+			}
+		}
+	}
+	sess, err := s.Get(ctx, name)
+	if err != nil {
+		return Session{}, nil, err
+	}
+	out, err = s.tmux(ctx, append(append([]string{"capture-pane", "-p"}, args...), "-t", target)...)
+	if err != nil {
+		return sess, out, tmuxError("capture-pane", out, err)
+	}
+	return sess, out, nil
 }

@@ -97,6 +97,13 @@ region list moves out of the way.
 A different base is a different visual diff; re-running against the same
 base adds a version.
 
+Pages behind a login: `berthd shots compare --as pro@acme.test` logs both
+sides in as one of the project's
+[dev users](/guides/kits#personas-logging-in-as-a-dev-user) first. The
+worktree and main each have their own dev server and database, so each
+side runs its own login; a saved baseline was shot as it was. The visual
+diff records the email in its settings (`login`).
+
 ## Repeatable shots
 
 Two loads of an unchanged page must give the same pixels, or every compare

@@ -53,7 +53,7 @@ func TestAnNPMInstalledAgentIsOfferedAndStarts(t *testing.T) {
 	// The session's login shell (sh -l) knows nothing of nvm.
 	os.WriteFile(filepath.Join(home, ".profile"), []byte("PATH=/usr/bin:/bin:$PATH\n"), 0o644)
 	ctx := context.Background()
-	if _, err := s.create(ctx, "agent", "", home, "claude --model opus", "claude", nil, nil); err != nil {
+	if _, err := s.create(ctx, "agent", "", home, "claude --model opus", "claude", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)

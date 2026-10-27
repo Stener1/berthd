@@ -64,7 +64,9 @@ func installCodexHooks(f files, rel, bin string) (bool, error) {
 	return editJSON(f, rel, func(root map[string]any) bool {
 		hooks := object(root, "hooks")
 		changed := false
-		for _, event := range []string{"SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop"} {
+		// PreToolUse says when Codex asks a question (its question box is a
+		// tool); it and PostToolUse mark the agent busy again after one.
+		for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop"} {
 			if addNested(hooks, event, hookCommand(bin, "codex", event)) {
 				changed = true
 			}
@@ -93,6 +95,19 @@ func InstallGeminiHooks(path, bin string) (bool, error) {
 // file, so it is replaced when it differs.
 func InstallOpenCodePlugin(path, bin string) (bool, error) {
 	want := []byte(adapters.OpenCodePlugin(bin))
+	if have, err := os.ReadFile(path); err == nil && string(have) == string(want) {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	return true, statefile.Write(path, want)
+}
+
+// InstallOmpExtension writes berth's oh-my-pi extension. It is berth's own
+// file, so it is replaced when it differs.
+func InstallOmpExtension(path, bin string) (bool, error) {
+	want := []byte(adapters.OmpExtension(bin))
 	if have, err := os.ReadFile(path); err == nil && string(have) == string(want) {
 		return false, nil
 	}

@@ -42,9 +42,13 @@ var usageSections = []struct {
 		{"%[1]s services%[3]s [--json]", "Which worktree each running server belongs to"},
 		{"%[1]s service list|start|stop|restart|log %[2]sLOC/WORKTREE [SERVICE]", "A worktree's services from the repo's config"},
 		{"%[1]s preview %[2]s[LOC/WORKTREE] [PORT] [--path /x]", "Open a worktree's page in the Shipyard app"},
-		{"%[1]s worktree new %[2]sLOC/NAME [--branch B] [--base REF] [--parent NAME]", "Create a git worktree and run its setup; --parent nests it\nunder another worktree of the location"},
+		{"%[1]s worktree new %[2]sLOC/NAME [--branch B] [--base REF] [--pr N [--ref REF]] [--parent NAME] [--no-setup]", "Create a git worktree and run its setup; --pr checks out a\npull request (BRANCH should be its head branch; a fork's head\nis fetched from REF, default pull/N/head); --parent nests it\nunder another worktree of the location; --no-setup skips setup\nand autostart (the worktree shows setup_pending)"},
+		{"%[1]s worktree setup %[2]sLOC/NAME [--wait]", "Run the location's setup script and autostart services in a\nworktree; --wait blocks until it finishes and fails if setup does"},
 		{"%[1]s worktree rm %[2]sLOC/NAME [--force]", "Remove a worktree"},
 		{"%[1]s worktree rename %[2]sLOC/NAME [TITLE]", "Give a worktree a display name (its branch and folder keep\ntheir names; no TITLE clears it)"},
+		{"%[1]s reviews%[3]s [--idle-days N] [--json]", "Pull requests opened for review here; --idle-days sets how long\none may sit unused before it is cleaned up (0: never)"},
+		{"%[1]s review-button %[2]s[LOC/WT] [--as EMAIL] [--path /x] [--clear] [--json]", "The \"Review in Shipyard\" button on the worktree's PR; --as and\n--path set what it opens with"},
+		{"%[1]s login users %[2]s[LOC[/WT]] [--json]", "Who the project's worktrees can be logged in as"},
 	}},
 	{"Agent sessions", [][2]string{
 		{"%[1]s sessions%[3]s [--json]", "List sessions"},
@@ -76,8 +80,8 @@ var usageSections = []struct {
 		{"%[1]s run cancel %[2]sRUN", "Stop a run"},
 		{"%[1]s flow secret%[3]s FLOW [--scope S] [--json]", "Make a webhook flow's signing secret (shown once)"},
 	}},
-	{"Agent browser (a headless browser on the box, per worktree)", [][2]string{
-		{"%[1]s browser open %[2]s[LOC/WT] [PATH|URL] [--size WxH|PRESET] [--scale N]", "Open the worktree's page ($BERTH_URL); prints a compact snapshot with @refs"},
+	{"Agent browser (a headless browser on the box, per worktree; --tab NAME on any of these\ngives an agent a tab of its own, so agents sharing a worktree don't share a page)", [][2]string{
+		{"%[1]s browser open %[2]s[LOC/WT] [PATH|URL] [--as EMAIL] [--path /x] [--size WxH|PRESET] [--scale N]", "Open the worktree's page ($BERTH_URL), logged in as EMAIL with --as;\nprints a compact snapshot with @refs"},
 		{"%[1]s browser resize %[2]s[LOC/WT] WxH|PRESET [--scale N]", "Set the page's size (default 1920x1080; phone 390x844, tablet, laptop); kept until changed"},
 		{"%[1]s browser snapshot %[2]s[LOC/WT] [--full] [--delta] [--selector SEL] [--depth N]", "The page's elements (interactive by default; capped)"},
 		{"%[1]s browser click|hover|check %[2]s[LOC/WT] @REF", "Act on an element; prints what changed"},
@@ -88,13 +92,14 @@ var usageSections = []struct {
 		{"%[1]s browser console %[2]s[LOC/WT] [--all]", "New console errors and warnings since the last look"},
 		{"%[1]s browser network %[2]s[LOC/WT]", "Failed requests since the last look"},
 		{"%[1]s browser eval %[2]s[LOC/WT] JS", "Run JavaScript in the page (output capped at 2 KB)"},
-		{"%[1]s browser status|close %[2]s[LOC/WT]", "Whether it runs, or close it"},
+		{"%[1]s browser status|close %[2]s[LOC/WT] [--tab NAME]", "Whether it runs, or close it (with --tab, just that tab)"},
+		{"%[1]s browser tabs %[2]s[LOC/WT]", "Its tabs: each its own page, cookies and size ($BERTH_BROWSER_TAB is the default)"},
 		{"%[1]s browser list%[3]s [--json]", "Browsers running on the box"},
 		{"%[1]s browser allow%[3]s ORIGIN", "Let agents' browsers load a public origin (the box owner's)"},
 		{"%[1]s browser reap%[3]s [--dry-run] [--json]", "Close agent-browser (Vercel's CLI) sessions left by ended berth sessions"},
 	}},
 	{"Visual diffs (before/after screenshots of a worktree's pages)", [][2]string{
-		{"%[1]s shots compare %[2]s[LOC/WT] [--pages / /login] [--sizes 375 768 1280]\n         [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both]\n         [--title T] [--note N] [--new]", "Shoot the worktree's pages and the base's, diff them, and\nkeep a visual diff (a new version on a re-run)"},
+		{"%[1]s shots compare %[2]s[LOC/WT] [--pages / /login] [--sizes 375 768 1280]\n         [--base main|turn-start|accepted|NAME] [--mask SEL]... [--color-scheme light|dark|both]\n         [--as EMAIL] [--title T] [--note N] [--new]", "Shoot the worktree's pages and the base's, diff them, and\nkeep a visual diff (a new version on a re-run)"},
 		{"%[1]s shots baseline %[2]s[LOC/WT] [--name turn-start] [--pages …] [--sizes …]", "Save the worktree's pages as a baseline to compare with later"},
 		{"%[1]s shots accept %[2]s[LOC/WT] ID", "Keep a visual diff's after-shots as the accepted baseline"},
 	}},
@@ -115,6 +120,11 @@ var usageSections = []struct {
 		{"%[1]s unit log %[2]sNAME", "What a unit has written, for one that will not stay up"},
 		{"%[1]s unit restart %[2]sNAME", "Start a unit again"},
 		{"%[1]s unit rm %[2]sNAME", "Stop and remove a unit (its log stays)"},
+	}},
+	{"Plugin helpers (programs plugins run on the box)", [][2]string{
+		{"%[1]s helpers%[3]s [--json]", "The helpers of plugins on the box, and whether each runs"},
+		{"%[1]s helper log %[2]sPLUGIN", "What a plugin's helper has printed"},
+		{"%[1]s helper rm %[2]sPLUGIN [--purge]", "Stop and remove a plugin's helper (its data stays; --purge\nremoves that too)"},
 	}},
 	{"Skills for agents", [][2]string{
 		{"%[1]s skills%[3]s [list|install|uninstall] [SKILL...] [--agent claude|codex|all]\n         [--target user|project] [--location LOC] [--commit]", "Teach Claude Code and Codex to use berth"},
@@ -176,9 +186,11 @@ var Commands = map[string]int{
 	"emit": 1, "events": 1,
 	"skills": 1, "preview": 1, "service": 2,
 	"units": 1, "unit": 2,
+	"helpers": 1, "helper": 2,
 	"secret": 2,
 	"runs":   1, "run": 2, "flow": 2, "browser": 2, "shots": 2,
 	"artifact": 2,
+	"reviews":  1, "review-button": 1, "login": 2,
 }
 
 // Run executes args, which start with the command words, against c.
@@ -246,10 +258,16 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 	case "flow secret":
 		return flowSecret(ctx, c, rest, out)
 	case "browser open", "browser resize", "browser snapshot", "browser click", "browser fill", "browser press", "browser select", "browser hover", "browser check",
-		"browser wait", "browser shot", "browser console", "browser network", "browser status", "browser close", "browser eval", "browser allow", "browser list", "browser reap":
+		"browser wait", "browser shot", "browser console", "browser network", "browser status", "browser close", "browser tabs", "browser eval", "browser allow", "browser list", "browser reap":
 		return browserCmd(ctx, c, strings.TrimPrefix(cmd, "browser "), rest, out)
 	case "shots compare", "shots baseline", "shots accept":
 		return shotsCmd(ctx, c, strings.TrimPrefix(cmd, "shots "), rest, out)
+	case "reviews":
+		return reviewsCmd(ctx, c, rest, out)
+	case "review-button":
+		return reviewButtonCmd(ctx, c, rest, out)
+	case "login users":
+		return loginUsersCmd(ctx, c, rest, out)
 	case "artifact add", "artifact list", "artifact ls", "artifact show", "artifact rm":
 		return artifactCmd(ctx, c, strings.TrimPrefix(cmd, "artifact "), rest, out)
 	case "run start", "run get", "run logs", "run cancel", "run approve", "run reject", "run templates":
@@ -346,6 +364,8 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return nil
 	case "worktree new":
 		return worktreeNew(ctx, c, rest, out)
+	case "worktree setup":
+		return worktreeSetup(ctx, c, rest, out)
 	case "worktree rm":
 		fs, _ := flags(rest)
 		force := fs.Bool("force", false, "remove even with uncommitted changes")
@@ -528,7 +548,7 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		}
 		return show(out, *asJSON, i.Agents, func() {
 			if len(i.Agents) == 0 {
-				fmt.Fprintln(out, "No agent CLIs found on this box (claude, codex, opencode, gemini, cursor-agent).")
+				fmt.Fprintln(out, "No agent CLIs found on this box (claude, codex, opencode, gemini, cursor-agent, omp).")
 				return
 			}
 			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
@@ -707,6 +727,62 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		}
 		fmt.Fprintf(out, "Stopped and removed unit %s; its log is still at %s\n", u.Name, u.LogPath)
 		return nil
+	case "helpers":
+		fs, asJSON := flags(rest)
+		parse(fs, rest)
+		all, err := c.Helpers(ctx)
+		if err != nil {
+			return err
+		}
+		return show(out, *asJSON, all, func() {
+			if len(all.Helpers) == 0 {
+				fmt.Fprintf(out, "No plugin has a helper on this box (%s).\n", all.Platform)
+				return
+			}
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "PLUGIN\tHELPER\tVERSION\tSTATE\tPID\tNOTE")
+			for _, h := range all.Helpers {
+				pid := ""
+				if h.PID > 0 {
+					pid = strconv.Itoa(h.PID)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", h.Plugin, h.Name, h.Version, h.State, pid, h.Error)
+			}
+			w.Flush()
+		})
+	case "helper log":
+		if len(rest) != 1 {
+			return usageErr("helper log PLUGIN")
+		}
+		log, err := c.HelperLog(ctx, rest[0], 1<<20)
+		if err != nil {
+			return err
+		}
+		if len(log) == 0 {
+			fmt.Fprintf(out, "The helper of %s has printed nothing yet.\n", rest[0])
+			return nil
+		}
+		out.Write(log)
+		if log[len(log)-1] != '\n' {
+			fmt.Fprintln(out)
+		}
+		return nil
+	case "helper rm":
+		fs, _ := flags(rest)
+		purge := fs.Bool("purge", false, "remove its data too")
+		pos, err := parse(fs, rest)
+		if err != nil || len(pos) != 1 {
+			return usageErr("helper rm PLUGIN [--purge]")
+		}
+		if _, err := c.RemoveHelper(ctx, pos[0], *purge); err != nil {
+			return err
+		}
+		if *purge {
+			fmt.Fprintf(out, "Stopped and removed the helper of %s, and its data\n", pos[0])
+		} else {
+			fmt.Fprintf(out, "Stopped and removed the helper of %s; its data is kept\n", pos[0])
+		}
+		return nil
 	case "unshare":
 		if len(rest) != 1 {
 			return usageErr("unshare ID")
@@ -826,10 +902,13 @@ func worktreeNew(ctx context.Context, c *box.Client, args []string, out io.Write
 	var req box.WorktreeRequest
 	fs.StringVar(&req.Branch, "branch", "", "branch to create (default: the worktree name)")
 	fs.StringVar(&req.Base, "base", "", "ref to branch from")
+	fs.IntVar(&req.PR, "pr", 0, "pull request to check out: origin's --branch if it has one, else REF")
+	fs.StringVar(&req.Ref, "ref", "", "ref holding the pull request's head (default: pull/N/head)")
 	fs.StringVar(&req.Parent, "parent", "", "another worktree of the location to nest this one under")
+	fs.BoolVar(&req.NoSetup, "no-setup", false, "skip the setup script and autostart; run them later with worktree setup")
 	pos, err := parse(fs, args)
-	if err != nil || len(pos) != 1 {
-		return usageErr("worktree new LOC/NAME [--branch B] [--base REF] [--parent NAME]")
+	if err != nil || len(pos) != 1 || req.PR < 0 || (req.Ref != "" && req.PR == 0) {
+		return usageErr("worktree new LOC/NAME [--branch B] [--base REF] [--pr N [--ref REF]] [--parent NAME] [--no-setup]")
 	}
 	loc, name, ok := strings.Cut(pos[0], "/")
 	if !ok || name == "" {
@@ -843,6 +922,61 @@ func worktreeNew(ctx context.Context, c *box.Client, args []string, out io.Write
 	return show(out, *asJSON, wt, func() {
 		fmt.Fprintf(out, "Created %s/%s at %s on %s\n", loc, wt.Name, wt.Path, wt.Branch)
 	})
+}
+
+func worktreeSetup(ctx context.Context, c *box.Client, args []string, out io.Writer) error {
+	fs, _ := flags(args)
+	wait := fs.Bool("wait", false, "block until setup finishes; exit non-zero if it fails")
+	pos, err := parse(fs, args)
+	if err != nil || len(pos) != 1 {
+		return usageErr("worktree setup LOC/NAME [--wait]")
+	}
+	loc, name, ok := strings.Cut(pos[0], "/")
+	if !ok || name == "" {
+		return usageErr("worktree setup LOC/NAME [--wait]")
+	}
+	started, err := c.SetupWorktree(ctx, loc, name)
+	if err != nil {
+		return err
+	}
+	if !*wait {
+		fmt.Fprintf(out, "Started setup of %s/%s\n", loc, name)
+		return nil
+	}
+	if started.Script == "" {
+		fmt.Fprintf(out, "Nothing to set up in %s/%s: the location has no setup script\n", loc, name)
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var result error
+	done := false
+	err = c.EventsSince(ctx, started.Since, func(e events.Event) {
+		if done || (e.Type != "worktree.setup.finished" && e.Type != "worktree.setup.failed") {
+			return
+		}
+		if n, _ := e.Data["name"].(string); n != started.Name {
+			return
+		}
+		if l, _ := e.Data["location"].(string); l != started.Location {
+			return
+		}
+		done = true
+		if e.Type == "worktree.setup.failed" {
+			result = fmt.Errorf("setup of %s/%s failed: %s", loc, name, e.Error)
+		}
+		cancel()
+	})
+	if done {
+		if result == nil {
+			fmt.Fprintf(out, "Finished setup of %s/%s\n", loc, name)
+		}
+		return result
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	return err
 }
 
 func sessions(ctx context.Context, c *box.Client, args []string, out io.Writer) error {

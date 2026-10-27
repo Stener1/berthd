@@ -126,6 +126,30 @@ func slugOf(remote string) string {
 	return strings.Join(parts[len(parts)-2:], "/")
 }
 
+// GitHubSlug is "owner/repo" for a remote on github.com, in any form
+// (https://, ssh://, git@github.com:, or an SSH alias named github.com-*),
+// and "" for any other host: GitHub Enterprise and other forges are not
+// what gh reads by default.
+func GitHubSlug(remote string) string {
+	host := ""
+	if m := scpLike.FindStringSubmatch(remote); m != nil {
+		host = m[1]
+	} else if u, err := url.Parse(remote); err == nil {
+		host = u.Hostname()
+	}
+	host = strings.ToLower(host)
+	switch {
+	case host == "github.com", host == "www.github.com", host == "ssh.github.com", strings.HasPrefix(host, "github.com-"):
+	default:
+		return ""
+	}
+	s := slugOf(remote)
+	if owner, name, ok := strings.Cut(s, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return ""
+	}
+	return s
+}
+
 // repoName is the folder a clone of remote would get.
 func repoName(remote string) string {
 	s := slugOf(remote)

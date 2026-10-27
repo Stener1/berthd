@@ -2,6 +2,7 @@
   "title": "Guides",
   "pages": [
     "home",
+    "structured-agents",
     "orchestration",
     "runs",
     "terminals",
@@ -17,6 +18,10 @@
     "project-config",
     "kits",
     "team-setup",
+    "review-a-pr",
+    "linear",
+    "leadline",
+    "database",
     "secrets",
     "task-templates",
     "agent-integrations",

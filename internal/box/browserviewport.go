@@ -176,7 +176,8 @@ func (cur Viewport) Resolve(size, scale string) (Viewport, error) {
 
 func (m *Browsers) viewportsPath() string { return filepath.Join(m.Dir, "viewports.json") }
 
-// viewports are the sizes agents chose, by worktree path.
+// viewports are the sizes agents chose, by worktree path, and for a named
+// tab by viewportKey.
 func (m *Browsers) viewports() map[string]Viewport {
 	out := map[string]Viewport{}
 	if b, err := os.ReadFile(m.viewportsPath()); err == nil {
@@ -185,30 +186,49 @@ func (m *Browsers) viewports() map[string]Viewport {
 	return out
 }
 
-// Viewport is the size a worktree's browser has, or opens at.
-func (m *Browsers) Viewport(path string) Viewport {
+// viewportKey is where a tab's size is kept: the worktree's path for its
+// main tab, with "#tab=NAME" after it for a named one.
+func viewportKey(path, tab string) string {
+	path = filepath.Clean(path)
+	if tab == "" {
+		return path
+	}
+	return path + "#tab=" + tab
+}
+
+// Viewport is the size a worktree's tab has, or opens at: a named tab
+// without one of its own opens at the main tab's.
+func (m *Browsers) Viewport(path, tab string) Viewport {
 	m.vpMu.Lock()
 	defer m.vpMu.Unlock()
-	if v, ok := m.viewports()[filepath.Clean(path)]; ok && v.Check() == nil {
+	all := m.viewports()
+	if v, ok := all[viewportKey(path, tab)]; ok && v.Check() == nil {
+		return v
+	}
+	if v, ok := all[viewportKey(path, "")]; ok && v.Check() == nil {
 		return v
 	}
 	return DefaultViewport
 }
 
-// setViewport keeps a worktree's size; the default is kept as no entry.
-func (m *Browsers) setViewport(path string, v Viewport) error {
+// setViewport keeps a tab's size; the default is kept as no entry.
+func (m *Browsers) setViewport(path, tab string, v Viewport) error {
 	m.vpMu.Lock()
 	defer m.vpMu.Unlock()
 	all := m.viewports()
-	path = filepath.Clean(path)
+	key := viewportKey(path, tab)
 	if v == DefaultViewport {
-		if _, ok := all[path]; !ok {
+		if _, ok := all[key]; !ok {
 			return nil
 		}
-		delete(all, path)
+		delete(all, key)
 	} else {
-		all[path] = v
+		all[key] = v
 	}
+	return m.writeViewports(all)
+}
+
+func (m *Browsers) writeViewports(all map[string]Viewport) error {
 	if err := os.MkdirAll(m.Dir, 0o700); err != nil {
 		return err
 	}
@@ -216,21 +236,32 @@ func (m *Browsers) setViewport(path string, v Viewport) error {
 	return statefile.Write(m.viewportsPath(), append(data, '\n'))
 }
 
-// forgetViewport drops a removed worktree's size.
+// forgetViewport drops a removed worktree's sizes, its tabs' too.
 func (m *Browsers) forgetViewport(path string) {
-	m.setViewport(path, DefaultViewport)
+	m.vpMu.Lock()
+	defer m.vpMu.Unlock()
+	all := m.viewports()
+	key, n := viewportKey(path, ""), len(all)
+	for k := range all {
+		if k == key || strings.HasPrefix(k, key+"#tab=") {
+			delete(all, k)
+		}
+	}
+	if len(all) != n {
+		m.writeViewports(all)
+	}
 }
 
-// Resize sets a worktree's size, keeps it, and applies it to its browser if
-// one runs (returned, or nil).
-func (m *Browsers) Resize(ctx context.Context, path string, v Viewport) (*browser, error) {
+// Resize sets a tab's size, keeps it, and applies it to the tab if it is
+// open (returned, or nil).
+func (m *Browsers) Resize(ctx context.Context, path, tab string, v Viewport) (*browser, error) {
 	if err := v.Check(); err != nil {
 		return nil, err
 	}
-	if err := m.setViewport(path, v); err != nil {
+	if err := m.setViewport(path, tab, v); err != nil {
 		return nil, err
 	}
-	br := m.Lookup(path)
+	br := m.Lookup(path, tab)
 	if br == nil {
 		return nil, nil
 	}
@@ -240,9 +271,7 @@ func (m *Browsers) Resize(ctx context.Context, path string, v Viewport) (*browse
 // resize applies a size to the running page: its viewport and scale, the
 // screencast's frames, and a fresh frame for whoever watches.
 func (br *browser) resize(ctx context.Context, v Viewport) error {
-	br.run.Lock()
-	defer br.run.Unlock()
-	br.touch()
+	defer br.begin()()
 	if err := br.applyViewport(ctx, v); err != nil {
 		return err
 	}

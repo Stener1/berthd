@@ -8,21 +8,27 @@ type Saved = { labs?: boolean; labsChosen?: boolean; closeAgents?: string; versi
 test("a fresh install starts with Labs on and the harbour home", async ({ app }) => {
   await app.open();
   const prefs = (await app.stored("berth.prefs")) as Saved;
-  expect(prefs).toMatchObject({ labs: true, labsChosen: false, closeAgents: "stop", version: 3 });
-  await expect(app.page.getByTestId("nav-home")).toHaveText(/Home/);
+  expect(prefs).toMatchObject({ labs: true, labsChosen: false, closeAgents: "stop", version: 4 });
+  await expect(app.page.getByTestId("nav-home")).toHaveText(/New task/);
   await expect(app.page.getByRole("heading", { name: "What should your agents work on?" })).toBeVisible();
+});
+
+test("a fresh install gets the project rail", async ({ app }) => {
+  await app.open({ params: { sidebar: "" } });
+  await expect(app.page.getByTestId("project-rail")).toBeVisible();
+  expect(((await app.stored("berth.prefs")) as { sidebarLayout?: string }).sidebarLayout).toBe("rail");
 });
 
 test("prefs an older Shipyard saved move to this version's defaults", async ({ app }) => {
   // Version 2 saved Labs off and "keep" only as the defaults of the day.
   await app.open({ prefs: { labs: false, closeAgents: "keep", agentCloseTips: 2, version: 2 } });
-  await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: true, version: 3 });
-  await expect(app.page.getByTestId("nav-home")).toHaveText(/Home/);
+  await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: true, version: 4 });
+  await expect(app.page.getByTestId("nav-home")).toHaveText(/New task/);
 });
 
 test("prefs from before version 2 drop the old close default too", async ({ app }) => {
   await app.open({ prefs: { labs: false, closeAgents: "keep" } });
-  await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: true, closeAgents: "stop", agentCloseTips: 0, version: 3 });
+  await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: true, closeAgents: "stop", agentCloseTips: 0, version: 4 });
 });
 
 test("Labs turned off in Settings stays off", async ({ app }) => {
@@ -36,13 +42,17 @@ test("Labs turned off in Settings stays off", async ({ app }) => {
 test("Labs can be turned off and on in Settings", async ({ app }) => {
   await app.open();
   const labs = await app.openSettings("labs");
-  const toggle = labs.getByRole("switch");
+  const toggle = labs.getByRole("switch", { name: "Harbour home and conversations" });
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect.poll(() => app.stored("berth.prefs")).toMatchObject({ labs: false, labsChosen: true });
+  // Settings has the window; the sidebar is back once it closes.
+  await app.leaveSettings();
   await expect(app.page.getByTestId("nav-home")).toHaveText(/Agent Dashboard/);
+  await app.openSettings("labs");
   await toggle.click();
-  await expect(app.page.getByTestId("nav-home")).toHaveText(/Home/);
+  await app.leaveSettings();
+  await expect(app.page.getByTestId("nav-home")).toHaveText(/New task/);
 });
 
 test("a new account with no boxes is shown onboarding", async ({ app }) => {

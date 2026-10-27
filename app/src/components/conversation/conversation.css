@@ -46,9 +46,22 @@
 .cv-md strong { font-weight: 600; }
 .cv-md a { color: var(--link, var(--foreground)); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 2px; }
 .cv-md a:hover { text-decoration-color: currentColor; }
+/* An issue, pull request or commit the reply names (repo-refs.tsx): a link
+   the app made rather than one the agent wrote, so a quieter dotted line;
+   hovered or focused, the line in the text's own colour. A commit's hash
+   is set as code is. */
+.cv-md a.cv-ref { text-decoration-style: dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); outline: none; border-radius: 3px; }
+.cv-md a.cv-ref:hover, .cv-md a.cv-ref:focus-visible { text-decoration-color: currentColor; }
+.cv-md a.cv-ref:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.cv-md a.cv-ref-hash { font-family: var(--font-mono); font-size: 0.88em; }
 .cv-md code { font-family: var(--font-mono); font-size: 0.88em; padding: 0.1em 0.35em; border-radius: 5px; background: var(--muted); }
 .cv-md pre { margin: 0 0 0.75em; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--muted) 60%, var(--background)); overflow-x: auto; font-size: 0.7812rem; line-height: 1.5; }
 .cv-md pre code { padding: 0; background: none; font-size: inherit; }
+/* A file the reply names (file-links.tsx): the code it was, a faint dotted
+   line beneath; hovered or focused, the line in the text's own colour. */
+.cv-md code[data-file-ref] { cursor: pointer; text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1px; outline: none; }
+.cv-md code[data-file-ref]:hover, .cv-md code[data-file-ref]:focus-visible { text-decoration-color: var(--foreground); }
+.cv-md code[data-file-ref]:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
 /* Syntax colours (code-highlight.ts): each token carries its colour for
    the light and the dark theme; the app's appearance picks one. The block
    sits nearer the page than other muted surfaces, as the theme's editor
@@ -56,6 +69,18 @@
 .cv-md pre code span { color: var(--diffs-token-light); font-style: var(--diffs-token-light-font-style); font-weight: var(--diffs-token-light-font-weight); }
 .dark .cv-md pre code span { color: var(--diffs-token-dark); font-style: var(--diffs-token-dark-font-style); font-weight: var(--diffs-token-dark-font-weight); }
 .cv-md blockquote { margin: 0 0 0.75em; padding-left: 0.9em; border-left: 2px solid var(--border); color: var(--muted-foreground); }
+/* GitHub's callouts (lib/callouts.ts): a quote washed in its kind's colour
+   from the theme, the state colours and the violet worktrees use, headed
+   by its icon and name in the colour's text shade. Its words are the
+   reply's own, not a quote's muted grey. */
+.cv-md blockquote.cv-callout { --callout: var(--info); --callout-text: var(--info-foreground); padding: 0.55em 0.9em 0.6em; border-left-color: var(--callout); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--callout) 7%, transparent); color: var(--foreground); }
+.cv-md blockquote.cv-callout[data-callout="tip"] { --callout: var(--success); --callout-text: var(--success-foreground); }
+.cv-md blockquote.cv-callout[data-callout="important"] { --callout: var(--wt-violet); --callout-text: var(--wt-violet); }
+.cv-md blockquote.cv-callout[data-callout="warning"] { --callout: var(--warning); --callout-text: var(--warning-foreground); }
+.cv-md blockquote.cv-callout[data-callout="caution"] { --callout: var(--destructive); --callout-text: var(--destructive-foreground); }
+.cv-md blockquote.cv-callout > :last-child { margin-bottom: 0; }
+.cv-md .cv-callout-title { display: flex; align-items: center; gap: 0.45em; margin: 0 0 0.3em; font-weight: 500; color: var(--callout-text); }
+.cv-md .cv-callout-title svg { width: 1em; height: 1em; flex: none; }
 .cv-md hr { margin: 1em 0; border: 0; border-top: 1px solid var(--border); }
 .cv-md .cv-table { margin: 0 0 0.75em; overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
 /* A cell's words and paths wrap only where they can, so a column of
@@ -64,6 +89,26 @@
 .cv-md th, .cv-md td { padding: 6px 10px; text-align: left; vertical-align: top; border-top: 1px solid var(--border); }
 .cv-md thead th { border-top: 0; font-weight: 500; color: var(--muted-foreground); background: var(--muted); }
 .cv-md td:first-child, .cv-md th:first-child { white-space: nowrap; }
+/* Math (KaTeX; its stylesheet loads with it): in the text's colour, its
+   letters about the height of the text's. A display stands centred on its
+   own lines and, wider than the column, scrolls as a wide table does. */
+.cv-md .katex { font-size: 1.1em; overflow-wrap: normal; }
+.cv-md .cv-math-display { display: block; margin: 0.375em 0; padding: 0.25em 0; overflow-x: auto; overflow-y: hidden; }
+.cv-md .cv-math-block { margin: 0 0 0.75em; }
+.cv-md .cv-math-block > .cv-math-display { margin: 0; }
+.cv-md .katex-display { margin: 0; }
+
+.cv-md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
+.cv-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.3em; }
+.cv-md li > input[type="checkbox"] { margin: 0 0.45em 0 0; vertical-align: -0.1em; accent-color: var(--primary); }
+
+/* A Markdown file's Preview (files/markdown-view.tsx): a document, so its
+   headings step down further than a reply's and the top two are ruled, as
+   a README reads on GitHub. */
+.md-doc .cv-md h1 { font-size: 1.75em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+.md-doc .cv-md h2 { font-size: 1.35em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border); margin-top: 1.5em; }
+.md-doc .cv-md h3 { font-size: 1.12em; }
+.md-doc .cv-md p, .md-doc .cv-md ul, .md-doc .cv-md ol { margin-bottom: 0.9em; }
 
 /* A code block's frame: a head naming its language, with Copy, over the
    code. The frame is the block's surface (bordered, the composer's radius);

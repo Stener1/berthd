@@ -21,19 +21,31 @@ import {
 } from "@berth/plugin/ui";
 import { useEffect, useState } from "react";
 
-import * as gh from "./gh";
-import { type Run, loadDetail, runnerOf } from "./store";
+import { type Run, runnerOf } from "./store";
 
 // The sheet behind "Start an agent": for one issue, a worktree named by the
 // box's resolver, a box, an agent and the first prompt, all editable; for
 // several, one agent each, started one after another with a summary.
 
+// An issue to start on, wherever it is from (GitHub or Linear).
 export interface Target {
   project: Project;
-  repo: string;
-  number: number;
+  // One issue, one key: "acme/shop#12", "linear:WEB-12".
+  key: string;
+  // As people say it: "#12", "WEB-12".
+  ref: string;
   title: string;
   runs: Run[];
+  // What the box's resolver names the worktree from (a GitHub issue's URL).
+  // Without it the worktree below is used as it is.
+  resolve?: string;
+  // The worktree when the box has no better name for it.
+  worktree: { name: string; branch: string };
+  // The first prompt: where its template is kept, what it is until the
+  // person changes it, and the {{variables}} it can use.
+  template: { key: string; initial: string; variables: string[] };
+  // render fills a template in from the issue, reading its body first.
+  render(template: string): Promise<string>;
 }
 
 interface Resolution {
@@ -54,7 +66,7 @@ export function StartSheet({ berth, targets, onClose, onStarted }: { berth: Bert
   return (
     <Sheet open={open} onOpenChange={(o: boolean) => !o && onClose()}>
       <SheetPopup side="right" className="max-w-lg">
-        {open && <StartForm key={targets.map((t) => `${t.repo}#${t.number}`).join(",")} berth={berth} targets={targets} onClose={onClose} onStarted={onStarted} />}
+        {open && <StartForm key={targets.map((t) => t.key).join(",")} berth={berth} targets={targets} onClose={onClose} onStarted={onStarted} />}
       </SheetPopup>
     </Sheet>
   );
@@ -63,7 +75,8 @@ export function StartSheet({ berth, targets, onClose, onStarted }: { berth: Bert
 function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginContext; targets: Target[]; onClose(): void; onStarted?(): void }) {
   const single = targets.length === 1 ? targets[0] : undefined;
   const project = targets.every((t) => t.project.id === targets[0].project.id) ? targets[0].project : undefined;
-  const [template, setTemplate] = useStorage("template", gh.DEFAULT_TEMPLATE);
+  // One batch is one kind of issue, so the first target's template is everyone's.
+  const [template, setTemplate] = useStorage(targets[0].template.key, targets[0].template.initial);
   const [lastAgent, setLastAgent] = useStorage("agent", "claude");
 
   // The box: the project's default unless another is picked. Several
@@ -106,9 +119,7 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
     if (!single || !member) return;
     let live = true;
     setResolution(undefined);
-    berth.api
-      .request<Resolution>(box, "POST", `locations/${enc(member.location.name)}/resolve`, { input: gh.issueUrl(single.repo, single.number), kind: "smart" })
-      .catch((): Resolution => ({ name: `issue-${single.number}`, branch: `issue-${single.number}` }))
+    resolveName(berth, box, member.location.name, single)
       .then((r) => {
         if (!live) return;
         setResolution(r);
@@ -119,22 +130,22 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
     };
     // nameEdited is read once, when the answer arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [berth, single?.repo, single?.number, box, member?.location.name]);
+  }, [berth, single?.key, box, member?.location.name]);
 
   const [prompt, setPrompt] = useState<string>();
   const [promptEdited, setPromptEdited] = useState(false);
   useEffect(() => {
     if (!single) return;
     let live = true;
-    void loadDetail(berth, single.project, single.number).then((d) => {
-      if (live && !promptEdited) setPrompt(gh.renderPrompt(template, single.repo, { number: single.number, title: single.title, body: d?.body, url: d?.url }));
+    void single.render(template).then((text) => {
+      if (live && !promptEdited) setPrompt(text);
     });
     return () => {
       live = false;
     };
     // Rendered once from the template; edits after that are the person's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [berth, single?.repo, single?.number]);
+  }, [berth, single?.key]);
 
   const [steps, setSteps] = useState<Step[]>();
   const [error, setError] = useState<string>();
@@ -173,9 +184,7 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
         } else {
           next[i] = { state: "working", what: "Naming the worktree" };
           show();
-          const r = await berth.api
-            .request<Resolution>(where.box, "POST", `locations/${enc(loc.name)}/resolve`, { input: gh.issueUrl(t.repo, t.number), kind: "smart" })
-            .catch((): Resolution => ({ name: `issue-${t.number}`, branch: `issue-${t.number}` }));
+          const r = await resolveName(berth, where.box, loc.name, t);
           const n = unique(r.name, loc.worktrees?.map((w) => w.name) ?? []);
           wt = { name: n, branch: n === r.name ? r.branch : n, base: r.base };
         }
@@ -183,8 +192,7 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
         if (!single) {
           next[i] = { state: "working", what: "Reading the issue" };
           show();
-          const d = await loadDetail(berth, t.project, t.number);
-          text = gh.renderPrompt(template, t.repo, { number: t.number, title: t.title, body: d?.body, url: d?.url });
+          text = await t.render(template);
         }
         next[i] = { state: "working", what: `Starting ${agentName}` };
         show();
@@ -211,7 +219,7 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
     if (single) {
       const s = next[0];
       if (s.state === "started") {
-        berth.notify(`${agentName} is on #${single.number}`, `${s.worktree} on ${s.box}`);
+        berth.notify(`${agentName} is on ${single.ref}`, `${s.worktree} on ${s.box}`);
         onClose();
       } else if (s.state === "failed") {
         setError(s.why);
@@ -237,7 +245,7 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
       <SheetHeader className="gap-1.5 pb-3">
         <SheetTitle className="flex items-center gap-2 text-base">
           <Icon name="Bot" className="size-4 text-muted-foreground" />
-          {single ? `Start an agent on #${single.number}` : `Start ${targets.length} agents`}
+          {single ? `Start an agent on ${single.ref}` : `Start ${targets.length} agents`}
         </SheetTitle>
         <SheetDescription className="line-clamp-2 text-[13px]">{single ? single.title : project ? `One worktree and agent per issue in ${project.name}, one after another.` : "One worktree and agent per issue, each on its project's default box."}</SheetDescription>
       </SheetHeader>
@@ -310,7 +318,13 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
           hint={
             single ? undefined : (
               <>
-                <Code>{"{{number}}"}</Code>, <Code>{"{{title}}"}</Code>, <Code>{"{{body}}"}</Code>, <Code>{"{{url}}"}</Code> and <Code>{"{{repo}}"}</Code> are filled in from each issue.
+                {targets[0].template.variables.map((v, i, all) => (
+                  <span key={v}>
+                    {i > 0 && (i === all.length - 1 ? " and " : ", ")}
+                    <Code>{`{{${v}}}`}</Code>
+                  </span>
+                ))}{" "}
+                are filled in from each issue.
               </>
             )
           }
@@ -336,9 +350,9 @@ function StartForm({ berth, targets, onClose, onStarted }: { berth: BerthPluginC
         {!single && (
           <ol className="flex flex-col divide-y rounded-lg border text-[13px]">
             {targets.map((t, i) => (
-              <li key={`${t.repo}#${t.number}`} className="flex items-center gap-2.5 px-3 py-2">
+              <li key={t.key} className="flex items-center gap-2.5 px-3 py-2">
                 <StepIcon step={steps?.[i]} />
-                <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">#{t.number}</span>
+                <span className="w-14 shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">{t.ref}</span>
                 <span className="min-w-0 flex-1 truncate">{t.title}</span>
                 <StepNote step={steps?.[i]} pending={!steps && t.runs.length ? `has ${t.runs[0].worktree}` : undefined} />
               </li>
@@ -398,6 +412,13 @@ function StepNote({ step, pending }: { step?: Step; pending?: string }) {
 function summary(steps: Step[]) {
   const n = (s: Step["state"]) => steps.filter((x) => x.state === s).length;
   return [`${n("started")} started`, n("skipped") && `${n("skipped")} skipped`, n("failed") && `${n("failed")} failed`].filter(Boolean).join(" · ");
+}
+
+// resolveName asks the box what to call an issue's worktree, when the issue
+// is one its resolver knows (GitHub's); otherwise the target's own name.
+async function resolveName(berth: BerthPluginContext, box: string, location: string, t: Target): Promise<Resolution> {
+  if (!t.resolve) return t.worktree;
+  return berth.api.request<Resolution>(box, "POST", `locations/${enc(location)}/resolve`, { input: t.resolve, kind: "smart" }).catch((): Resolution => t.worktree);
 }
 
 // unique keeps a new worktree's name clear of the location's others.

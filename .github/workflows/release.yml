@@ -7,9 +7,15 @@ name: release
 # notarized and stapled (scripts/mac-release.sh), and adds the dmg, the
 # updater archive and latest.json, the feed installed apps update from. No
 # asset name carries a version, so releases/latest/download/<name> always
-# finds the newest. The checks job (all of ci.yml) must pass first. The
-# release job runs on omarchy, the owner's self-hosted
-# runner (ci/runner/), when the repository variable SELF_HOSTED is true.
+# finds the newest. The checks job (all of ci.yml) runs alongside the builds,
+# and the feed job publishes nothing unless it passes: until then the release
+# is a draft, which releases/latest/download/ and installed apps never see.
+# The release job runs on omarchy, the owner's self-hosted runner
+# (ci/runner/), when the repository variable SELF_HOSTED is true.
+#
+# The builds start from caches release-cache.yml keeps warm on main (a tag's
+# run reads main's caches, not other tags'): the Mac's Go build cache, and
+# the Rust dependencies of the Mac and Linux apps.
 #
 # The linux job builds the Linux desktop app, an alpha, for x86_64 on a
 # hosted Ubuntu runner (scripts/linux-release.sh): an AppImage, which updates
@@ -34,8 +40,9 @@ concurrency:
 jobs:
   # All of CI (ci.yml: Go with -race and a real Chromium, shellcheck, the
   # app's checks, tests, build and Playwright suite, the docs build) on the
-  # tagged commit. Nothing is built or published unless it passes, so a
-  # release needs no test run on a laptop.
+  # tagged commit. It runs while the release is built; nothing is published
+  # unless it passes (the feed job), so a release needs no test run on a
+  # laptop. A failure leaves a draft, which nobody is offered.
   checks:
     uses: ./.github/workflows/ci.yml
 
@@ -73,7 +80,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [tmux, checks]
+    needs: [tmux]
     runs-on: ${{ (vars.SELF_HOSTED == 'true' && github.event_name == 'push' && github.actor == github.repository_owner) && fromJSON('["self-hosted","omarchy"]') || 'ubuntu-latest' }}
     permissions:
       contents: write
@@ -173,6 +180,24 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
+      # main's warm caches (release-cache.yml): read here, never written,
+      # since a tag's caches serve no later tag.
+      - if: steps.published.outputs.published != 'true'
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-mac-release-${{ hashFiles('go.sum') }}-
+          restore-keys: |
+            go-mac-release-${{ hashFiles('go.sum') }}-
+            go-mac-release-
+      - if: steps.published.outputs.published != 'true'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: app/src-tauri
+          shared-key: mac-release
+          save-if: false
       - name: Install tools
         if: steps.published.outputs.published != 'true'
         run: |
@@ -314,6 +339,11 @@ jobs:
           tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
           sudo install -m 0755 "$RUNNER_TEMP/minisign-linux/x86_64/minisign" /usr/local/bin/minisign
           minisign -v
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: app/src-tauri
+          shared-key: linux-release
+          save-if: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: tmux
@@ -344,12 +374,13 @@ jobs:
           if-no-files-found: error
 
   feed:
-    # After the Mac and Linux jobs, whichever finished first: the Mac's
-    # latest.json gets the Linux entries, then the release becomes "latest".
-    # Runs when the Mac app is published even if the Linux build failed; then
-    # the feed stays the Mac's alone.
-    needs: [macos, linux]
-    if: ${{ !cancelled() && needs.macos.result == 'success' }}
+    # After the Mac and Linux jobs, whichever finished first, and the checks:
+    # the Mac's latest.json gets the Linux entries, then the release becomes
+    # "latest". Runs when the Mac app is built even if the Linux build
+    # failed; then the feed stays the Mac's alone. Never when a check failed:
+    # the release stays a draft.
+    needs: [macos, linux, checks]
+    if: ${{ !cancelled() && needs.macos.result == 'success' && needs.checks.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

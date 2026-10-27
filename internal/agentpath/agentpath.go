@@ -43,7 +43,7 @@ import (
 )
 
 // Commands are the agent CLIs Shipyard starts, looked for together.
-var Commands = []string{"claude", "codex", "opencode", "gemini", "cursor-agent", "pi"}
+var Commands = []string{"claude", "codex", "opencode", "gemini", "cursor-agent", "pi", "omp"}
 
 // Found is where an agent's command is.
 type Found struct {

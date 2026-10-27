@@ -51,18 +51,25 @@ func olderPage(w http.ResponseWriter, r *http.Request, agent, path, dir string) 
 
 // claudeRecord is a session's Claude Code record, or why there is none.
 func (b *Box) claudeRecord(r *http.Request) (Session, string, error) {
-	sess, err := b.Sessions.Get(r.Context(), r.PathValue("name"))
+	sess, all, err := b.Sessions.getWithAll(r.Context(), r.PathValue("name"))
 	if err != nil {
 		return Session{}, "", err
 	}
-	agent, path, _ := b.transcriptFile(r, sess)
+	path, err := b.claudeRecordOf(r.Context(), sess, all)
+	return sess, path, err
+}
+
+// claudeRecordOf is sess's Claude Code record, or why there is none. all
+// is the box's sessions when the caller has just listed them.
+func (b *Box) claudeRecordOf(ctx context.Context, sess Session, all []Session) (string, error) {
+	agent, path, _ := b.transcriptFile(ctx, sess, all)
 	switch {
 	case agent != "claude":
-		return sess, "", httpError{http.StatusBadRequest, "this works with Claude Code's conversations; this session runs " + firstNonEmpty(agent, "no agent")}
+		return "", httpError{http.StatusBadRequest, "this works with Claude Code's conversations; this session runs " + firstNonEmpty(agent, "no agent")}
 	case path == "":
-		return sess, "", httpError{http.StatusNotFound, "this session's conversation can't be read yet"}
+		return "", httpError{http.StatusNotFound, "this session's conversation can't be read yet"}
 	}
-	return sess, path, nil
+	return path, nil
 }
 
 // listHelpers answers GET /v1/sessions/{name}/subagents: the helpers the

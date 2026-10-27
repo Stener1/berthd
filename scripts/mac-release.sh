@@ -25,7 +25,10 @@
 # runs under launchd) is signed by make app-binaries with the same identity
 # and the hardened runtime before Tauri seals it in, so notarization covers
 # it too. This signs the dmg if Tauri did not,
-# notarizes and staples it too, and fails unless every check below passes:
+# notarizes and staples it too (waiting DMG_NOTARY_WAIT, 15m: if Apple is
+# still at it then, the dmg ships unstapled with a warning, and its stapler
+# and Gatekeeper checks are skipped; the app inside has passed them), and
+# fails unless every check below passes:
 # codesign --verify --deep --strict, spctl (Gatekeeper's own verdict, which
 # must say "Notarized Developer ID") and stapler validate, on the app, the
 # dmg, the app inside the dmg and the app inside the updater archive; both
@@ -182,24 +185,39 @@ else
 fi
 codesign --verify --strict --verbose=2 "$dmg" || die "the dmg's signature does not verify"
 
+# Apple can be slow with the dmg on a day it takes the app in minutes
+# (v0.3.17: the app in 7 minutes, the dmg not in an hour). The app inside
+# is what macOS checks when it opens, and it is notarized and stapled by
+# now, so the dmg is waited for DMG_NOTARY_WAIT (15m) and, when Apple is
+# still at it, shipped unstapled: its ticket reaches Macs online once Apple
+# finishes. A dmg Apple refuses still fails the release.
+dmg_pending=""
 if [ "$notarize" = 1 ]; then
   step "Notarizing the dmg (the app inside already is)"
+  rc=0
   result="$(xcrun notarytool submit "$dmg" \
     --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
-    --wait --timeout 1h --output-format json)" || die "notarytool failed: $result"
-  status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' <<<"$result")"
-  if [ "$status" != Accepted ]; then
-    id="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' <<<"$result")"
+    --wait --timeout "${DMG_NOTARY_WAIT:-15m}" --output-format json)" || rc=$?
+  field() { python3 -c 'import json,sys; print(json.load(sys.stdin).get(sys.argv[1],""))' "$1" <<<"$result" 2>/dev/null || true; }
+  id="$(field id)"
+  status="$(field status)"
+  if [ "$rc" != 0 ] && [ -n "$id" ] && grep -qi "timeout" <<<"$(field message)"; then
+    dmg_pending="$id"
+    echo "::warning::Apple hasn't finished notarizing the dmg (submission $dmg_pending); it ships unstapled, and its ticket reaches Macs online once Apple does. The app inside is notarized and stapled." >&2
+  elif [ "$rc" != 0 ]; then
+    die "notarytool failed: $result"
+  elif [ "$status" != Accepted ]; then
     [ -z "$id" ] || xcrun notarytool log "$id" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" >&2 || true
     die "Apple did not accept the dmg (status: ${status:-unknown})"
+  else
+    ok "accepted"
+    xcrun stapler staple "$dmg"
   fi
-  ok "accepted"
-  xcrun stapler staple "$dmg"
 fi
 
 step "Checking the dmg"
 codesign --verify --deep --strict --verbose=2 "$dmg" || die "the dmg's signature does not verify"
-if [ "$notarize" = 1 ]; then
+if [ "$notarize" = 1 ] && [ -z "$dmg_pending" ]; then
   gatekeeper install "$dmg"
   xcrun stapler validate "$dmg" || die "the dmg has no stapled notarization ticket"
 fi
@@ -243,4 +261,5 @@ with open(f"{out}/latest.json", "w") as f:
 PY
 
 [ "$notarize" = 1 ] || echo "mac-release: NOT notarized (--no-notarize); for local checks only, do not publish these" >&2
+[ -z "$dmg_pending" ] || echo "mac-release: the dmg's notarization is still with Apple (submission $dmg_pending): check it with notarytool info $dmg_pending" >&2
 (cd "$out" && shasum -a 256 ./*)

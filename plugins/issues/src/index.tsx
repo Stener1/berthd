@@ -1,4 +1,4 @@
-import { type Project, type ScreenProps, type Session, definePlugin, useCurrentWorktree, useProjects, useSessions, useStorage } from "@berth/plugin";
+import { type Project, type ScreenProps, type Session, definePlugin, useCurrentWorktree, useProjects, useStorage } from "@berth/plugin";
 import {
   Button,
   Checkbox,
@@ -18,7 +18,6 @@ import {
   MenuSeparator,
   MenuTrigger,
   PickOne,
-  Skeleton,
   Tip,
   Tooltip,
   TooltipPopup,
@@ -26,17 +25,21 @@ import {
   ViewHeader,
   cn,
 } from "@berth/plugin/ui";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Avatar, Detail, LabelChip, PrIcon, Problem, type Row, StatePill } from "./detail";
 import * as gh from "./gh";
+import { LinearWidget } from "./home";
+import { LinearIssues } from "./linear-view";
+import { KeyHints, RowSkeleton, SessionFeed, useListKeys } from "./shared";
 import { StartSheet, type Target } from "./start-sheet";
-import { type Run, askRefresh, isGitHubProject, listOf, loadList, refreshCount, runnerOf, runsByIssue, useIssuesStore } from "./store";
+import { type Run, askRefresh, isGitHubProject, listOf, loadDetail, loadList, refreshCount, runnerOf, runsByIssue, useIssuesStore } from "./store";
 
 // Issues: the open GitHub issues of a project (or of every project), read
-// with gh on the project's box, and an agent on any of them in one step: a
-// worktree named for the issue, the agent you pick, and the issue as its
-// first prompt. Rows show how that agent is doing from then on.
+// with gh on the project's box, or your Linear issues, read by the laptop
+// with your API key; and an agent on any of them in one step: a worktree
+// named for the issue, the agent you pick, and the issue as its first
+// prompt. Rows show how that agent is doing from then on.
 
 export default definePlugin((berth) => {
   berth.addScreen({ id: "issues", title: "Issues", layout: "fill", Component: IssuesScreen });
@@ -51,14 +54,43 @@ export default definePlugin((berth) => {
       berth.openScreen("issues");
     },
   });
+  berth.addHomeWidget({
+    id: "linear",
+    title: "Linear",
+    description: "Linear issues assigned to you and not done, the most urgent first.",
+    icon: "ListTodo",
+    category: "Work",
+    sizes: ["m", "l", "t", "w"],
+    source: "Linear, asked by this computer with your API key, every 3 minutes while on screen",
+    Component: LinearWidget,
+  });
 });
 
 type Who = "all" | "mine" | "unassigned";
 type Sort = "updated" | "newest" | "discussed";
+type Source = "github" | "linear";
 
 const ALL = "all";
 
+// IssuesScreen is one of two lists, GitHub's or Linear's, and the switch
+// between them, which each list puts in its header.
 function IssuesScreen({ berth }: ScreenProps) {
+  const [source, setSource] = useStorage<Source>("source", "github");
+  const picker = (
+    <PickOne
+      label="Issues from"
+      value={source}
+      onChange={(v: string) => setSource(v as Source)}
+      options={[
+        { value: "github", label: "GitHub" },
+        { value: "linear", label: "Linear" },
+      ]}
+    />
+  );
+  return source === "linear" ? <LinearIssues berth={berth} source={picker} /> : <GitHubIssues berth={berth} source={picker} />;
+}
+
+function GitHubIssues({ berth, source }: ScreenProps & { source: ReactNode }) {
   useIssuesStore();
   const allProjects = useProjects();
   const projects = useMemo(() => allProjects.filter(isGitHubProject), [allProjects]);
@@ -153,43 +185,34 @@ function IssuesScreen({ berth }: ScreenProps) {
     });
 
   const [targets, setTargets] = useState<Target[]>([]);
-  const targetOf = (r: Row): Target => ({ project: r.project, repo: r.repo, number: r.number, title: r.title, runs: runs.get(r.key) ?? [] });
+  const targetOf = (r: Row): Target => ({
+    project: r.project,
+    key: r.key,
+    ref: `#${r.number}`,
+    title: r.title,
+    runs: runs.get(r.key) ?? [],
+    resolve: gh.issueUrl(r.repo, r.number),
+    worktree: { name: `issue-${r.number}`, branch: `issue-${r.number}` },
+    template: { key: "template", initial: gh.DEFAULT_TEMPLATE, variables: ["number", "title", "body", "url", "repo"] },
+    render: async (template) => {
+      const d = await loadDetail(berth, r.project, r.number);
+      return gh.renderPrompt(template, r.repo, { number: r.number, title: r.title, body: d?.body, url: d?.url });
+    },
+  });
   const startOn = (rs: Row[]) => rs.length && setTargets(rs.map(targetOf));
 
-  // Keys: J/K move, X ticks, S starts, O opens on GitHub, / searches.
-  const keys = useRef({ filtered, selected, checkedRows, targets });
-  keys.current = { filtered, selected, checkedRows, targets };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.metaKey || e.ctrlKey || e.altKey || keys.current.targets.length) return;
-      if (t && (t.closest("input, textarea, [contenteditable=true], [role=dialog], [role=menu]") || t.isContentEditable)) {
-        if (e.key === "Escape" && t === search.current) search.current?.blur();
-        return;
-      }
-      const { filtered: list, selected: sel, checkedRows: ticked } = keys.current;
-      const i = sel ? list.indexOf(sel) : -1;
-      const move = (d: number) => {
-        const next = list[Math.min(list.length - 1, Math.max(0, i + d))];
-        if (!next) return;
-        setSelectedKey(next.key);
-        document.getElementById(`issue-${next.key}`)?.scrollIntoView({ block: "nearest" });
-      };
-      if (e.key === "j" || e.key === "ArrowDown") move(1);
-      else if (e.key === "k" || e.key === "ArrowUp") move(-1);
-      else if (e.key === "x" && sel) toggle(sel.key);
-      else if (e.key === "s") startOn(ticked.length ? ticked : sel ? [sel] : []);
-      else if (e.key === "o" && sel) berth.openUrl(gh.issueUrl(sel.repo, sel.number));
-      else if (e.key === "/") search.current?.focus();
-      else if (e.key === "Escape") setChecked(new Set());
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // startOn and toggle only use setters and the refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [berth]);
+  useListKeys<Row>({
+    list: filtered,
+    selected,
+    ticked: checkedRows,
+    blocked: targets.length > 0,
+    search,
+    select: setSelectedKey,
+    toggle,
+    start: startOn,
+    open: (r) => berth.openUrl(gh.issueUrl(r.repo, r.number)),
+    clear: () => setChecked(new Set()),
+  });
 
   const busyRuns = useMemo(() => [...runs.values()].filter((rs) => rs[0]?.session && rs[0].session.agent_state !== "finished").length, [runs]);
 
@@ -203,6 +226,7 @@ function IssuesScreen({ berth }: ScreenProps) {
         description={busyRuns > 0 ? `${busyRuns} agent${busyRuns === 1 ? " is" : "s are"} on issues right now.` : "Open GitHub issues, and an agent on any of them in one step."}
         actions={
           <>
+            {source}
             <ProjectPicker projects={projects} scope={scope} onChange={(id) => (setStored(id), setChecked(new Set()))} />
             <Tooltip>
               <TooltipTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Refresh" onClick={refresh} disabled={!shown.length} />}>
@@ -332,29 +356,7 @@ function IssuesScreen({ berth }: ScreenProps) {
                   </Button>
                 </footer>
               ) : (
-                <footer className="flex shrink-0 items-center gap-2.5 overflow-hidden whitespace-nowrap border-t px-3 py-2 text-[11px] text-muted-foreground">
-                  {(
-                    [
-                      ["J K", "move"],
-                      ["X", "select"],
-                      ["S", "start agent"],
-                      ["O", "GitHub"],
-                    ] as const
-                  ).map(([k, label]) => (
-                    <span key={label} className="inline-flex items-center gap-1">
-                      {k.split(" ").map((x) => (
-                        <Kbd key={x} className="h-4 min-w-4 px-1 text-[10px]">
-                          {x}
-                        </Kbd>
-                      ))}
-                      {label}
-                    </span>
-                  ))}
-                  <span className="ml-auto tabular-nums">
-                    {filtered.length === rows.length ? `${rows.length}` : `${filtered.length} of ${rows.length}`}
-                    {total > rows.length ? ` · ${total} open` : ""}
-                  </span>
-                </footer>
+                <KeyHints where="GitHub" count={`${filtered.length === rows.length ? `${rows.length}` : `${filtered.length} of ${rows.length}`}${total > rows.length ? ` · ${total} open` : ""}`} />
               )}
             </aside>
             <section className="min-w-0 flex-1 overflow-y-auto">
@@ -370,14 +372,6 @@ function IssuesScreen({ berth }: ScreenProps) {
       <StartSheet berth={berth} targets={targets} onClose={() => setTargets([])} onStarted={() => setChecked(new Set())} />
     </div>
   );
-}
-
-// SessionFeed hands a box's live sessions up, so rows can follow agents on
-// every box the shown projects are on.
-function SessionFeed({ box, onSessions }: { box: string; onSessions(box: string, s?: Session[]): void }) {
-  const s = useSessions(box);
-  useEffect(() => onSessions(box, s), [box, s, onSessions]);
-  return null;
 }
 
 function IssueRow({
@@ -479,18 +473,6 @@ function IssueRow({
             )}
           </span>
         </span>
-      </div>
-    </li>
-  );
-}
-
-function RowSkeleton() {
-  return (
-    <li className="flex gap-2.5 px-2.5 py-2.5">
-      <Skeleton className="mt-0.5 size-3.5 rounded-full" />
-      <div className="flex flex-1 flex-col gap-1.5">
-        <Skeleton className="h-3.5 w-4/5" />
-        <Skeleton className="h-3 w-2/5" />
       </div>
     </li>
   );

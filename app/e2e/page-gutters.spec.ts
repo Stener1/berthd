@@ -1,0 +1,42 @@
+import { expect, mockOnly, test } from "./fixtures";
+
+// A full-page view's content starts on its header's gutter (px-page, the
+// grid in index.css), so the view's name and what's under it line up.
+
+// lined says whether the left of the view's title and of the first thing
+// under its header that `content` picks, from the header's parent.
+async function lined(page: import("@playwright/test").Page, title: string, content: string) {
+  return page.evaluate(
+    ({ title, content }) => {
+      const h1 = [...document.querySelectorAll("header h1")].find((h) => h.textContent === title);
+      const el = h1?.closest("header")?.parentElement?.querySelector(content);
+      if (!h1 || !el) return false;
+      const pad = parseFloat(getComputedStyle(el).paddingLeft) || 0;
+      return Math.round(h1.getBoundingClientRect().left) === Math.round(el.getBoundingClientRect().left + pad);
+    },
+    { title, content },
+  );
+}
+
+test("the Agent Dashboard's columns start under its title", async ({ app }) => {
+  mockOnly();
+  // Without Labs, the first place is the Agent Dashboard itself.
+  await app.open({ prefs: { labs: false, labsChosen: true, version: 3 } });
+  await app.page.getByTestId("nav-home").click();
+  await expect.poll(() => lined(app.page, "Agent Dashboard", "section[aria-label]")).toBe(true);
+});
+
+test("the Worktrees view's filters start under its title", async ({ app }) => {
+  mockOnly();
+  await app.open();
+  await app.page.getByTestId("nav-worktrees").click();
+  await expect.poll(() => lined(app.page, "Worktrees", "header + div > :first-child")).toBe(true);
+});
+
+test("Review's work starts under its title", async ({ app }) => {
+  mockOnly();
+  await app.open();
+  await app.page.getByTestId("nav-review").click();
+  // A row's content (its padding in from its highlight) is on the gutter.
+  await expect.poll(() => lined(app.page, "Review", "ul[aria-label='Work to review'] li button")).toBe(true);
+});

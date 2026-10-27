@@ -183,9 +183,11 @@ test("a crew row's Report badge brings the report into view", async ({ app }) =>
   if ((await crew.getAttribute("data-open")) === null) await crew.locator("[data-crew-toggle]").click();
   await scrollChat(app.page, "bottom");
   const report = card(app, "report", "Map ledger writes");
-  await expect(report).not.toBeInViewport();
+  // Scrolled to the bottom, the report is above, out of view (its edge may
+  // peek in under the tab bar); the badge brings it into view.
+  await expect(report).not.toBeInViewport({ ratio: 0.5 });
   await crew.locator("[data-crew-report=toolu_ledger]").click();
-  await expect(report).toBeInViewport();
+  await expect(report).toBeInViewport({ ratio: 0.5 });
   // The time column keeps "12m 00s"-wide times on one line.
   const time = crew.locator("[data-crew-list] li").first().locator("span.font-mono");
   await expect.poll(async () => (await time.boundingBox())?.height ?? 99).toBeLessThan(22);

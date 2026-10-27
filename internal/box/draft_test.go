@@ -15,7 +15,13 @@ import (
 
 func screen(t *testing.T, name string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "draft", name))
+	return fixture(t, "draft", name)
+}
+
+// fixture is a captured screen under testdata/DIR.
+func fixture(t *testing.T, dir, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", dir, name))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,11 +13,18 @@ import { type BrowserContext, expect, type Locator, type Page, test as base } fr
 //
 // Stable hooks, so tests never click text that moves: data-testid where
 // nothing else was stable (worktree-row with data-worktree="box/name",
-// nav-<id>, pane with data-pane-kind, chat, chat-item with data-kind,
+// nav-<id>, nav-more, nav-badge, pane with data-pane-kind, chat, chat-item with data-kind,
 // composer, question-form, queued-reply, artifacts-chip/-popover,
 // attachment-chip, panel with data-panel, browser-pane with data-mode,
-// chat-background, settings-nav-<id>, settings-<id>, theme-option with
-// data-theme-id, zoom-hud), and the attributes the app already keys on
+// chat-background, header-picture with data-picture, header-picture-settings, settings-nav-<id>, settings-<id>, theme-option with
+// data-theme-id, plugin-row and market-plugin with data-plugin,
+// market-error, zoom-hud, leadline with data-leadline and data-state, and
+// its leadline-row, -detail, -notice, -box, database with data-state, and
+// its database-table, -row with data-row and cells with data-col, -notice,
+// -lock with data-writes, -staged, -review, -console, -box, skills-notices
+// and its skills-notice with data-box, data-kind and data-state,
+// skills-notices-more and -rail, skills-reminder), and the attributes the
+// app already keys on
 // (data-tab, data-ws, data-group, data-tab-strip, data-pane-area).
 
 export const live = process.env.BERTH_E2E_LIVE === "1";
@@ -58,6 +65,8 @@ export interface App {
   openSettings(section: string): Promise<Locator>;
   // What the app has saved, as JSON.
   stored(key: string): Promise<unknown>;
+  // Back from Settings to the sidebar, when Settings is open.
+  leaveSettings(): Promise<void>;
   // Requests that tried to reach the laptop agent from a mock test.
   agentCalls: string[];
 }
@@ -116,6 +125,9 @@ export const test = base.extend<{ app: App }>({
           );
         }
         const q = new URLSearchParams(opts.agent ? { token: opts.agent.token, agent: opts.agent.url } : live ? { token, agent: agentUrl } : { mock: "1" });
+        // The specs were written against the list sidebar; they keep it
+        // unless they seed or ask for another layout (sidebar-rail.spec.ts).
+        if (!opts.prefs?.sidebarLayout) q.set("sidebar", "list");
         for (const [k, v] of Object.entries(opts.params ?? {})) q.set(k, v);
         await page.goto(`/?${q}`);
         // Connected: the sidebar's places are there and not dimmed.
@@ -124,28 +136,34 @@ export const test = base.extend<{ app: App }>({
       },
       worktree: (w) => page.locator(`[data-testid=worktree-row][data-worktree="${w}"]`),
       async openWorktree(w) {
+        await app.leaveSettings();
         const row = app.worktree(w);
-        // A real fleet folds worktrees with nothing going on under
-        // "N more worktrees" (smoke:live): unfold them to find this one.
-        const more = page.getByText(/^\d+ more worktrees?$/);
-        await expect(row.or(more.first())).toBeVisible();
-        if (!(await row.isVisible())) {
-          while ((await more.count()) > 0 && !(await row.isVisible())) await more.first().click();
-        }
-        await row.click();
+        await expect(row).toBeVisible();
+        // On its title: a narrow row's middle can be under its + and ⋯.
+        await row.click({ position: { x: 32, y: 12 } });
         await expect(row).toHaveAttribute("data-active", "true");
       },
       panes: page.locator("[data-testid=pane]:visible"),
       chat: page.locator("[data-testid=pane]:visible [data-testid=chat]"),
       composer: page.locator("[data-testid=pane]:visible [data-testid=composer]"),
       async openSettings(section) {
-        await page.getByTestId("nav-settings").click();
+        // Already in Settings, its own nav has the section.
+        if (await page.getByTestId("nav-settings").isVisible()) await page.getByTestId("nav-settings").click();
         await page.getByTestId(`settings-nav-${section}`).click();
         const body = page.getByTestId(`settings-${section}`);
         await expect(body).toBeVisible();
         return body;
       },
       stored: (key) => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? "null"), key),
+      // Settings draws its own nav where the sidebar is; Back to app brings
+      // the sidebar back. Nothing happens when Settings isn't open.
+      async leaveSettings() {
+        const back = page.getByRole("button", { name: "Back to app" });
+        if (await back.isVisible()) {
+          await back.click();
+          await expect(page.getByTestId("nav-home")).toBeVisible();
+        }
+      },
     };
 
     await use(app);
@@ -168,10 +186,7 @@ export async function agentWorktree(app: App, mock: string): Promise<string> {
   if (!live) return mock;
   if (process.env.BERTH_E2E_WORKTREE) return process.env.BERTH_E2E_WORKTREE;
   const rows = app.page.locator("[data-testid=worktree-row]");
-  const more = app.page.getByText(/^\d+ more worktrees?$/);
-  await expect(rows.or(more).first()).toBeVisible();
-  // Worktrees with nothing going on are folded away: unfold them all.
-  while ((await more.count()) > 0) await more.first().click();
+  await expect(rows.first()).toBeVisible();
   for (const row of await rows.all()) {
     if (await row.locator("svg.lucide-asterisk, [role=img]").count()) return (await row.getAttribute("data-worktree")) ?? mock;
   }

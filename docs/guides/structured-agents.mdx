@@ -1,0 +1,98 @@
+---
+title: Agents in chat
+description: How agents run as a conversation the box drives through their own protocol, what Permissions does, and Claude Code's own terminal.
+---
+
+A new Claude Code, Codex, OpenCode, Gemini CLI, Cursor Agent or oh-my-pi
+agent runs in chat: without its terminal, as a conversation, whether
+[Labs](/guides/labs) is on or off. There is nothing to turn on. For Claude
+Code the box starts `claude -p` speaking stream-json under
+`berthd agent-host`, which keeps the agent running in its tmux session and
+writes everything that passes between them to the box's own record of the
+conversation. The box drives it from there:
+
+- **The conversation** is read from that record, and the reply being written
+  streams into the chat as it is written. The chat's controls, commands and
+  history are in [the conversation view](/guides/labs#conversation-view).
+- **Stop** interrupts the turn, as Esc does in its terminal.
+- **Resume.** An agent in chat that ended offers *Resume the conversation*
+  in its pane, and a worktree's menu lists its conversations whose agents
+  aren't running under *Resume a conversation*: each carries on, with
+  Claude Code's `--resume`, in its own record, so the chat shows its earlier
+  turns.
+- **`/resume`** in the chat opens Shipyard's own list of the agent's past
+  conversations in the folder, newest first: Claude Code's, including those
+  had in its terminal, or what an ACP agent lists (ACP's `session/list`).
+  Picking one carries it on in the same tab, its earlier turns in the chat;
+  the conversation it leaves stays under *Resume a conversation*. One running
+  in another tab is shown but can't be picked. `/resume words` opens the list
+  filtered by them. Codex's threads aren't listed yet: use its terminal.
+- **Skills** the agent loads show as a step ("Used the … skill"), not as the
+  skill's text in a message of yours.
+
+## Permissions
+
+When an agent wants to run a command or change a file, Settings → Agents
+and models → *Permissions* decides what happens:
+
+- **Bypass**, the default, has the box allow it for you. Questions the
+  agent asks and its plans always wait for you.
+- **Ask** brings each one to the chat, with **Allow**, **Always allow**
+  (for the rest of the session) and **Deny**.
+
+The choice is for agents you start from then on; one already running keeps
+its mode, and the chat's mode menu switches it between bypass, ask, accept
+edits, plan and auto. An ACP agent under *Ask* starts in its own first mode
+and offers its own modes in that menu.
+
+## Claude Code's own terminal
+
+Claude Code's terminal is one click away: the pane's Terminal switch
+(*Open in Claude Code's terminal*) stops the agent in chat and opens the
+same conversation in Claude Code's screen (`claude --resume`), for what
+only it does (`/login`, `/memory`, `/permissions`, its menus).
+Conversation (*Back to the chat*) takes it back, with what you said in the
+terminal in its place. Either way needs the agent to be idle. In a folder
+Claude Code hasn't seen, its screen first asks whether you trust it.
+
+Codex and the ACP agents have no screen of their own to switch to.
+
+## Codex and ACP agents
+
+- **Codex** runs as `codex app-server` under the same host: the box opens its
+  thread, sends each prompt as a turn with the agent's mode, model and effort,
+  and brings its command and file-change approvals and its questions to the
+  chat. Its modes are default (asks to go past its workspace sandbox),
+  untrusted (asks before untrusted commands), read only, and bypass (no
+  sandbox, nothing asked).
+- **OpenCode, Gemini CLI, Cursor Agent and oh-my-pi** speak the Agent Client
+  Protocol (`opencode acp`, `gemini --acp`, `cursor-agent acp`, `omp acp`), and so does any agent
+  whose preset in a repository's config has an [`acp`](/reference/config):
+  the box opens its session (with its own login, for Cursor Agent), streams
+  its reply, cancels its turn, switches its own modes, and brings its
+  permission requests to the chat; *Bypass* has the box allow them.
+
+An agent with no such protocol (Aider, a preset of your own without `acp`)
+runs in its terminal, as always.
+
+## Agents started without the app
+
+Agents another agent starts with the berth tools, those started with
+`berth task new` or `berth session new --agent`, and the agents of runs and
+automations run in chat too. Shipyard gives each box your *Permissions*
+choice whenever it connects and whenever you change it. A box it hasn't
+reached yet starts them in chat asking for each permission, since nobody
+chose to let them through. A request that names `"driver": "terminal"`
+still gets the terminal.
+
+## Older boxes
+
+The box needs the `driver.claude` capability (`driver.codex` for Codex,
+`driver.acp` for ACP agents), `driver.switch` for Claude Code's terminal,
+and `agents.defaults` for agents started without the app. On a box without
+them, agents run in their terminals as they did before (with Labs, their
+[conversation view](/guides/labs#conversation-view) reads their
+transcript) until you upgrade it.
+
+The agent keeps working while berthd restarts or upgrades, and the record
+keeps every streamed word even if the agent is killed.

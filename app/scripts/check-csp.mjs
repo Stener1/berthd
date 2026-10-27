@@ -35,6 +35,9 @@ assert.ok(worker.includes("'self'"), "worker-src (or script-src) needs 'self': t
 // the frosted grain is a data: SVG.
 has("img-src", "blob:", "Settings shows your chat backgrounds from blob: URLs");
 has("img-src", "data:", "the chat background's frosted grain is a data: image");
+// A Markdown file's Preview shows a README's badges and screenshots from
+// the web; the worktree's own pictures are blob: URLs.
+has("img-src", "https:", "a Markdown file's Preview shows pictures from the web");
 // Terminals: ghostty-web fetches its WebAssembly from a data: URL and
 // compiles it (src/lib/terminal.ts).
 has("connect-src", "data:", "ghostty-web fetches its WebAssembly from a data: URL");

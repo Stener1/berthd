@@ -23,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/cosscom/shipyard/internal/box"
+	"github.com/cosscom/shipyard/internal/copybuf"
 	"github.com/cosscom/shipyard/internal/hooks"
 	"github.com/cosscom/shipyard/internal/statefile"
 	"github.com/cosscom/shipyard/internal/terminal"
@@ -98,6 +99,9 @@ func (a *Agent) ui(token, hostport string, inner http.Handler) http.Handler {
 	mux.HandleFunc("POST /v1/boxes/{box}/attach-local", a.uiAttachLocal)
 	mux.HandleFunc("GET /v1/boxes/{box}/sessions/{name}/attach", a.uiAttach)
 	a.manageRoutes(mux)
+	a.marketplaceRoutes(mux)
+	a.helperRoutes(mux)
+	a.helperTidyRoutes(mux)
 	a.guidedRoutes(mux)
 	a.outdatedRoutes(mux)
 	a.localBoxRoutes(mux)
@@ -121,6 +125,11 @@ func (a *Agent) ui(token, hostport string, inner http.Handler) http.Handler {
 			h.Set("Access-Control-Allow-Origin", o)
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, If-Match, If-None-Match")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			// Every call carries the token, so every one is preflighted:
+			// without this the webview keeps a preflight for 5s only, and
+			// each poll costs two requests and two round trips. 600s is
+			// the most WebKit keeps one for.
+			h.Set("Access-Control-Max-Age", "600")
 			h.Set("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {
@@ -242,6 +251,18 @@ func (a *Agent) uiBoxAPI(w http.ResponseWriter, r *http.Request) {
 	a.relayBox(w, r, c, r.Method, target, body, header)
 }
 
+// helperRelayed reports whether a box path is a request the box relays to a
+// plugin's helper (box/helpersapi.go), and names the plugin.
+func helperRelayed(target string) (plugin string, ok bool) {
+	route, _, _ := strings.Cut(target, "?")
+	rest, ok := strings.CutPrefix(route, "/v1/helpers/")
+	if !ok {
+		return "", false
+	}
+	plugin, rest, ok = strings.Cut(rest, "/")
+	return plugin, ok && plugin != "" && (rest == "api" || strings.HasPrefix(rest, "api/"))
+}
+
 // relayBox sends one request to a box and streams its answer back.
 func (a *Agent) relayBox(w http.ResponseWriter, r *http.Request, c *wire.Client, method, target string, body io.Reader, header http.Header) {
 	// A box slow to answer may have gone: check it now rather than at the
@@ -250,6 +271,22 @@ func (a *Agent) relayBox(w http.ResponseWriter, r *http.Request, c *wire.Client,
 	resp, err := c.DoWithHeader(r.Context(), method, target, body, header)
 	slow.Stop()
 	if err != nil {
+		// A plugin's helper may turn a request away with a 401 of its own:
+		// one that asks for a token does, of a box whose berthd is from
+		// before it sent one, and that berthd relays the answer as it came.
+		// To the connection that carries it a 401 is the box's, and means
+		// the box no longer trusts this laptop, which it does. So the box
+		// is asked: when it still answers this laptop, the refusal was the
+		// helper's, and is passed on as one.
+		if plugin, ok := helperRelayed(target); ok && errors.Is(err, wire.ErrUntrusted) {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			_, perr := c.Ping(ctx)
+			cancel()
+			if perr == nil {
+				writeCoded(w, http.StatusUnauthorized, "the "+plugin+" helper on "+r.PathValue("box")+" turned the box's request away: the box's berthd did not send the token the helper asks for. A berthd from before helpers had tokens sends none: update the box", "unauthorized")
+				return
+			}
+		}
 		a.checkSoon()
 		// 503: the request never reached the box, so it is safe to queue
 		// or retry. 502: it may have; the box could have acted on it.
@@ -272,7 +309,8 @@ func (a *Agent) relayBox(w http.ResponseWriter, r *http.Request, c *wire.Client,
 	}
 	w.WriteHeader(resp.StatusCode)
 	rc := http.NewResponseController(w)
-	buf := make([]byte, 32<<10)
+	buf := copybuf.Pool{}.Get()
+	defer copybuf.Pool{}.Put(buf)
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
@@ -492,15 +530,25 @@ type PluginInfo struct {
 	Changed bool `json:"changed,omitempty"`
 	// Entry is the URL the app imports, when the plugin has a main module.
 	Entry string `json:"entry,omitempty"`
-	Error string `json:"error,omitempty"`
+	// Source is "marketplace" for a plugin installed from the listing
+	// (marketplace.go), which the app can update and remove.
+	Source string `json:"source,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 func (a *Agent) plugins() []PluginInfo {
 	manifests, _ := filepath.Glob(filepath.Join(a.cfg.UserDir, "plugins", "*", hooks.PluginManifest))
 	out := []PluginInfo{}
+	sources := a.readPluginSources()
 	for _, m := range manifests {
 		dir := filepath.Dir(m)
 		p := PluginInfo{ID: filepath.Base(dir)}
+		// A link in its place is someone's own plugin, whatever was there.
+		if _, ok := sources[p.ID]; ok {
+			if fi, err := os.Lstat(dir); err == nil && fi.IsDir() {
+				p.Source = "marketplace"
+			}
+		}
 		var raw struct {
 			PluginInfo
 			Hooks []json.RawMessage `json:"hooks"`
@@ -528,6 +576,9 @@ func (a *Agent) plugins() []PluginInfo {
 }
 
 func (a *Agent) uiPlugins(w http.ResponseWriter, r *http.Request) {
+	// The app is looking at its plugins: a good moment to notice one that
+	// changed on disk, and what that means for its helper.
+	a.wakeHelperTidy()
 	writeJSON(w, http.StatusOK, a.plugins())
 }
 

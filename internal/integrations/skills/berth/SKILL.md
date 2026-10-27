@@ -116,6 +116,40 @@ then shows `repo_trust.state` as `untrusted` or `changed`. Never trust it
 yourself (`--trust`); tell the user what it wants to run and let them decide
 in the app or with `berth location config BOX/LOC --trust HASH`.
 
+## Review links for the PRs you open
+
+When a pull request you open from a berth worktree changes something a
+reviewer would look at in a browser (pages, components, styles, copy, UI
+behaviour), end its description with a **Review in Shipyard** button, so a
+teammate opens it on their own box in one click, set up by the team's kit,
+at the page it changes. Leave it out of PRs with nothing to see: backend,
+API, infrastructure, tests or docs alone. GitHub drops `berth://` links, so the
+button goes through berthd.app, which opens the review in Shipyard:
+
+```md
+<!-- shipyard-review-button -->
+[![Review in Shipyard](https://berthd.app/badges/review.svg)](https://berthd.app/review?repo=OWNER/NAME&pr=N&as=EMAIL&path=/x)
+<!-- /shipyard-review-button -->
+```
+
+- `repo` and `pr` are the PR's. Open the PR first, then edit its description
+  to add the button (`gh pr edit N --body-file …`, keeping what is there).
+- `path` is the main page your change affects (`/settings/billing`): a path
+  on the app's own address, starting with one `/`. Leave it out when no page
+  shows the change.
+- `as` is the dev user who sees that page best, one of the project's login
+  users: `berthd login users` lists them. Leave it out when the project has
+  none or it doesn't matter.
+- URL-encode both (`pro%2Bqa@acme.test`, `/billing%3Ftab%3Dplans`), and put
+  nothing else in the link: never a secret, a token or a real person's email.
+- Keep the two marker comments: berthd uses them to never add a second
+  button. When the project has the button turned on, berthd adds one by
+  itself; then `berthd review-button --as EMAIL --path /x` sets its user and
+  page instead of editing the description.
+
+In a review worktree, `BERTH_REVIEW` is the PR number: it is someone else's
+work pinned to the commit they were shown, so don't push to its branch.
+
 ## Share publicly — only when a human asks
 
 `berthd share 3000` makes a port reachable **by anyone on the internet**

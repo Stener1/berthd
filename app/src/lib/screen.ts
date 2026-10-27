@@ -52,15 +52,45 @@ export function choicesIn(screen: string): Choice[] {
   // A form of questions isn't answered by one number: each picks for the
   // question on show and moves on, or ticks a box.
   if (questionFormIn(screen)) return [];
+  return menuIn(screen).choices;
+}
+
+// menuIn reads the numbered options in a screen's last lines, the screen's
+// lines, and which of them holds option 1 (-1 with no menu).
+function menuIn(screen: string): { choices: Choice[]; lines: string[]; first: number } {
   // A pane taller than what the agent drew ends in blank lines.
-  const lines = screen.trimEnd().split("\n").slice(-14);
+  const lines = screen.trimEnd().split("\n");
   const out: Choice[] = [];
-  for (const l of lines) {
-    const m = l.match(/^\s*(?:[❯›>]\s*)?(\d)[.)]\s+(\S.*)$/);
-    if (m && !out.some((c) => c.key === m[1])) out.push({ key: m[1], label: m[2].trim() });
+  let first = -1;
+  for (let i = Math.max(0, lines.length - 14); i < lines.length; i++) {
+    const m = lines[i].match(/^\s*(?:[❯›>]\s*)?(\d)[.)]\s+(\S.*)$/);
+    if (!m || out.some((c) => c.key === m[1])) continue;
+    if (!out.length) first = i;
+    out.push({ key: m[1], label: m[2].trim() });
   }
   // A real menu counts up from 1.
-  return out.length >= 2 && out[0].key === "1" ? out.slice(0, 4) : [];
+  return out.length >= 2 && out[0].key === "1" ? { choices: out.slice(0, 4), lines, first } : { choices: [], lines, first: -1 };
+}
+
+// askIn reads what a waiting agent's screen asks: the numbered options of
+// its menu, the line above the first as the question, and whether it is a
+// form of questions no one number answers. At its own prompt it asks
+// nothing (a list in its last message is no menu), and the question is
+// never its chrome (a rule, its footer's "/rc") or the prompt the person
+// typed ("❯ /rc"), which end the search.
+export function askIn(screen: string): { detail: string; choices: Choice[]; form: boolean } {
+  const form = questionFormIn(screen);
+  const none = { detail: "", choices: [], form };
+  if (form || screenAt(undefined, screen) === "prompt") return none;
+  const { choices, lines, first } = menuIn(screen);
+  if (!choices.length) return none;
+  for (let i = first - 1; i >= 0; i--) {
+    const l = lines[i].replace(/^[│|╭╰\s]+|[│|╮╯\s]+$/g, "");
+    if (!l) continue;
+    const chrome = RULE.test(l) || /^[❯>›]\s/.test(l) || CHROME.some((re) => re.test(l));
+    return { detail: chrome ? "" : l, choices, form };
+  }
+  return { ...none, choices };
 }
 
 // questionFormIn says the screen's foot shows Claude Code's form of
@@ -103,11 +133,4 @@ export function screenAt(agent: string | undefined, screen: string): "prompt" | 
   if (prompt) return "prompt";
   if (hinted || choicesIn(screen).length) return "interactive";
   return "unknown";
-}
-
-// keysOnly says the screen's foot is a screen of the agent's own that only
-// keys answer (Claude Code's "Do you trust this folder?", a picker): key
-// hints and no numbered options. It is no question a word or a Yes answers.
-export function keysOnly(screen: string): boolean {
-  return !choicesIn(screen).length && !questionFormIn(screen) && screenAt(undefined, screen) === "interactive";
 }

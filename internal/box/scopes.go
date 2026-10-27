@@ -103,13 +103,16 @@ func (s *systemdScopes) Available(ctx context.Context) bool {
 	return s.ok
 }
 
+// Wrap asks for no CPUAccounting: cgroup v2 always counts a scope's CPU
+// time (cpu.stat's usage_usec), and systemd 258 and later print a warning
+// for it in every new pane.
 func (s *systemdScopes) Wrap(unit, description string, memoryHigh uint64) []string {
 	run := s.run
 	if run == "" {
 		run = "systemd-run"
 	}
 	args := []string{run, "--user", "--scope", "--quiet", "--collect", "--unit=" + unit, "--description=" + description,
-		"-p", "TimeoutStopSec=" + scopeTimeoutStop, "-p", "CPUAccounting=yes", "-p", "MemoryAccounting=yes"}
+		"-p", "TimeoutStopSec=" + scopeTimeoutStop, "-p", "MemoryAccounting=yes"}
 	if memoryHigh > 0 {
 		args = append(args, "-p", "MemoryHigh="+strconv.FormatUint(memoryHigh, 10))
 	}

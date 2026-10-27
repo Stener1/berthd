@@ -163,5 +163,9 @@ reports that land together arrive as one message.
   them and why. Do not send "yes", approve permissions, or pick options.
 - Do not prompt sessions you did not start unless the user asked you to.
 - Prefer a new worktree (`task new`) over two agents editing the same files.
+- Agents (or your own subagents and teammates) that check pages in the same
+  worktree must not share its browser. Give each one a tab in its brief:
+  "use `--tab NAME` on every `berthd browser` command", with a different
+  name for each.
 - Never put secrets in prompts; they are typed into a terminal the user reads.
 - Stop when the goal is met. Report what each agent did and where.

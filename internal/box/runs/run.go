@@ -177,6 +177,11 @@ type Gate struct {
 	Pick     bool      `json:"pick,omitempty"`
 	// Default is the candidate a pick approves without naming one.
 	Default int `json:"default,omitempty"`
+	// ApproveLabel and RejectLabel name the two ways on when they are not
+	// approve and reject: "Retry publishing" and "Finish without a pull
+	// request" at a pull request that didn't open.
+	ApproveLabel string `json:"approve_label,omitempty"`
+	RejectLabel  string `json:"reject_label,omitempty"`
 }
 
 // Decision decides a gate.
@@ -253,6 +258,9 @@ const (
 	Succeeded   = "succeeded"
 	Failed      = "failed"
 	Cancelled   = "cancelled"
+	// Skipped, for a leaf step, is one that chose not to act (a pull
+	// request on a host without them): the run goes on as on success.
+	Skipped     = "skipped"
 	Interrupted = "interrupted"
 )
 

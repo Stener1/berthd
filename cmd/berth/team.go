@@ -26,11 +26,17 @@ const teamUsage = `berth team — set a box up the way your team's are, from <or
 
   berth team show ORG [--box BOX] [--json]   What the team setup does: the org, the commit,
                                              each box step (and which need your password),
-                                             each repo (and whether you can read it), the keys
+                                             each repo (and whether you can read it), the keys.
+                                             With --box, the clones BOX already has of each repo
   berth team setup ORG BOX [--yes] [--only ID,…] [--no-1password] [--key PROJECT/KEY=VALUE]…
+                     [--use ID=PATH]… [--fresh ID]…
                                              Run it on BOX: the steps in a terminal on the box
                                              (sudo asks for your password there), then the repos.
-                                             --no-1password asks for the shared keys instead
+                                             --no-1password asks for the shared keys instead.
+                                             --use web=~/work/acme-web uses that clone on BOX as
+                                             it is, rather than cloning a second copy; --fresh web
+                                             clones a fresh copy even when a Shipyard project is
+                                             one already. Quote a ~ so your shell leaves it for BOX
   berth team status [--json]                 Each team setup you accepted, and how it stands
   berth team retry ORG [--from STEP|PROJECT] [--box BOX]
                                              Start a failed setup again from where it stopped
@@ -72,12 +78,18 @@ func teamCommand(l laptop, args []string) error {
 		yes := fs.Bool("yes", false, "run it without asking")
 		only := fs.String("only", "", "set up only these projects (comma-separated ids); required ones always")
 		noOP := fs.Bool("no-1password", false, "skip 1Password: type the shared keys once instead (Enter leaves one missing), and never sign op in on the box")
-		var keys keyFlags
+		var keys, uses, fresh keyFlags
 		fs.Var(&keys, "key", "PROJECT/KEY=VALUE, a key the team setup asks for (repeatable)")
+		fs.Var(&uses, "use", "ID=PATH, a clone already on the box to use for a project instead of cloning (repeatable)")
+		fs.Var(&fresh, "fresh", "ID, a project to clone fresh even when the box has a clone of it (repeatable)")
 		if err := fs.Parse(reorder(args[1:])); err != nil || fs.NArg() != 2 {
-			return errors.New("usage: berth team setup ORG BOX [--yes] [--only ID,…] [--no-1password] [--key PROJECT/KEY=VALUE]…")
+			return errors.New("usage: berth team setup ORG BOX [--yes] [--only ID,…] [--no-1password] [--key PROJECT/KEY=VALUE]… [--use ID=PATH]… [--fresh ID]…")
 		}
-		return teamSetup(ctx, c, fs.Arg(0), fs.Arg(1), *yes, *only, keys, *noOP)
+		use, err := parseUse(uses, fresh)
+		if err != nil {
+			return err
+		}
+		return teamSetup(ctx, c, fs.Arg(0), fs.Arg(1), *yes, *only, keys, *noOP, use)
 	case "status":
 		asJSON := len(args) > 1 && args[1] == "--json"
 		var rows []struct {
@@ -125,6 +137,62 @@ func teamCommand(l laptop, args []string) error {
 
 type keyFlags []string
 
+// parseUse reads --use ID=PATH and --fresh ID into what the setup request
+// takes: a folder on the box per project, or "" for a fresh clone.
+func parseUse(uses, fresh []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, u := range uses {
+		id, path, ok := strings.Cut(u, "=")
+		id, path = strings.TrimSpace(id), strings.TrimSpace(path)
+		if !ok || id == "" || path == "" {
+			return nil, fmt.Errorf("--use %q is not ID=PATH (a folder on the box, like web=~/work/acme-web)", u)
+		}
+		if !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, "/") {
+			return nil, fmt.Errorf("--use %s: %q must be a folder on the box, ~/… or /…", id, path)
+		}
+		if _, dup := out[id]; dup {
+			return nil, fmt.Errorf("--use %s is given twice", id)
+		}
+		out[id] = path
+	}
+	for _, id := range fresh {
+		id = strings.TrimSpace(id)
+		if _, dup := out[id]; dup {
+			return nil, fmt.Errorf("%s is given --use and --fresh: pick one", id)
+		}
+		out[id] = ""
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// cloneLine describes a clone the box already has.
+func cloneLine(c box.ExistingClone) string {
+	parts := []string{}
+	if c.Branch != "" {
+		parts = append(parts, "on "+c.Branch)
+	} else if c.Head != "" {
+		parts = append(parts, "at "+c.Head)
+	}
+	switch c.Dirty {
+	case 0:
+		parts = append(parts, "clean")
+	case 1:
+		parts = append(parts, "1 uncommitted change")
+	default:
+		parts = append(parts, fmt.Sprintf("%d uncommitted changes", c.Dirty))
+	}
+	if c.Behind > 0 {
+		parts = append(parts, fmt.Sprintf("%d behind", c.Behind))
+	}
+	if c.Location != "" {
+		parts = append(parts, "Shipyard project "+c.Location)
+	}
+	return fmt.Sprintf("%s (%s)", c.Display, strings.Join(parts, ", "))
+}
+
 func (k *keyFlags) String() string     { return strings.Join(*k, ",") }
 func (k *keyFlags) Set(v string) error { *k = append(*k, v); return nil }
 
@@ -167,6 +235,9 @@ func describeTeam(v agent.TeamView) {
 					mark = "*"
 				}
 				fmt.Printf("  %s %s\n", mark, r.FullName)
+				for _, c := range r.Existing {
+					fmt.Printf("      found %s\n", cloneLine(c))
+				}
 			}
 		}
 		return
@@ -217,6 +288,12 @@ func describeTeam(v agent.TeamView) {
 			req = " (required)"
 		}
 		fmt.Printf("  %-28s → %s, %s%s\n", p.Repo, p.Path, src, req)
+		for _, c := range p.Existing {
+			fmt.Printf("  %-28s   found %s: --use %s=%s\n", "", cloneLine(c), p.ID, c.Display)
+		}
+		if p.ExistingNote != "" {
+			fmt.Printf("  %-28s   %s\n", "", p.ExistingNote)
+		}
 	}
 	if v.Keys.Shared > 0 || len(v.Keys.Ask) > 0 {
 		fmt.Printf("\nKeys: %d from 1Password", v.Keys.Shared)
@@ -241,12 +318,21 @@ func describeTeam(v agent.TeamView) {
 	}
 }
 
-func teamSetup(ctx context.Context, c *agent.Client, org, boxName string, yes bool, only string, keys keyFlags, noOP bool) error {
+func teamSetup(ctx context.Context, c *agent.Client, org, boxName string, yes bool, only string, keys keyFlags, noOP bool, use map[string]string) error {
 	v, err := teamView(ctx, c, org, boxName)
 	if err != nil {
 		return err
 	}
-	req := agent.TeamSetupRequest{Box: boxName, Keys: map[string]map[string]string{}, SkipOnePassword: noOP}
+	req := agent.TeamSetupRequest{Box: boxName, Keys: map[string]map[string]string{}, SkipOnePassword: noOP, Use: use}
+	for id := range use {
+		known := false
+		for _, p := range v.Projects {
+			known = known || p.ID == id
+		}
+		if !known && v.State == "found" {
+			return fmt.Errorf("--use/--fresh %s: %s's team setup has no project %s", id, org, id)
+		}
+	}
 	if noOP && v.Keys.OnePasswordRequired {
 		return fmt.Errorf("%s's team setup needs 1Password for its shared keys; run it without --no-1password", v.Setup.Name)
 	}
@@ -274,6 +360,13 @@ func teamSetup(ctx context.Context, c *agent.Client, org, boxName string, yes bo
 		req.Keys[proj][name] = val
 	}
 	describeTeam(v)
+	// A clone the box found is used only when asked: say how.
+	for _, p := range v.Projects {
+		if _, chosen := use[p.ID]; chosen || len(p.Existing) == 0 || p.Existing[0].Location != "" {
+			continue
+		}
+		fmt.Printf("\nnote: %s has %s already; it is cloned fresh to %s unless you add --use %s=%s\n", boxName, cloneLine(p.Existing[0]), p.Path, p.ID, p.Existing[0].Display)
+	}
 	if !yes {
 		fmt.Printf("\nRun %s's team setup (commit %s) on %s? The steps run in a terminal on %s, as you. [y/N] ", v.Setup.Name, v.Commit.Short, boxName, boxName)
 		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -352,6 +445,12 @@ func followTeam(ctx context.Context, c *agent.Client, boxName string, st box.Tea
 				fmt.Printf("  … cloning %s\n", p.Repo)
 			case box.TeamReady:
 				fmt.Printf("  ✓ %s is ready: %s/%s\n", p.Repo, boxName, p.Location)
+				if p.Adopted {
+					fmt.Printf("    in your existing checkout %s, as it was\n", p.Path)
+				}
+				if p.FirstOpen > 0 {
+					fmt.Printf("    its %d other worktrees are set up the first time you open each\n", p.FirstOpen)
+				}
 			case box.TeamFailed:
 				fmt.Printf("  ✗ %s: %s\n", p.Repo, p.Error)
 			}

@@ -34,3 +34,13 @@ const plain = (o: object) => {
   const proto = Object.getPrototypeOf(o);
   return proto === Object.prototype || proto === null;
 };
+
+// shareByKey is share for a list of things with a key whose order may change
+// between reads: each item of next is compared with prev's item of the same
+// key, wherever that was, so an item nothing changed keeps its identity even
+// when the list around it was sorted differently or something was added.
+export function shareByKey<T extends { key: string }>(prev: readonly T[], next: T[]): T[] {
+  const was = new Map(prev.map((p) => [p.key, p]));
+  const out = next.map((n) => share(was.get(n.key), n));
+  return out.length === prev.length && out.every((o, i) => o === prev[i]) ? (prev as T[]) : out;
+}

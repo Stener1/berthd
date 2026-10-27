@@ -53,7 +53,11 @@ func (b *Box) browserDevtools(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	br := b.Browsers.Lookup(wt.Path)
+	tab, err := browserTab(r)
+	if err != nil {
+		return err
+	}
+	br := b.Browsers.Lookup(wt.Path, tab)
 	if br == nil {
 		writeJSON(w, BrowserDevtools{Console: []DevtoolsLine{}, Failures: []DevtoolsFailed{}})
 		return nil

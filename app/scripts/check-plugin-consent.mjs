@@ -7,7 +7,7 @@
 //   node scripts/check-plugin-consent.mjs
 import assert from "node:assert/strict";
 
-import { cleanPath, hashPluginFiles, mainOf, mayLoad } from "../src/plugins/consent-core.ts";
+import { cleanPath, hashPluginFiles, helperOf, helperPower, mainOf, mayLoad } from "../src/plugins/consent-core.ts";
 
 const enc = new TextEncoder();
 const manifest = enc.encode(`{"id":"évil","main":"dist/index.js"}`);
@@ -29,4 +29,15 @@ assert.equal(mayLoad({ ...evil, enabled: true, allowed: "sha256:other" }, hash),
 assert.equal(mayLoad({ ...evil, enabled: false, allowed: hash }, hash), false, "turned off");
 assert.equal(mayLoad({ ...evil, enabled: true, allowed: hash }, hash), true);
 assert.equal(mayLoad({ ...evil, builtin: true }, hash), true, "built-ins ship with the app");
+
+// A plugin that carries a program for boxes says so before it is allowed,
+// by the program's name. The manifest is part of what is hashed, so a
+// plugin can't gain one, or swap it, without being asked about again.
+const withHelper = enc.encode(`{"id":"acme","main":"dist/index.js","box":{"helper":{"name":"acme-helper","version":"1.2.0","assets":{}}}}`);
+assert.deepEqual(helperOf(withHelper), { name: "acme-helper", version: "1.2.0" });
+assert.equal(helperPower(helperOf(withHelper)), "Install and run a program, acme-helper, on the boxes you turn it on for");
+assert.equal(helperOf(manifest), undefined);
+assert.equal(helperOf(enc.encode(`{"box":{"helper":{"name":""}}}`)), undefined);
+assert.equal(helperOf(enc.encode("not json")), undefined);
+assert.notEqual(await hashPluginFiles(withHelper, main), await hashPluginFiles(enc.encode(`{"id":"acme","main":"dist/index.js"}`), main));
 console.log("check-plugin-consent: ok");

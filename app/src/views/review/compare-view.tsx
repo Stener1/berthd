@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, CheckIcon, Columns2Icon, CrownIcon, GitCompareArrowsIcon, SquareTerminalIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, Columns2Icon, CrownIcon, ExternalLinkIcon, GitCompareArrowsIcon, GitPullRequestIcon, RotateCcwIcon, SquareTerminalIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AgentIcon } from "@/components/agent-glyph";
@@ -16,22 +16,70 @@ import { openCompare } from "@/lib/compare-actions";
 import { usePrefs } from "@/lib/prefs";
 import { tokens } from "@/views/automations/flows/runs-tab";
 import { ErrorText } from "@/components/error-note";
+import { openUrl } from "@/lib/open-url";
 
 // CompareStrip lists attempts runs with candidates to compare, at the top of
 // Review: the ones waiting for a pick first.
 export function CompareStrip({ runs, onOpen }: { runs: BoxRun[]; onOpen(r: BoxRun): void }) {
   if (!runs.length) return null;
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/30 px-6 py-2 text-xs">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/30 px-page py-2 text-meta">
       <GitCompareArrowsIcon className="size-3.5 text-muted-foreground" />
       <span className="text-muted-foreground">Attempts to compare:</span>
       {runs.map((r) => (
         <Button key={`${r.box}/${r.id}`} size="xs" variant={r.status === "waiting_gate" ? "default" : "outline"} onClick={() => onOpen(r)}>
           {r.title ?? r.id}
-          {r.status === "waiting_gate" && " · pick one"}
+          {r.status === "waiting_gate" && (r.gate?.approve_label ? " · publishing failed" : r.gate && !r.gate.pick ? " · needs you" : " · pick one")}
         </Button>
       ))}
     </div>
+  );
+}
+
+// PullRequestNote says what became of the pick's pull request: that it
+// didn't open (publishing failed, not the agents' work), with retry and
+// finish without one; or, once the run is past it, what the step said (on
+// Gitea, say, the branch is pushed and the link is the forge's own).
+function PullRequestNote({ data, where, busy, onPublish }: { data: RunCompare; where?: string; busy: boolean; onPublish(retry: boolean): void }) {
+  const gate = data.gate;
+  if (gate && !gate.pick && gate.approve_label) {
+    return (
+      <section aria-label={gate.title} className="mb-4 rounded-xl border border-warning/40 bg-warning/8 px-4 py-2.5 text-body">
+        <p className="flex items-center gap-1.5 font-medium">
+          <GitPullRequestIcon className="size-3.5 shrink-0 text-warning-foreground" />
+          {gate.title}
+          {where && <span className="font-normal text-muted-foreground">on {where}</span>}
+        </p>
+        {gate.text && <p className="mt-1 whitespace-pre-wrap text-desc text-muted-foreground">{gate.text}</p>}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <Button size="xs" disabled={busy} onClick={() => onPublish(true)}>
+            <RotateCcwIcon />
+            {gate.approve_label}
+          </Button>
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => onPublish(false)}>
+            {gate.reject_label}
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  const pr = data.pr;
+  if (gate || !pr?.output || (pr.status !== "succeeded" && pr.status !== "skipped")) return null;
+  const link = /https?:\/\/[^\s'"<>)]+/.exec(pr.output)?.[0]?.replace(/[.,;]+$/, "");
+  return (
+    <section aria-label="Pull request" className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border bg-muted/30 px-4 py-2.5 text-body">
+      <GitPullRequestIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="font-medium">Pull request{where ? ` on ${where}` : ""}: </span>
+        <span className="text-muted-foreground">{pr.status === "succeeded" ? "opened" : pr.output}</span>
+      </span>
+      {link && (
+        <Button size="xs" variant="outline" onClick={() => void openUrl(link)}>
+          <ExternalLinkIcon />
+          {pr.status === "succeeded" ? "Open pull request" : `Open ${new URL(link).host}`}
+        </Button>
+      )}
+    </section>
   );
 }
 
@@ -69,12 +117,28 @@ export function CompareView({ box, id, onClose }: { box: string; id: string; onC
     setBusy(true);
     try {
       for (const r of all) {
-        if (!r.data.gate) continue;
+        if (!r.data.gate?.pick) continue;
         const mine = at && r.box === at.box && r.id === at.id;
         await runsApi.decide(r.box, r.id, approve ? { approve: true, pick: mine ? at.index : -1 } : { approve: false });
         scheduleRuns(r.box, 0);
       }
       toastManager.add({ type: "success", title: approve && at ? `Picked attempt ${at.index + 1}${all.length > 1 ? ` on ${at.box}` : ""}` : "Rejected every attempt", description: approve ? "The run goes on: its pull request, then the others are archived." : undefined });
+      await load();
+    } catch (err) {
+      toastManager.add({ type: "error", title: "Couldn't decide", description: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A pull request that didn't open waits at its own gate: the pick is in,
+  // so this only publishes again or lets the run finish without one.
+  const publish = async (r: (typeof all)[number], retry: boolean) => {
+    setBusy(true);
+    try {
+      await runsApi.decide(r.box, r.id, { approve: retry });
+      scheduleRuns(r.box, 0);
+      toastManager.add({ type: "success", title: retry ? "Trying the pull request again" : "Finished without a pull request", description: retry ? undefined : "The pick is kept, and the other attempts are archived." });
       await load();
     } catch (err) {
       toastManager.add({ type: "error", title: "Couldn't decide", description: errorMessage(err) });
@@ -120,14 +184,14 @@ export function CompareView({ box, id, onClose }: { box: string; id: string; onC
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-3 border-b px-6 py-2.5">
+      <div className="flex shrink-0 items-center gap-3 border-b px-page py-2.5">
         <Button size="sm" variant="ghost" onClick={onClose}>
           <ArrowLeftIcon />
           Review
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium text-sm">{title}</p>
-          <p className="truncate text-muted-foreground text-xs">
+          <p className="truncate text-row">{title}</p>
+          <p className="truncate text-meta text-muted-foreground">
             {multi ? all.map((r) => r.box).join(" and ") : box} · {data ? `${data.run.status.replace("_", " ")} · started ${ago(data.run.created)}` : "…"}
             {data?.run.usage && ` · ${tokens(data.run.usage)}`}
           </p>
@@ -139,23 +203,26 @@ export function CompareView({ box, id, onClose }: { box: string; id: string; onC
           </Button>
         )}
       </div>
-      {error && <ErrorText className="px-6 py-3 text-destructive-foreground text-sm" text={error} />}
+      {error && <ErrorText className="px-page py-3 text-destructive-foreground text-body" text={error} />}
       {!data && !error && (
-        <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground text-sm">
+        <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground text-body">
           <Spinner className="size-4" /> Reading the attempts…
         </div>
       )}
       {data && (
-        <div className="min-h-0 flex-1 overflow-auto p-6">
+        <div className="min-h-0 flex-1 overflow-auto p-page">
+          {all.map((r) => (
+            <PullRequestNote key={`${r.box}/${r.id}`} data={r.data} where={multi ? r.box : undefined} busy={busy} onPublish={(retry) => void publish(r, retry)} />
+          ))}
           {all
             .filter((r) => r.data.judge)
             .map((r) => (
-              <p key={`${r.box}/${r.id}`} className="mb-4 rounded-xl border bg-muted/30 px-4 py-2.5 text-sm">
+              <p key={`${r.box}/${r.id}`} className="mb-4 rounded-xl border bg-muted/30 px-4 py-2.5 text-body">
                 <span className="font-medium">Judge{multi ? ` on ${r.box}` : ""}: </span>
                 {r.data.judge}
               </p>
             ))}
-          {!cands.length && <p className="text-muted-foreground text-sm">No attempt has finished yet.</p>}
+          {!cands.length && <p className="text-muted-foreground text-body">No attempt has finished yet.</p>}
           <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(1, cands.length)}, minmax(260px, 1fr))` }}>
             {cands.map((c) => {
               const files = c.review?.files ?? [];
@@ -163,22 +230,22 @@ export function CompareView({ box, id, onClose }: { box: string; id: string; onC
                 <section key={`${c.box}/${c.runId}/${c.index}`} className={cn("flex min-w-0 flex-col rounded-xl border bg-card", c.picked && "border-success/60", isBest(c) && canPick && "border-primary/50")}>
                   <header className="flex items-center gap-2 border-b px-3 py-2">
                     <AgentIcon agent={c.agent} />
-                    <span className="shrink-0 whitespace-nowrap font-medium text-sm">Attempt {c.index + 1}</span>
-                    <span className="min-w-0 truncate text-muted-foreground text-xs">{multi ? `${c.box} · ${c.worktree}` : c.worktree}</span>
+                    <span className="shrink-0 whitespace-nowrap text-row">Attempt {c.index + 1}</span>
+                    <span className="min-w-0 truncate text-meta text-muted-foreground">{multi ? `${c.box} · ${c.worktree}` : c.worktree}</span>
                     {isBest(c) && (
-                      <span className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-primary">
+                      <span className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-meta text-primary">
                         <CrownIcon className="size-3" />
                         judge's pick
                       </span>
                     )}
                     {c.picked && (
-                      <span className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-success-foreground">
+                      <span className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-meta text-success-foreground">
                         <CheckIcon className="size-3" />
                         picked
                       </span>
                     )}
                   </header>
-                  <dl className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 px-3 py-2 text-xs">
+                  <dl className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 px-3 py-2 text-meta">
                     <dt className="text-muted-foreground">Check</dt>
                     <dd className={c.verify.passed ? "text-success-foreground" : "text-destructive-foreground"}>
                       {c.verify.passed ? "passed" : `failed (exit ${c.verify.exit_code})`}
@@ -210,8 +277,8 @@ export function CompareView({ box, id, onClose }: { box: string; id: string; onC
                       </>
                     )}
                   </dl>
-                  {!c.verify.passed && c.verify.tail && <pre className="mx-3 mb-2 max-h-28 overflow-auto rounded-lg bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">{c.verify.tail}</pre>}
-                  <ul className="min-h-0 flex-1 space-y-0.5 border-t px-3 py-2 text-[11px]">
+                  {!c.verify.passed && c.verify.tail && <pre className="mx-3 mb-2 max-h-28 overflow-auto rounded-lg bg-muted/60 p-2 font-mono text-mono text-muted-foreground">{c.verify.tail}</pre>}
+                  <ul className="min-h-0 flex-1 space-y-0.5 border-t px-3 py-2 text-meta">
                     {files.slice(0, 14).map((f) => (
                       <li key={f.path} className="flex items-center gap-2">
                         <span className="min-w-0 flex-1 truncate font-mono">{f.path}</span>

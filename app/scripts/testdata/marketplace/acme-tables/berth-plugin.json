@@ -1,0 +1,19 @@
+{
+  "name": "Acme tables",
+  "description": "A plugin for the listing build's tests: its helper is a second one this repository builds.",
+  "version": "0.4.0",
+  "author": "Acme",
+  "marketplace": true,
+  "box": {
+    "helper": {
+      "name": "berth-database",
+      "version": "0.1.0",
+      "args": ["serve", "--dir", "{dir}", "--addr", "127.0.0.1:0"],
+      "ready": "helper.json",
+      "attach": "/api/attach",
+      "detach": "/api/detach",
+      "attach_env": ["DATABASE_URL", "POSTGRES_URL"],
+      "assets": {}
+    }
+  }
+}

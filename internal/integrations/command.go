@@ -19,7 +19,7 @@ const Usage = `Integrations
   %[1]s integrations [status]
                          Where Shipyard's hooks and skills are, per agent
                          and per Claude Code or Codex account
-  %[1]s integrations install claude|cursor|codex|gemini|opencode|all|present
+  %[1]s integrations install claude|cursor|codex|gemini|opencode|omp|all|present
                          Install Shipyard's skills and agent hooks for a
                          tool, in every account folder it has
   %[1]s hook TOOL EVENT [PAYLOAD]
@@ -40,6 +40,11 @@ func Hook(args []string, stdin *os.File, stdout, stderr io.Writer, emit Emit) {
 	}
 	tool, event := args[0], args[1]
 	defer fmt.Fprint(stdout, Reply(tool))
+	if os.Getenv("BERTH_DRIVER") == "structured" {
+		// berthd drives this agent and reads what it does from its stream:
+		// its hooks would say it all again.
+		return
+	}
 	var payload []byte
 	if len(args) >= 3 {
 		payload = []byte(args[2])
@@ -74,7 +79,7 @@ func Install(args []string, bin string, out io.Writer) error {
 		return nil
 	}
 	if len(args) < 2 || args[0] != "install" {
-		return errors.New("usage: integrations [status] | integrations install claude|cursor|codex|gemini|opencode|all|present")
+		return errors.New("usage: integrations [status] | integrations install claude|cursor|codex|gemini|opencode|omp|all|present")
 	}
 	tools := args[1:]
 	if len(tools) == 1 && tools[0] == "all" {
@@ -131,8 +136,23 @@ func InstallTool(home, tool, bin string, out io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(out, "OpenCode: plugin %s at %s\n", verb(changed), plugin)
+	case "omp":
+		ext := filepath.Join(home, ".omp", "agent", "extensions", "berth.ts")
+		changed, err := InstallOmpExtension(ext, bin)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "oh-my-pi: extension %s at %s\n", verb(changed), ext)
+		if mcpBin(bin) {
+			mcp := filepath.Join(home, ".omp", "agent", "mcp.json")
+			changed, err := InstallMCP(mcp, bin, true)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "oh-my-pi: MCP server %s in %s\n", verb(changed), mcp)
+		}
 	default:
-		return fmt.Errorf("unknown tool %q; use claude, cursor, codex, gemini, opencode, or all", tool)
+		return fmt.Errorf("unknown tool %q; use claude, cursor, codex, gemini, opencode, omp, or all", tool)
 	}
 	return nil
 }
@@ -186,7 +206,7 @@ func verb(changed bool) string {
 }
 
 // AllTools are the agents `integrations install all` covers.
-var AllTools = []string{"claude", "cursor", "codex", "gemini", "opencode"}
+var AllTools = []string{"claude", "cursor", "codex", "gemini", "opencode", "omp"}
 
 var validSession = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 

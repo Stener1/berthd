@@ -33,12 +33,14 @@ export type View =
   // run, when set, opens Review's Compare of an attempts run.
   | { kind: "review"; run?: { box: string; id: string } }
   | { kind: "worktrees" }
-  | { kind: "settings"; section?: string }
+  // box, when set, is the box a section opens on (Agents: its skills).
+  | { kind: "settings"; section?: string; box?: string }
   | { kind: "plugin"; screen: string }
   // Team setup (lib/team): an org's <org>/.berth, read from GitHub, to set a
   // box up with. No org asks for one; from says how the page was reached.
   // update opens it on a newer commit's changes, to review and apply.
-  | { kind: "team"; org?: string; from?: "onboarding" | "addbox" | "link" | "sidebar" | "palette"; box?: string; update?: boolean };
+  // from "suggestion": the laptop noticed the org publishes one (lib/team-suggest).
+  | { kind: "team"; org?: string; from?: "onboarding" | "addbox" | "link" | "sidebar" | "palette" | "suggestion"; box?: string; update?: boolean };
 
 export interface Connection {
   state: "connecting" | "online" | "offline";

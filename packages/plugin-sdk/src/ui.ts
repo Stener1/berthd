@@ -3,6 +3,8 @@
 // they are typed loosely here so the SDK does not depend on the app's source.
 import type { ComponentType, ReactNode } from "react";
 
+import type { BerthPluginContext, HelperStatus } from "./index";
+
 // biome-ignore lint/suspicious/noExplicitAny: see above.
 type Loose = ComponentType<any>;
 
@@ -117,7 +119,122 @@ export declare const ViewHeader: ComponentType<{ title: ReactNode; description?:
 export declare const PluginPage: ComponentType<{ className?: string; children?: ReactNode }>;
 // Any lucide icon by name: <Icon name="Server" />.
 export declare const Icon: ComponentType<{ name: string; className?: string }>;
+// A chart drawn by the app's own chart components, in the theme's colours:
+// bars, lines or areas over rows, as an agent's chart artifact is (the
+// berth.chart format, docs/guides/artifacts). x names the row's label ("x"
+// when left out) and y its series, by key; a color is "1" to "5" (the
+// theme's series palette), "good", "bad", "warn" or "muted". The chart
+// fills its box, 16rem high unless className says otherwise.
+export interface ChartSpec {
+  type: "bar" | "line" | "area";
+  data: Record<string, string | number | null>[];
+  x?: string;
+  y: (string | { key: string; label?: string; color?: string })[];
+  // "ms", "%", "$": written after (or before) a value in the tooltip.
+  units?: string;
+  stacked?: boolean;
+  orientation?: "vertical" | "horizontal";
+}
+export declare const Chart: ComponentType<{ spec: ChartSpec; className?: string }>;
+// A small SQL editor: the File tab's editor (CodeMirror, in the theme's
+// colours) for a statement or a few, with completion of the tables and
+// columns you give it and a key to run. It loads on first use, so a plugin
+// has an editor without carrying one. Its box sets the size (10rem high
+// unless className says otherwise); the editor scrolls inside it.
+export interface SqlEditorProps {
+  value: string;
+  onChange(value: string): void;
+  // ⌘↵ (Ctrl+↵ off a Mac): the selection then, as offsets into value, with
+  // from === to for a cursor. What to run from that is the plugin's rule.
+  onRun?(selection: { from: number; to: number }): void;
+  // The selection whenever it moves, for a Run button outside the editor.
+  onSelect?(selection: { from: number; to: number }): void;
+  // What to complete: each table (or "schema.table") and its columns.
+  schema?: Record<string, string[]>;
+  // The schema whose tables complete without its name ("public").
+  defaultSchema?: string;
+  // "postgresql", "mysql", "mariadb", "sqlite", "mssql", "plsql" or
+  // "cassandra": its keywords and quoting. Anything else is standard SQL.
+  dialect?: string;
+  // Where a statement failed, as offsets into value: underlined from `from`
+  // to `to`, or to the end of the word there. Typing takes the mark away.
+  error?: { from: number; to?: number };
+  // What a screen reader calls the editor ("SQL" when left out).
+  label?: string;
+  placeholder?: string;
+  readOnly?: boolean;
+  className?: string;
+}
+export declare const SqlEditor: ComponentType<SqlEditorProps>;
 export declare function cn(...classes: unknown[]): string;
+
+// For a plugin that carries a program for boxes (berth-plugin.json's
+// "box.helper", berth.helper): the per-box switch every such plugin needs.
+// HelperCopy is what the plugin says of its own helper; the states, the
+// buttons and the confirms are the app's, the same for every plugin.
+export interface HelperCopy {
+  // The plugin, as a sentence names it: "Leadline".
+  name: string;
+  // The program it puts on a box: "berth-leadline".
+  program: string;
+  // A lucide icon for the plugin, where it introduces itself.
+  icon?: string;
+  // The confirm before the program is installed or replaced: what it does
+  // once it runs on the box. It follows "This installs <program>, a program
+  // this plugin carries, on <box> and keeps it running there."
+  does(box: string): ReactNode;
+  // A panel on a box where it is off: what turning it on there gets you.
+  about(box: string): ReactNode;
+  // A box's row while it is off.
+  off(box: string): ReactNode;
+  // Removing what the program kept on a box.
+  remove: {
+    // The confirm's title: "Remove what Leadline recorded on devl?"
+    title(box: string): string;
+    // What goes. It follows "This stops <program> on <box>, removes it, and".
+    body(box: string): ReactNode;
+    // The notification once it is gone: "Removed Leadline's data on devl".
+    done(box: string): string;
+  };
+  // Only for a helper that changes the environment of the services a box
+  // starts ("attach_env"): those services still point at it once it is
+  // turned off. This is the sentence for the box's row, given the services
+  // by name ("web in acme/fix-orders") and how many there are.
+  left?(services: string, count: number): string;
+}
+// HelperBox, as a "row" (the default): one box of a list of boxes, an <li>
+// with its state (Off, Installing…, Running, Failed, Can't run it, Offline),
+// Turn on… (a confirm that names the program), Update, Turn off and Remove
+// data…, and children under a running helper. As a "panel": a worktree
+// panel's whole body on a box where the helper isn't running, with why and
+// the same Turn on…; it draws nothing once the helper runs.
+export declare const HelperBox: ComponentType<{
+  berth: BerthPluginContext;
+  box: string;
+  copy: HelperCopy;
+  variant?: "row" | "panel";
+  // A row: whether the box can be reached, and whether the row is on screen
+  // (nothing is read while it is not).
+  online?: boolean;
+  active?: boolean;
+  // A panel: opens the plugin's own screen, from an "About <name>" button.
+  onAbout?(): void;
+  // The prefix of its data-testid attributes ("helper" when left out):
+  // <prefix>-box, <prefix>-restart, <prefix>-notice.
+  testId?: string;
+  children?: ReactNode;
+}>;
+// useHelperState is the plugin's helper on a box as HelperBox knows it,
+// read again while active (every second while it installs or starts,
+// otherwise every fifteen). status is undefined until the first answer;
+// fault is why it could not be read; old is a Shipyard on this computer
+// from before helpers. refresh reads now: call it when a request to the
+// helper says it has gone ("helper_off").
+export declare function useHelperState(
+  berth: BerthPluginContext,
+  box: string,
+  active: boolean,
+): { status?: HelperStatus; fault?: { message: string; code?: string; status?: number; hint?: string }; old?: boolean; refresh(): void };
 
 // The app's diff renderer (@pierre/diffs, diffs.com: highlighted in two
 // workers, themed like the app), loaded on first use and shared with the

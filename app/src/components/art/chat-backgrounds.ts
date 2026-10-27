@@ -3,6 +3,8 @@ import fog from "@/components/art/backgrounds/fog.webp";
 import night from "@/components/art/backgrounds/night.webp";
 import openSea from "@/components/art/backgrounds/open-sea.webp";
 import { HARBOUR, type HarbourLight } from "@/components/art/harbour-art";
+import { plateSrc } from "@/components/art/plates";
+import { PLATES } from "@/lib/header-picture";
 
 // The chat backgrounds Shipyard ships (lib/chat-background.ts). Patterns and
 // gradients are drawn in code, in the theme's colours
@@ -34,6 +36,8 @@ export const BUILTINS: Builtin[] = [
   { id: "night", name: "Moorings at night", kind: "scene", src: () => night },
   { id: "open-sea", name: "Open sea", kind: "scene", src: () => openSea },
   { id: "fog", name: "Fog", kind: "scene", src: () => fog },
+  // The header picture's plates (lib/header-picture.ts), by day or night.
+  ...PLATES.map((p): Builtin => ({ id: p.id, name: p.name, kind: "scene", src: (l) => plateSrc(p.id, l) })),
 ];
 
 export const builtin = (id: string) => BUILTINS.find((b) => b.id === id) ?? BUILTINS[0];

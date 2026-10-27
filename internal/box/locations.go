@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +48,12 @@ type Location struct {
 	// else one found in the repository (CheckFrom "config" or "detected").
 	Check     string `json:"check,omitempty"`
 	CheckFrom string `json:"check_from,omitempty"`
+	// KitTeam is the org whose team setup the location's kit comes from,
+	// when it does.
+	KitTeam string `json:"kit_team,omitempty"`
+	// keepMain is the config's keep_main: whether new branches keep the
+	// default branch current (freshbase.go).
+	keepMain bool
 }
 
 type Worktree struct {
@@ -56,6 +63,9 @@ type Worktree struct {
 	Head   string `json:"head,omitempty"`
 	// Main marks the repository's own checkout.
 	Main bool `json:"main,omitempty"`
+	// MainRefresh is what making it did to keep the default branch
+	// current (freshbase.go); only in what a create returns.
+	MainRefresh *BaseRefresh `json:"main_refresh,omitempty"`
 	// SettingUp is true when the tool that made it is still running its
 	// setup; a worktree.setup event follows.
 	SettingUp bool `json:"setting_up,omitempty"`
@@ -71,6 +81,15 @@ type Worktree struct {
 	// Parent is the path of the worktree whose agent handed this one off,
 	// for clients to nest it under (worktreeparents.go).
 	Parent string `json:"parent,omitempty"`
+	// SetupOnOpen marks a worktree the repository had before Team setup
+	// adopted it: its per-worktree setup runs the first time a terminal or
+	// an agent starts there (firstopen.go).
+	SetupOnOpen bool `json:"setup_on_open,omitempty"`
+	// SetupPending marks a worktree made with --no-setup: its setup has
+	// not run and only runs when asked for (worktreesetup.go).
+	SetupPending bool `json:"setup_pending,omitempty"`
+	// Review marks a pull request opened for review (prreview.go).
+	Review *ReviewMark `json:"review,omitempty"`
 }
 
 var (
@@ -107,6 +126,15 @@ type savedLocation struct {
 	// Parents are the worktrees handed off from another, child path to
 	// parent path (worktreeparents.go).
 	Parents map[string]string `json:"parents,omitempty"`
+	// FirstOpen are worktrees set up the first time they are opened, by
+	// path (firstopen.go).
+	FirstOpen []string `json:"first_open,omitempty"`
+	// SetupPending are worktrees made with --no-setup, by path, waiting
+	// for an explicit setup (worktreesetup.go).
+	SetupPending []string `json:"setup_pending,omitempty"`
+	// Reviews are the worktrees opened to review a pull request, by path
+	// (prreview.go).
+	Reviews map[string]*ReviewMark `json:"reviews,omitempty"`
 }
 
 func (l *Locations) Add(ctx context.Context, name, path string) (Location, error) {
@@ -178,6 +206,25 @@ func (l *Locations) List(ctx context.Context) ([]Location, error) {
 		out = append(out, l.withPorts(describe(ctx, s)))
 	}
 	return out, nil
+}
+
+// worktreePaths is each location with its worktrees' names and paths only,
+// as List names them: for finding which worktree a directory is in, it
+// skips what else List reads (remote, default branch, configs).
+func (l *Locations) worktreePaths(ctx context.Context) []Location {
+	saved, err := l.read()
+	if err != nil {
+		return nil
+	}
+	out := make([]Location, 0, len(saved))
+	for _, s := range saved {
+		loc := Location{Name: s.Name, Path: s.Path}
+		if b, err := git(ctx, "-C", s.Path, "worktree", "list", "--porcelain"); err == nil {
+			loc.Worktrees = parseWorktrees(b, s.Path)
+		}
+		out = append(out, loc)
+	}
+	return out
 }
 
 // withPorts adds each worktree's first port.
@@ -260,6 +307,7 @@ func (l *Locations) CreateWorktreeFrom(ctx context.Context, location string, req
 		}
 	}
 	args := []string{"-C", loc.Path, "worktree", "add"}
+	var refresh *BaseRefresh
 	switch {
 	case branchExists(ctx, loc.Path, "refs/heads/"+branch):
 		// An existing branch is checked out as it is, to review or continue.
@@ -267,9 +315,16 @@ func (l *Locations) CreateWorktreeFrom(ctx context.Context, location string, req
 	case branchExists(ctx, loc.Path, "refs/remotes/origin/"+branch):
 		args = append(args, "--track", "-b", branch, path, "origin/"+branch)
 	default:
+		var from string
+		from, refresh = freshBase(ctx, loc, base)
+		if from != base {
+			// Branched from origin's, not tracking it: its upstream is
+			// set by the first push, as a branch from main's would be.
+			args = append(args, "--no-track")
+		}
 		args = append(args, "-b", branch, path)
-		if base != "" {
-			args = append(args, base)
+		if from != "" {
+			args = append(args, from)
 		}
 	}
 	// The add runs to the end even if whoever asked goes away: one killed
@@ -283,10 +338,11 @@ func (l *Locations) CreateWorktreeFrom(ctx context.Context, location string, req
 	}
 	for _, w := range describe(ctx, savedLocation{Name: loc.Name, Path: loc.Path}).Worktrees {
 		if w.Path == path {
+			w.MainRefresh = refresh
 			return w, nil
 		}
 	}
-	return Worktree{Name: name, Path: path, Branch: branch}, nil
+	return Worktree{Name: name, Path: path, Branch: branch, MainRefresh: refresh}, nil
 }
 
 // cleanUpFailedAdd undoes what a failed `git worktree add` left: its
@@ -367,6 +423,7 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 		// A worktree made again under the same name starts without a title.
 		l.forgetTitle(location, w.Path)
 		l.forgetParent(location, w.Path)
+		l.setReview(location, w.Path, nil)
 		return nil
 	}
 	return ErrUnknownWorktree
@@ -374,6 +431,9 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 
 func describe(ctx context.Context, s savedLocation) Location {
 	loc := Location{Name: s.Name, Path: s.Path, Scripts: scriptsFor(s)}
+	if s.Kit != nil && s.Kit.Team != nil {
+		loc.KitTeam = s.Kit.Team.Org
+	}
 	repo, trust, _ := repoLayer(s)
 	loc.RepoTrust = trust.State
 	out, err := git(ctx, "-C", s.Path, "worktree", "list", "--porcelain")
@@ -392,6 +452,7 @@ func describe(ctx context.Context, s savedLocation) Location {
 	}
 	all := layered(repo, s.Kit, local)
 	loc.Agents = all.Agents
+	loc.keepMain = all.KeepMain == nil || *all.KeepMain
 	if all.Check != "" {
 		loc.Check, loc.CheckFrom = all.Check, "config"
 	} else if c := detectCheck(s.Path); c != "" {
@@ -400,6 +461,12 @@ func describe(ctx context.Context, s savedLocation) Location {
 	loc.Worktrees = parseWorktrees(out, s.Path)
 	for i := range loc.Worktrees {
 		loc.Worktrees[i].Title = s.Titles[loc.Worktrees[i].Path]
+		loc.Worktrees[i].SetupOnOpen = slices.Contains(s.FirstOpen, loc.Worktrees[i].Path)
+		loc.Worktrees[i].SetupPending = slices.Contains(s.SetupPending, loc.Worktrees[i].Path)
+		if m := s.Reviews[loc.Worktrees[i].Path]; m != nil && !loc.Worktrees[i].Main {
+			c := *m
+			loc.Worktrees[i].Review = &c
+		}
 	}
 	withParents(loc.Worktrees, s.Parents)
 	return loc
@@ -468,6 +535,18 @@ func git(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	return cmd.CombinedOutput()
+}
+
+// dirtyWorktree says git would refuse to remove dir unless forced: it has
+// uncommitted or untracked files. When git can't tell, it says no, and git's
+// own check at removal decides.
+func dirtyWorktree(dir string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
 func expandHome(path string) string {

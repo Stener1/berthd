@@ -147,6 +147,9 @@ func (b *Box) StartService(ctx context.Context, location, worktree, name string)
 		k, v, _ := strings.Cut(kv, "=")
 		envMap[k] = v
 	}
+	// Plugins' helpers on the box may add to it: where telemetry goes, a
+	// database URL through a recording proxy (helperattach.go).
+	b.attachHelpers(ctx, loc, wt, svc.Name, envMap, parts.refs)
 	if svc.Terminal {
 		if err := b.startTerminalService(ctx, loc, wt, *svc, envMap, parts.refs); err != nil {
 			return ServiceStatus{}, err

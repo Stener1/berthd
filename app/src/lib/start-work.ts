@@ -10,10 +10,10 @@ import { startBroadcast } from "@/lib/broadcast";
 import type { AgentPick, ComposerTarget } from "@/lib/composer";
 import { agentLabel } from "@/lib/derive";
 import { plainError } from "@/lib/errors";
-import { playTurn } from "@/lib/mock-conversation";
 import { handoff, loop, review } from "@/lib/orchestrate";
 import { worktreeSlug } from "@/lib/projects";
 import { usePrompts } from "@/lib/prompts";
+import { structuredLaunch } from "@/lib/structured";
 import { boxHasRuns, runs, scheduleRuns } from "@/lib/runs";
 import { save } from "@/lib/storage";
 import { useStore } from "@/lib/store";
@@ -121,7 +121,7 @@ export async function startWork(d: StartDraft): Promise<boolean> {
       toastManager.add({ type: "success", title: `Created ${wt.name}`, description: `${wt.branch ?? ""} on ${d.box}` });
       return true;
     }
-    const how = { agent: pick.agent, prompt: d.text || undefined, model: pick.model || undefined, effort: pick.effort || undefined };
+    const how = { agent: pick.agent, prompt: d.text || undefined, model: pick.model || undefined, effort: pick.effort || undefined, ...structuredLaunch(d.box, pick.agent, presets.find((p) => p.id === pick.agent)) };
     if (d.where === "new") {
       const name = d.worktree?.name || freeName(d.box, d.location, d.text ? slug(d.text) : randomName());
       const res = await client.box<TaskResult>(d.box, "POST", "tasks", {
@@ -140,7 +140,7 @@ export async function startWork(d: StartDraft): Promise<boolean> {
     }
     // The demo plays a scripted turn; it starts before the pane opens, so
     // the pane finds the conversation already begun.
-    if (isMock() && d.text) void playTurn(d.box, session, d.text);
+    if (isMock() && d.text) void import("@/lib/mock-conversation").then((m) => m.playTurn(d.box, session, d.text));
     await useStore.getState().refreshBox(d.box, ["locations", "sessions"]);
     await focusSession(d.box, session);
     save(`berth.composer.picks.${d.box}/${d.location}`, d.picks);

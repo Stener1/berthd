@@ -12,7 +12,9 @@ export type StepWhen = "success" | "failure" | "always";
 
 export interface Step {
   id?: string;
-  kind: StepKind;
+  // A run step kind (loop, gate, pr, …) the editor shows but does not edit
+  // is any other string.
+  kind: StepKind | (string & {});
   when?: StepWhen;
   command?: string;
   text?: string;
@@ -96,7 +98,9 @@ export const overrides = (f: ScopedFlow, all: ScopedFlow[]) => all.some((o) => s
 
 export interface StepRun {
   id: string;
-  kind: StepKind;
+  // A run step kind (loop, gate, pr, …) the editor shows but does not edit
+  // is any other string.
+  kind: StepKind | (string & {});
   status: "succeeded" | "failed" | "skipped";
   started?: string;
   duration?: string;
@@ -142,6 +146,32 @@ export interface RepoConfig {
   services?: WorktreeService[];
   hooks?: Hook[];
   flows?: Flow[];
+  // Who a worktree's pages can be logged in as, and the script that does it
+  // (lib/login-url.ts). Only from trusted layers: the kit, the box's own
+  // config, or the committed config once trusted.
+  login?: LoginConfig;
+  // A "Review in Shipyard" button on each PR opened from the project's
+  // worktrees (box/reviewbutton.go). Off unless a layer or team.json says.
+  review_button?: boolean;
+  // Keep the default branch current: a new branch from it fetches it first
+  // and fast-forwards the local one (box/freshbase.go). On unless a layer
+  // says false.
+  keep_main?: boolean;
+}
+
+// LoginUser is a seeded user a worktree can be logged in as. The box always
+// answers with objects; a config file may list plain emails.
+export interface LoginUser {
+  email: string;
+  label?: string;
+}
+
+export interface LoginConfig {
+  // Relative to the kit's folder ($BERTH_KIT_DIR) or the config's.
+  script: string;
+  users?: LoginUser[];
+  // Any valid email may be asked for, not only the listed users.
+  any?: boolean;
 }
 
 // RepoTrust says whether a box runs a repository's committed config. Until
@@ -172,6 +202,17 @@ export interface LocationConfig {
   effective: RepoConfig;
   // The project's kit, a layer between repo and local.
   kit?: InstalledKit;
+  // Whether PRs from the project's worktrees get the review button, and
+  // where that comes from; inherited is the value without this box's own
+  // setting. The team's team.json counts here, unlike in effective.
+  review_button?: ReviewButtonState;
+}
+
+export interface ReviewButtonState {
+  on: boolean;
+  from?: "box" | "repo" | "kit" | "team";
+  inherited: boolean;
+  inherited_from?: "repo" | "kit" | "team";
 }
 
 export interface ServiceStatus extends WorktreeService {

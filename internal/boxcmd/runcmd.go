@@ -267,7 +267,7 @@ func recordLine(r runs.Record) string {
 		return line
 	case "gate.opened":
 		if r.Gate != nil {
-			return fmt.Sprintf("%s  waiting at gate %q (%s): run approve|reject RUN", at, r.Gate.Title, r.Path)
+			return fmt.Sprintf("%s  waiting at gate %q (%s): %s", at, r.Gate.Title, r.Path, gateWays(r.Gate))
 		}
 	case "gate.decided":
 		if r.Decided != nil {
@@ -281,6 +281,15 @@ func recordLine(r runs.Record) string {
 		return line
 	}
 	return ""
+}
+
+// gateWays is how to decide a gate: approve or reject, or the two ways on
+// it names (retry publishing, or finish without a pull request).
+func gateWays(g *runs.Gate) string {
+	if g.ApproveLabel == "" || g.RejectLabel == "" {
+		return "run approve|reject RUN"
+	}
+	return "run approve RUN to " + strings.ToLower(g.ApproveLabel) + ", run reject RUN to " + strings.ToLower(g.RejectLabel)
 }
 
 func firstLineOf(s string) string {
@@ -304,6 +313,9 @@ func printRun(out io.Writer, r runs.Run) {
 	}
 	if r.Gate != nil {
 		fmt.Fprintf(out, "  waiting at gate %q (%s)\n", r.Gate.Title, r.Gate.Path)
+		if r.Gate.ApproveLabel != "" {
+			fmt.Fprintf(out, "  %s\n", gateWays(r.Gate))
+		}
 	}
 	if r.Usage != nil {
 		fmt.Fprintf(out, "  agents used %d tokens", r.Usage.Tokens())

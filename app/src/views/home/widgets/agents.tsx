@@ -5,11 +5,13 @@ import { AgentIcon, StateGlyph } from "@/components/agent-glyph";
 import { toastError } from "@/components/error-note";
 import { Button } from "@/components/ui/button";
 import { type SessionEntry, useAllSessions } from "@/hooks/use-agent-counts";
+import { lastOf } from "@/lib/last-of";
 import { boxApi, type Session } from "@/lib/api";
+import { QUESTION_TOOLS } from "@/lib/chat-card";
 import { agentLabel, agentOf, worktreeOf } from "@/lib/derive";
 import { parseScreen } from "@/lib/screen-status";
 import { permissionChoices } from "@/lib/screen";
-import { useStore } from "@/lib/store";
+import { type BoxData, useStore } from "@/lib/store";
 import { useAsk } from "@/lib/transcript-feed";
 import { cn } from "@/lib/utils";
 import { focusSession, homeBox, selectWorktree, useWorkspaces, type WorktreeRef } from "@/lib/workspaces";
@@ -41,28 +43,31 @@ export interface AgentRow {
 export function useAgentRows(): AgentRow[] {
   const all = useAllSessions();
   const boxes = useStore((s) => s.boxes);
-  return useMemo(() => {
-    const rows: AgentRow[] = [];
-    for (const e of all as SessionEntry[]) {
-      const agent = agentOf(e.session);
-      if (!agent || (e.state !== "waiting" && e.state !== "running" && e.state !== "finished")) continue;
-      const wt = worktreeOf(boxes[e.box]?.locations, e.session);
-      const place = wt ? (wt.worktree.main ? wt.location.name : `${wt.location.name} / ${worktreeLabel(wt.worktree)}`) : "";
-      rows.push({
-        key: `${e.box}/${e.session.name}`,
-        box: e.box,
-        session: e.session,
-        agent,
-        title: e.session.title?.trim() || place || e.session.name,
-        where: [e.session.title?.trim() ? place : "", e.box].filter(Boolean).join(" · "),
-        worktree: wt ? { box: e.box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main } : undefined,
-        state: e.state,
-        since: e.session.state_since ?? e.session.created,
-      });
-    }
-    return rows.sort((a, b) => (b.since ?? "").localeCompare(a.since ?? ""));
-  }, [all, boxes]);
+  return agentRows(all, boxes);
 }
+
+// Worked out once for every widget and count that asks (lastOf).
+const agentRows = lastOf((all: SessionEntry[], boxes: Record<string, BoxData>): AgentRow[] => {
+  const rows: AgentRow[] = [];
+  for (const e of all) {
+    const agent = agentOf(e.session);
+    if (!agent || (e.state !== "waiting" && e.state !== "running" && e.state !== "finished")) continue;
+    const wt = worktreeOf(boxes[e.box]?.locations, e.session);
+    const place = wt ? (wt.worktree.main ? wt.location.name : `${wt.location.name} / ${worktreeLabel(wt.worktree)}`) : "";
+    rows.push({
+      key: `${e.box}/${e.session.name}`,
+      box: e.box,
+      session: e.session,
+      agent,
+      title: e.session.title?.trim() || place || e.session.name,
+      where: [e.session.title?.trim() ? place : "", e.box].filter(Boolean).join(" · "),
+      worktree: wt ? { box: e.box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main } : undefined,
+      state: e.state,
+      since: e.session.state_since ?? e.session.created,
+    });
+  }
+  return rows.sort((a, b) => (b.since ?? "").localeCompare(a.since ?? ""));
+});
 
 // Until the agent and every online box have answered, agent lists are
 // loading, not empty.
@@ -88,14 +93,11 @@ export const useFinishedCount = () => ({ n: byState(useAgentRows(), "finished").
 
 function OfflineNote({ boxes }: { boxes: string[] }) {
   if (!boxes.length) return null;
-  return <p className="truncate px-2 pt-1 text-[11px] text-muted-foreground">{boxes.length === 1 ? `${boxes[0]} is offline: its agents aren't listed` : `${boxes.length} boxes offline: their agents aren't listed`}</p>;
+  return <p className="truncate px-2 pt-1 text-meta text-muted-foreground">{boxes.length === 1 ? `${boxes[0]} is offline: its agents aren't listed` : `${boxes.length} boxes offline: their agents aren't listed`}</p>;
 }
 
 // ---------- Needs you ----------
 
-// A question's tools: these are answered in the agent's own form, not with
-// Allow or Deny.
-const QUESTION_TOOLS = /^(AskUserQuestion|request_user_input|ExitPlanMode)$/;
 
 export function NeedsYouWidget() {
   const { lines, height } = useHomeWidget();
@@ -127,9 +129,9 @@ function WaitingRow({ r }: { r: AgentRow }) {
   const s = r.session;
   const tool = s.ask?.tool;
   const question = !tool || QUESTION_TOOLS.test(tool);
-  // A permission's options are on the agent's screen: read them while the
-  // row can be seen, as the agent's own pane does.
-  const ask = useAsk(r.box, s.name, visible && !preview && !question, s.state_since);
+  // A permission's options are on the agent's screen (or, structured, on
+  // its ask): read them while the row can be seen, as its own pane does.
+  const ask = useAsk(r.box, s.name, visible && !preview && !question, s.state_since, s.ask);
   const choices = ask && !ask.form ? permissionChoices(ask.choices) : undefined;
   const allow = choices?.find((c) => c.label === "Allow");
   const deny = choices?.find((c) => c.label === "Deny");
@@ -150,26 +152,26 @@ function WaitingRow({ r }: { r: AgentRow }) {
 
   return (
     <div className="group/row flex min-w-0 flex-col gap-1 rounded-md px-2 py-1.5 hover:bg-accent/60">
-      <button type="button" onClick={open} className="flex w-full min-w-0 items-center gap-2.5 rounded-sm text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <button type="button" onClick={open} className="flex w-full min-w-0 items-center gap-2.5 rounded-sm text-left text-body outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <StateGlyph state="waiting" />
-        <span className="min-w-0 flex-1 truncate font-medium">{r.title}</span>
-        <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{shortAgo(r.since)}</span>
+        <span className="min-w-0 flex-1 truncate text-row">{r.title}</span>
+        <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{shortAgo(r.since)}</span>
       </button>
-      <span className="flex min-w-0 items-center gap-2 pl-6 text-muted-foreground text-xs">
-        <span className={cn("min-w-0 flex-1 truncate", tool && !question && "font-mono text-[11px]")}>{detail}</span>
+      <span className="flex min-w-0 items-center gap-2 pl-6 text-meta text-muted-foreground">
+        <span className={cn("min-w-0 flex-1 truncate", tool && !question && "font-mono")}>{detail}</span>
         {answered ? (
-          <span className="shrink-0 text-[11px]">{answered === "Deny" ? "Denied" : "Allowed"} · resuming</span>
+          <span className="shrink-0">{answered === "Deny" ? "Denied" : "Allowed"} · resuming</span>
         ) : allow && deny ? (
           <span className="flex shrink-0 items-center gap-1">
-            <Button size="xs" variant="outline" className="h-5 rounded-[5px] px-1.5 text-[11px]" onClick={() => answer(deny.key, "Deny")} aria-label={`Deny: ${r.title}`}>
+            <Button size="xs" variant="outline" className="h-5 rounded-[5px] px-1.5 text-tag" onClick={() => answer(deny.key, "Deny")} aria-label={`Deny: ${r.title}`}>
               Deny
             </Button>
-            <Button size="xs" className="h-5 rounded-[5px] px-1.5 text-[11px]" onClick={() => answer(allow.key, "Allow")} aria-label={`Allow once: ${r.title}`}>
+            <Button size="xs" className="h-5 rounded-[5px] px-1.5 text-tag" onClick={() => answer(allow.key, "Allow")} aria-label={`Allow once: ${r.title}`}>
               Allow once
             </Button>
           </span>
         ) : (
-          <Button size="xs" variant="outline" className="h-5 shrink-0 rounded-[5px] px-1.5 text-[11px]" onClick={open} aria-label={`Answer: ${r.title}`}>
+          <Button size="xs" variant="outline" className="h-5 shrink-0 rounded-[5px] px-1.5 text-tag" onClick={open} aria-label={`Answer: ${r.title}`}>
             Answer
             <CornerDownLeftIcon className="size-3" />
           </Button>
@@ -256,15 +258,15 @@ function WorkingRow({ r }: { r: AgentRow }) {
       onClick={() => void focusSession(r.box, r.session.name)}
       className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex w-full min-w-0 items-center gap-2.5 text-sm">
+      <span className="flex w-full min-w-0 items-center gap-2.5 text-body">
         <StateGlyph state="running" />
-        <span className="min-w-0 flex-1 truncate font-medium">{r.title}</span>
+        <span className="min-w-0 flex-1 truncate text-row">{r.title}</span>
         <AgentIcon agent={r.agent} className="size-3 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{step?.elapsed ?? shortAgo(r.since)}</span>
+        <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{step?.elapsed ?? shortAgo(r.since)}</span>
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 pl-6 text-muted-foreground text-xs">
-        <span className="min-w-0 truncate font-mono text-[11px]">{step?.now ?? `${agentLabel(r.agent)} · ${r.where}`}</span>
-        {step?.sub && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground @max-[300px]:hidden">· {step.sub}</span>}
+      <span className="flex min-w-0 items-center gap-1.5 pl-6 text-meta text-muted-foreground">
+        <span className="min-w-0 truncate font-mono">{step?.now ?? `${agentLabel(r.agent)} · ${r.where}`}</span>
+        {step?.sub && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground @max-[300px]:hidden">· {step.sub}</span>}
       </span>
     </button>
   );
@@ -288,8 +290,8 @@ export function FinishedWidget() {
           <WidgetRow key={r.key} onClick={() => void focusSession(r.box, r.session.name)}>
             <StateGlyph state="finished" />
             <span className="min-w-0 flex-1 truncate">{r.title}</span>
-            {e && (e.added || e.removed) ? <DiffStat add={e.added} del={e.removed} className="@max-[280px]:hidden" /> : <span className="min-w-0 truncate text-muted-foreground text-xs @max-[340px]:hidden">{r.where}</span>}
-            <span className="w-8 shrink-0 text-right text-muted-foreground text-xs tabular-nums">{shortAgo(r.since)}</span>
+            {e && (e.added || e.removed) ? <DiffStat add={e.added} del={e.removed} className="@max-[280px]:hidden" /> : <span className="min-w-0 truncate text-meta text-muted-foreground @max-[340px]:hidden">{r.where}</span>}
+            <span className="w-8 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{shortAgo(r.since)}</span>
           </WidgetRow>
         );
       })}
@@ -354,8 +356,8 @@ export function AreasWidget() {
               {waiting > 0 && <StateGlyph state="waiting" className="size-3" />}
               {running > 0 && <StateGlyph state="running" className="size-3" />}
             </span>
-            {span.c > 1 && <span className="shrink-0 font-mono text-[11px] text-muted-foreground @max-[260px]:hidden">{a.ref.box}</span>}
-            <span className="w-7 shrink-0 text-right text-muted-foreground text-xs tabular-nums">{shortAgo(a.at)}</span>
+            {span.c > 1 && <span className="shrink-0 font-mono text-meta text-muted-foreground @max-[260px]:hidden">{a.ref.box}</span>}
+            <span className="w-7 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{shortAgo(a.at)}</span>
           </WidgetRow>
         );
       })}

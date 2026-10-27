@@ -19,15 +19,15 @@ import (
 )
 
 // runsBox is a served box with the turn ledger and durable runs.
-func runsBox(t *testing.T) (*Box, func(method, path string, in, out any, header ...string) int) {
+func runsBox(t *testing.T, opts ...func(*Box)) (*Box, func(method, path string, in, out any, header ...string) int) {
 	t.Helper()
 	turns := &Turns{}
 	var bx *Box
-	c, bus := servedBox(t, func(b *Box) {
+	c, bus := servedBox(t, append([]func(*Box){func(b *Box) {
 		b.Turns = turns
 		b.Flows = &Flows{Path: filepath.Join(t.TempDir(), "flows.json")}
 		bx = b
-	})
+	}}, opts...)...)
 	turns.Attach(bus)
 	ctx, cancel := context.WithCancel(context.Background())
 	bx.NewRuns(filepath.Join(t.TempDir(), "runs"), 0, 0, nil)

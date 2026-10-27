@@ -2,6 +2,7 @@ package box
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -59,6 +60,9 @@ type Span struct {
 	Start  time.Time `json:"start"`
 	End    time.Time `json:"end,omitzero"`
 	Reason string    `json:"reason,omitempty"`
+	// Hooked is set when the agent's own hooks reported it: only they end
+	// it, as the screen may not show the question (see screenEvent).
+	Hooked bool `json:"hooked,omitempty"`
 	// Ask is what the agent asked for, from its own hooks, when it said.
 	Ask *Ask `json:"ask,omitempty"`
 }
@@ -73,6 +77,10 @@ type Ask struct {
 	Input   string `json:"input,omitempty"`
 	Why     string `json:"why,omitempty"`
 	Message string `json:"message,omitempty"`
+	// Choices are the answers a structured session offers, by the key
+	// that picks one (claudedriver.go); a terminal's are on its screen.
+	// Never kept: the session list asks its driver.
+	Choices []AskChoice `json:"choices,omitempty"`
 }
 
 // SessionState is what an agent session is doing now.
@@ -90,6 +98,15 @@ type SessionState struct {
 	// for while it waits, when its hooks said.
 	Queued int  `json:"queued,omitempty"`
 	Ask    *Ask `json:"ask,omitempty"`
+	// Unfinished is a finished turn turn check read as work still running
+	// without the agent: a delegated task, a build, a deploy, a watcher.
+	// Parked is one it read as paused until someone else replies or a
+	// later time, with nothing running and nothing asked of you.
+	Unfinished bool `json:"unfinished,omitempty"`
+	Parked     bool `json:"parked,omitempty"`
+	// SoftWait is a wait turn check read into a finished turn: its last
+	// message asks something, and nothing on its screen waits for a key.
+	SoftWait bool `json:"soft_wait,omitempty"`
 }
 
 func (t Turn) open() bool {
@@ -135,6 +152,11 @@ type Turns struct {
 	saveSoon  chan struct{}
 	loaded    bool
 	stop      func()
+
+	// writeMu orders the ledger's writes; legacyOut is what LegacyPath
+	// was last written with.
+	writeMu   sync.Mutex
+	legacyOut []byte
 }
 
 type sessTrack struct {
@@ -153,12 +175,24 @@ type sessTrack struct {
 	// they said a prompt started, so its sends can wait for that.
 	Hooked   bool `json:"hooked,omitempty"`
 	SawStart bool `json:"saw_start,omitempty"`
+	// AsyncAsk is set while the session waits on Codex's async question
+	// box, which a turn can end before anyone answers.
+	AsyncAsk bool `json:"async_ask,omitempty"`
 	// Prompted is set once the ledger has seen a prompt for the session,
 	// sent or typed: the first one may name it (see Box.nameAfter).
 	Prompted bool `json:"prompted,omitempty"`
 	// Reconcile marks a turn left open across a restart, for the screen to
 	// settle if no hook does.
 	Reconcile bool `json:"reconcile,omitempty"`
+	// SoftWait marks a wait turn check read into a finished turn: it shows
+	// as waiting, but the agent takes prompts as if finished.
+	SoftWait bool `json:"soft_wait,omitempty"`
+	// Unfinished marks a finished turn turn check read as work still going
+	// on: it shows as working, but the agent takes prompts as finished.
+	// Parked marks one it read as paused until a reply or a later time: it
+	// shows as idle, and takes prompts as finished too.
+	Unfinished bool `json:"unfinished,omitempty"`
+	Parked     bool `json:"parked,omitempty"`
 
 	inbox []inboxItem
 	// screen polling, owned by the poller
@@ -380,7 +414,7 @@ func (t *Turns) newTurn(s *sessTrack, state, origin string) *Turn {
 }
 
 func (s *sessTrack) set(state string, e events.Event) {
-	s.State, s.Since, s.Seq = state, e.Time, e.Seq
+	s.State, s.Since, s.Seq, s.SoftWait, s.Unfinished, s.Parked = state, e.Time, e.Seq, false, false, false
 }
 
 func (s *sessTrack) end(tr *Turn, state string, e events.Event) {
@@ -562,7 +596,7 @@ func (t *Turns) sent(e events.Event) {
 // the single live agent session in its directory (of its agent, when the
 // directory has several). ok is false when it cannot tell.
 func (t *Turns) resolve(e events.Event) (s *sessTrack, ambiguous bool) {
-	if name := str(e.Data, "session"); name != "" {
+	if name := t.claimed(e.Data); name != "" {
 		return t.track(name, str(e.Data, "agent"), str(e.Data, "path"), time.Time{}), false
 	}
 	path := str(e.Data, "path")
@@ -570,9 +604,18 @@ func (t *Turns) resolve(e events.Event) (s *sessTrack, ambiguous bool) {
 		return nil, false
 	}
 	path = filepath.Clean(path)
+	// An agent berth didn't start (one in an editor, or a one-off claude -p
+	// a tool runs) names no session: its folder says which session it is.
+	// But a session that knows its agent's conversation is not another
+	// conversation in the same folder: that one starting or exiting says
+	// nothing of it.
+	id := str(e.Data, "agent_session_id")
 	var match []*sessTrack
 	for _, s := range t.sess {
 		if s.Agent != "" && s.State != "exited" && sameDir(s.Dir, path) {
+			if id != "" && s.AgentSessionID != "" && s.AgentSessionID != id {
+				continue
+			}
 			match = append(match, s)
 		}
 	}
@@ -595,6 +638,31 @@ func (t *Turns) resolve(e events.Event) (s *sessTrack, ambiguous bool) {
 	return nil, false
 }
 
+// claimed is the session an agent event belongs to by name, or "" when it
+// names none it can be: then its directory says. A Codex whose hooks run
+// from its shared daemon reports every session's events with the
+// BERTH_SESSION of the session that started the daemon
+// (cosscom/shipyard#8), so for Codex a conversation another live session
+// already holds is that session's, and an event from another directory than
+// the named session's is not the named session's.
+func (t *Turns) claimed(data map[string]any) string {
+	name := str(data, "session")
+	if name == "" || str(data, "agent") != "codex" {
+		return name
+	}
+	if id := str(data, "agent_session_id"); id != "" {
+		for _, s := range t.sess {
+			if s.AgentSessionID == id && s.State != "exited" {
+				return s.Name
+			}
+		}
+	}
+	if s, path := t.sess[name], str(data, "path"); s != nil && s.Dir != "" && path != "" && !sameDir(s.Dir, filepath.Clean(path)) {
+		return ""
+	}
+	return name
+}
+
 func sameDir(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -603,6 +671,14 @@ func sameDir(a, b string) bool {
 }
 
 var stateOf = map[string]string{adapters.Ready: "idle", adapters.Started: "running", adapters.Waiting: "waiting", adapters.Finished: "finished", adapters.Exited: "exited"}
+
+// notifyAfterHooks says whether a finished event is Codex's notify for a
+// session whose hooks have said a prompt started. Notify comes at the end
+// of each of Codex's messages, not only the turn's, so there its Stop hook
+// ends the turn. A Codex without hooks still ends turns with notify.
+func notifyAfterHooks(s *sessTrack, typ string, data map[string]any) bool {
+	return typ == adapters.Finished && str(data, "via") == "notify" && s.SawStart
+}
 
 func (t *Turns) agentEvent(e events.Event) {
 	s, ambiguous := t.resolve(e)
@@ -619,6 +695,9 @@ func (t *Turns) agentEvent(e events.Event) {
 		}
 		return
 	}
+	if notifyAfterHooks(s, e.Type, e.Data) {
+		return
+	}
 	source := str(e.Data, "source")
 	if source == "" {
 		s.Hooked = true
@@ -630,13 +709,49 @@ func (t *Turns) agentEvent(e events.Event) {
 		s.Agent = str(e.Data, "agent")
 	}
 	cur := s.current()
+	if source == "" && cur != nil && cur.Fidelity == "screen" && adapters.CapsFor(s.Agent).Finished &&
+		(e.Type == adapters.Started || e.Type == adapters.Waiting) {
+		// Sent before its hooks said anything (its first prompt, given as
+		// it started), the turn was left for the screen to end. They speak
+		// for it now: its Stop ends it, not a quiet screen.
+		cur.Fidelity = "partial"
+	}
 	switch e.Type {
 	case adapters.Ready:
+		// Turn check's "unfinished, not yours": still running (working) or
+		// paused until a reply or a later time (parked). Only on the turn
+		// end it was about, as for its waits below. The turn stays finished.
+		if source == "turncheck" {
+			if cur != nil || s.State != "finished" || s.Seq != seqOf(e.Data["seq"]) {
+				return
+			}
+			parked := str(e.Data, "choice") == "parked"
+			s.Unfinished, s.Parked = !parked, parked
+			break
+		}
 		if cur == nil {
 			s.set("idle", e)
 		}
 	case adapters.Started:
+		// A question the agent's own hook reported is answered when the
+		// agent says so (a tool, a prompt), not when its screen changes.
+		if source == "screen" && cur != nil && cur.State == "waiting" && lastWait(cur) == "question" {
+			return
+		}
 		signal := str(e.Data, "signal")
+		if signal == "tool" && cur == nil && helperTool(e.Data) {
+			// A helper the agent left working in the background, after its
+			// turn ended: the agent itself has not started again. Its tool
+			// running ends a permission it asked for meanwhile, and the
+			// session is done again.
+			if s.helperWait() {
+				s.set("finished", e)
+				t.kickInbox()
+				t.bump()
+			}
+			return
+		}
+		s.AsyncAsk = false
 		switch {
 		case source == "send":
 			// Said by berth for an agent that cannot: the turn exists.
@@ -680,17 +795,36 @@ func (t *Turns) agentEvent(e events.Event) {
 		}
 		s.set("running", e)
 	case adapters.Waiting:
+		if source == "turncheck" {
+			// A verdict on a finished turn counts only while that turn's
+			// end is still the last thing the session did.
+			if cur != nil || s.State != "finished" || s.Seq != seqOf(e.Data["seq"]) {
+				return
+			}
+			s.set("waiting", e)
+			s.SoftWait = true
+			break
+		}
 		if cur != nil {
 			if cur.State != "waiting" {
-				cur.Waits = append(cur.Waits, Span{Start: e.Time, Reason: str(e.Data, "reason")})
+				cur.Waits = append(cur.Waits, Span{Start: e.Time, Reason: str(e.Data, "reason"), Hooked: source == ""})
 				if len(cur.Waits) > 20 {
 					cur.Waits = cur.Waits[len(cur.Waits)-20:]
 				}
+			} else if n := len(cur.Waits); source == "" && n > 0 && cur.Waits[n-1].End.IsZero() {
+				cur.Waits[n-1].Hooked = true // the screen saw it first
 			}
 			cur.State = "waiting"
 		}
+		s.AsyncAsk = str(e.Data, "question_box") == "async"
 		s.set("waiting", e)
 	case adapters.Finished:
+		// A turn that ends on its own async question (Codex's question box
+		// returns at once, then the turn stops) still waits for the answer.
+		// A question answered within the turn (a structured driver's) ends
+		// with it.
+		asked := cur != nil && cur.State == "waiting" && source == "" && s.AsyncAsk
+		s.AsyncAsk = asked
 		if cur != nil {
 			if source == "screen" || source == "reconcile" {
 				cur.Fidelity = "screen" // its end was read off the screen
@@ -702,6 +836,10 @@ func (t *Turns) agentEvent(e events.Event) {
 			}
 		}
 		s.Reconcile = false
+		if asked {
+			s.set("waiting", e)
+			break
+		}
 		s.set("finished", e)
 		t.kickInbox()
 	case adapters.Exited:
@@ -720,6 +858,18 @@ func (t *Turns) agentEvent(e events.Event) {
 		t.kickInbox()
 	}
 	t.bump()
+}
+
+// seqOf reads a Seq from event data, as published (int64) or read back
+// from the journal (float64).
+func seqOf(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return -1
 }
 
 // FirstPrompt says whether this is the first prompt the ledger has seen for
@@ -743,7 +893,7 @@ func (t *Turns) SessionOf(data map[string]any) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.init()
-	if name := str(data, "session"); name != "" {
+	if name := t.claimed(data); name != "" {
 		if _, ok := t.sess[name]; ok {
 			return name
 		}
@@ -773,10 +923,13 @@ func (t *Turns) kickInbox() {
 }
 
 // Redundant says whether an agent event would change nothing: a tool use
-// while the agent is already working. Those are frequent, so the box does
-// not publish them.
+// while the agent is already working, which is frequent, a helper's after
+// the turn ended (agentEvent), or Codex's notify
+// once its hooks are heard (notifyAfterHooks). The box does not publish
+// them.
 func (t *Turns) Redundant(typ string, data map[string]any) bool {
-	if typ != adapters.Started || str(data, "signal") != "tool" {
+	tool := typ == adapters.Started && str(data, "signal") == "tool"
+	if !tool && typ != adapters.Finished {
 		return false
 	}
 	t.mu.Lock()
@@ -787,7 +940,23 @@ func (t *Turns) Redundant(typ string, data map[string]any) bool {
 	if s == nil {
 		return false
 	}
-	return s.State == "running"
+	if !tool {
+		return notifyAfterHooks(s, typ, data)
+	}
+	return s.State == "running" || (helperTool(data) && s.current() == nil && !s.helperWait())
+}
+
+// helperWait says the session waits, with no turn open, on its hooks' word:
+// a permission a helper left running in the background asked for after
+// the agent's turn ended. Turn check's wait is the agent's own question.
+func (s *sessTrack) helperWait() bool {
+	return s.State == "waiting" && !s.SoftWait && s.current() == nil
+}
+
+// helperTool says a tool use was a helper's (a subagent's), not the agent's.
+func helperTool(data map[string]any) bool {
+	helper, _ := data["helper"].(bool)
+	return helper
 }
 
 // Track makes sure a live session is in the ledger and returns its state.
@@ -803,7 +972,7 @@ func (t *Turns) Track(sess Session) SessionState {
 }
 
 func (s *sessTrack) snapshot() SessionState {
-	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox)}
+	out := SessionState{Session: s.Name, Agent: s.Agent, State: s.State, Since: s.Since, Seq: s.Seq, Fidelity: s.Fidelity, AgentSessionID: s.AgentSessionID, Queued: len(s.inbox), Unfinished: s.Unfinished, Parked: s.Parked, SoftWait: s.State == "waiting" && s.SoftWait}
 	if tr := s.current(); tr != nil {
 		out.Turn = tr.ID
 		if n := len(tr.Waits); tr.State == "waiting" && n > 0 && tr.Waits[n-1].End.IsZero() && tr.Waits[n-1].Ask != nil {
@@ -816,6 +985,13 @@ func (s *sessTrack) snapshot() SessionState {
 		out.Turn = s.Turns[n-1].ID
 	}
 	return out
+}
+
+// SoftWait says whether a session waits only by turn check's reading, so a
+// prompt typed now starts a turn rather than answering a question.
+func (t *Turns) SoftWait(name string) bool {
+	st, ok := t.State(name)
+	return ok && st.SoftWait
 }
 
 // State is a session's state, if the ledger knows it.
@@ -1046,7 +1222,7 @@ func (t *Turns) NoteAsk(data map[string]any, raw any) {
 		return
 	}
 	ask := Ask{Tool: askStr(m, "tool"), Input: askStr(m, "input"), Why: askStr(m, "why"), Message: askStr(m, "message")}
-	if ask == (Ask{}) {
+	if ask.Tool == "" && ask.Input == "" && ask.Why == "" && ask.Message == "" {
 		return
 	}
 	t.mu.Lock()
@@ -1197,10 +1373,10 @@ func (t *Turns) Ready(name string) bool {
 	return s.State == "" || s.idle()
 }
 
-// idle says whether the agent can take a prompt: idle or finished, with no
-// turn open.
+// idle says whether the agent can take a prompt: idle or finished (or
+// waiting only by turn check's reading), with no turn open.
 func (s *sessTrack) idle() bool {
-	if s.State != "idle" && s.State != "finished" {
+	if s.State != "idle" && s.State != "finished" && !(s.State == "waiting" && s.SoftWait) {
 		return false
 	}
 	for _, tr := range s.Turns {
@@ -1240,6 +1416,29 @@ func (t *Turns) failQueued(it inboxItem, why string) {
 }
 
 // Changed returns a channel closed at the ledger's next change.
+// AwaitSent waits up to d for a prompt sent to the session to be in the
+// ledger: a turn pending, or begun. A structured agent's start can be read
+// before berthd has said it sent the prompt that starts it.
+func (t *Turns) AwaitSent(name string, d time.Duration) {
+	deadline := time.After(d)
+	for {
+		t.mu.Lock()
+		t.init()
+		s := t.sess[name]
+		ready := s != nil && (s.oldest("pending") != nil || (s.current() != nil && s.current().State == "running"))
+		changed := t.changed
+		t.mu.Unlock()
+		if ready {
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			return
+		}
+	}
+}
+
 func (t *Turns) Changed() <-chan struct{} {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1293,33 +1492,48 @@ func (t *Turns) openForScreen() []string {
 	return out
 }
 
-// screenSeen records a capture and says how many polls it has been the
-// same.
-func (t *Turns) screenSeen(name, screen string) (same int, state string, fidelity string, reconcile bool) {
+// screenEvent records a capture of a session's screen and says what it
+// reports, if anything: the event the screen adapter publishes for it, and
+// its data (pollScreens adds the path).
+func (t *Turns) screenEvent(name, screen string) (string, map[string]any) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s := t.sess[name]
 	if s == nil {
-		return 0, "", "", false
+		return "", nil
 	}
 	if screen == s.lastScreen {
 		s.sameFor++
 	} else {
 		s.lastScreen, s.sameFor = screen, 0
 	}
-	fid := ""
+	fidelity, hookedWait := "", false
 	if tr := s.current(); tr != nil {
-		fid = tr.Fidelity
+		fidelity = tr.Fidelity
+		n := len(tr.Waits)
+		hookedWait = tr.State == "waiting" && n > 0 && tr.Waits[n-1].End.IsZero() && tr.Waits[n-1].Hooked
 	}
-	return s.sameFor, s.State, fid, s.Reconcile
-}
-
-func (t *Turns) forgetScreen(name string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if s := t.sess[name]; s != nil {
+	data := map[string]any{"session": name, "source": "screen"}
+	typ := ""
+	switch seen := adapters.ScreenState(screen); {
+	case seen == "waiting" && s.State != "waiting":
+		typ, data["reason"] = adapters.Waiting, "screen"
+	case hookedWait:
+		// A wait the agent's hooks reported is theirs to end: a screen
+		// that shows no question, or stops changing, may be one it cannot
+		// read (Claude Code's question form, a plan to approve).
+	case seen != "waiting" && s.State == "waiting" && s.sameFor == 0 && fidelity == "screen":
+		typ, data["signal"] = adapters.Started, "tool"
+	case s.sameFor >= screenQuiet && (fidelity == "screen" || s.Reconcile):
+		typ = adapters.Finished
+		if s.Reconcile {
+			data["source"] = "reconcile"
+		}
+	}
+	if typ != "" {
 		s.lastScreen, s.sameFor = "", 0
 	}
+	return typ, data
 }
 
 // save writes the ledger, the inbox, the legacy states and the archive.
@@ -1358,12 +1572,19 @@ func (t *Turns) save() {
 	archive := t.archive
 	t.archive = nil
 	t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	if err == nil && t.Path != "" {
 		statefile.Write(t.Path, b)
 	}
 	if t.LegacyPath != "" {
-		if lb, err := json.Marshal(legacy); err == nil {
-			statefile.Write(t.LegacyPath, lb)
+		// Its states change far less often than the ledger: each write
+		// is a full fsync, so one that would write the same bytes is
+		// left out.
+		if lb, err := json.Marshal(legacy); err == nil && !bytes.Equal(lb, t.legacyOut) {
+			if statefile.Write(t.LegacyPath, lb) == nil {
+				t.legacyOut = lb
+			}
 		}
 	}
 	if inbox != nil && t.InboxPath != "" {
@@ -1498,7 +1719,7 @@ func (b *Box) deliverInbox(ctx context.Context) {
 			continue
 		}
 		unlock := b.lockSend(it.Session)
-		if err := b.Sessions.Send(ctx, it.Session, it.Text, it.Enter); err != nil {
+		if err := b.sendText(ctx, it.Session, it.Text, it.Enter); err != nil {
 			b.Turns.failQueued(it, err.Error())
 			unlock()
 			continue
@@ -1557,33 +1778,24 @@ func (b *Box) pollScreens(ctx context.Context) {
 			b.Turns.Exited(name)
 			continue
 		}
+		if structuredDriver(sess.Driver) {
+			// Its driver says what it does, from its stream; the screen
+			// is its host's, which shows none of it.
+			continue
+		}
 		if b.startingState(name) == startAsking {
 			// Its startup watch reads it: a question that sits still is
 			// not a turn that ended.
 			continue
 		}
-		screen, err := b.Sessions.Screen(ctx, name, 0)
+		// Found in the list just read: capture it without listing again.
+		screen, err := b.Sessions.capture(ctx, name, 0)
 		if err != nil {
 			continue
 		}
-		same, state, fidelity, reconcile := b.Turns.screenSeen(name, screen)
-		data := map[string]any{"session": name, "path": sess.Dir, "source": "screen"}
-		publish := func(typ string) {
-			b.Turns.forgetScreen(name)
+		if typ, data := b.Turns.screenEvent(name, screen); typ != "" {
+			data["path"] = sess.Dir
 			b.Events.Publish(events.Event{Type: typ, Box: b.Name, Origin: "screen", Data: data})
-		}
-		switch seen := adapters.ScreenState(screen); {
-		case seen == "waiting" && state != "waiting":
-			data["reason"] = "screen"
-			publish(adapters.Waiting)
-		case seen != "waiting" && state == "waiting" && same == 0 && fidelity == "screen":
-			data["signal"] = "tool"
-			publish(adapters.Started)
-		case same >= screenQuiet && (fidelity == "screen" || reconcile):
-			if reconcile {
-				data["source"] = "reconcile"
-			}
-			publish(adapters.Finished)
 		}
 	}
 }
@@ -1612,4 +1824,12 @@ func (t *Turns) waitSessionState(ctx context.Context, name string, want map[stri
 		case <-ch:
 		}
 	}
+}
+
+// lastWait is the reason of the turn's latest wait, or "".
+func lastWait(tr *Turn) string {
+	if n := len(tr.Waits); n > 0 {
+		return tr.Waits[n-1].Reason
+	}
+	return ""
 }

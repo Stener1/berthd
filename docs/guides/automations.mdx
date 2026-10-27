@@ -136,7 +136,10 @@ delivery harmless. Each new item is its own run, one after another (see
 carrying a `github.<on>` event (`github.review_comment`, …) with `pr`, `url`,
 `title`, `author`, `body`, `file`, `line`, `check` and `state` as its data. Main checkouts and worktrees on the default branch
 have no PR to watch. A box without `gh` simply never starts these flows. One
-poll makes at most 20 `gh` calls, shared between flows.
+poll makes at most 20 `gh` calls, shared between flows; when a poll runs out,
+the next one starts where it stopped, so every worktree gets its turn. Once a
+PR is merged or closed, a flow looks at it again only once an hour, in case it
+is reopened.
 
 Anyone can comment on a public repository, and a comment's text can reach an
 agent's prompt, so `review_comment` and `pr_review` flows start only for

@@ -1,18 +1,14 @@
-// The mark: a B drawn in one line, with the amber dot (the one lamp), and the
-// lowercase wordmark. The same drawing as the landing page's header and
-// site/assets/favicon.svg.
+// The mark: a hull seen bow-on, on its keel blocks, with the amber dot (the
+// one lamp) lit inside it, and the lowercase wordmark. The same drawing as
+// the landing page's header and site/assets/favicon.svg.
 export function Mark({ className }: { className?: string }) {
   return (
-    <svg viewBox="80 20 384 472" aria-hidden="true" className={className}>
-      <path
-        d="M116 84 H300 a96 96 0 0 1 0 192 H116 Z M116 276 H324 a104 104 0 0 1 0 208 H116 Z"
-        transform="translate(0,-28)"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="68"
-        strokeLinejoin="round"
-      />
-      <circle cx="296" cy="152" r="30" fill="var(--berth-amber)" />
+    <svg viewBox="56 64 400 386" aria-hidden="true" className={className}>
+      <path d="M88 96H424Q410 300 256 350Q102 300 88 96Z" fill="none" stroke="currentColor" strokeWidth="60" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="138" y="404" width="58" height="44" rx="9" fill="currentColor" />
+      <rect x="227" y="404" width="58" height="44" rx="9" fill="currentColor" />
+      <rect x="316" y="404" width="58" height="44" rx="9" fill="currentColor" />
+      <circle cx="256" cy="190" r="30" fill="var(--berth-amber)" />
     </svg>
   );
 }

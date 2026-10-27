@@ -2,7 +2,10 @@
 
 Each folder here is a Shipyard plugin. The ones whose `berth-plugin.json` says
 `"builtin": true` ship inside the app; `hello-ports` is the smallest example
-of the SDK and is not built in.
+of the SDK and is not built in. The ones that say `"marketplace": true`
+(`hello-ports`, and [`leadline`](leadline) and [`database`](database), which
+each also carry a program for boxes) are in the listing people browse and install from in Settings →
+Plugins: see "How the listing ships" below.
 
 | Plugin | Adds | Why it's built in |
 | --- | --- | --- |
@@ -13,7 +16,7 @@ of the SDK and is not built in.
 | [box-monitor](box-monitor) | Screen, sidebar item | Memory, disk and load with an hour of history, and a warning before a box runs out. |
 | [activity](activity) | Screen, sidebar item | What happened on every box while you were away. |
 | [notes](notes) | Worktree panel "Notes" | A scratchpad per worktree that its agents can read too. |
-| [issues](issues) | Screen, sidebar item, commands | Open GitHub issues for each project, and an agent on any of them (or a batch) in one step. |
+| [issues](issues) | Screen, sidebar item, commands, Home widget | Open GitHub issues for each project, or your Linear issues, and an agent on any of them (or a batch) in one step. |
 | [prompts](prompts) | Screen, sidebar item, command | Saved prompts with `{{variables}}`, sent to one agent from ⌘K or a pane's menu, or to several at once. |
 
 ## How built-ins ship
@@ -44,3 +47,20 @@ of the SDK and is not built in.
   `node_modules`. Diff loads `@pierre/diffs` this way.
 - Type-check them all with `pnpm -C app typecheck:plugins` (uses
   `plugins/tsconfig.json`).
+
+## How the listing ships
+
+- `pnpm -C app build:marketplace` bundles each plugin whose
+  `berth-plugin.json` says `"marketplace": true` (its `src/index.tsx`, with
+  React and the SDK external, not minified) into
+  `site/plugins/<id>/<version>/` beside its manifest, and writes
+  `site/plugins/index.json`: every plugin, and each file's path, link, size
+  and SHA-256. That folder is committed and deployed with the site, so
+  publishing is building and committing it. Raise the plugin's `version`
+  when its code changes.
+- The laptop agent reads the index (`internal/agent/marketplace.go`),
+  checks every file it downloads against it, and installs into
+  `~/.berth/plugins/<id>/`. It never turns a plugin on: the consent dialog
+  does, as for any plugin there.
+- `pnpm -C app check:marketplace` fails when `site/plugins/` is not what
+  this folder builds. A plugin is built in or in the listing, not both.

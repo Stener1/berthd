@@ -11,6 +11,7 @@ import (
 
 	"github.com/cosscom/shipyard/internal/events"
 	"github.com/cosscom/shipyard/internal/integrations"
+	"github.com/cosscom/shipyard/internal/integrations/adapters"
 )
 
 // ledger is a turn ledger following a sequenced bus, with sessions tracked
@@ -110,6 +111,83 @@ func TestApprovalClosesTheWaitSpan(t *testing.T) {
 	}
 }
 
+// A helper (subagent) the agent left working in the background goes on
+// using tools after the agent's Stop: the session stays finished, and the
+// box does not publish them. The agent's own tool use with no turn open (a
+// prompt Claude Code took from its own queue, which fires no prompt hook)
+// is the agent working again, and so is a helper's inside a turn.
+func TestAHelpersToolAfterStopLeavesTheTurnFinished(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "s", Dir: "/w", Agent: "claude"})
+	helperTool := func() {
+		bus.Publish(events.Event{Type: "agent.started", Origin: "claude", Data: map[string]any{"session": "s", "path": "/w", "agent": "claude", "signal": "tool", "helper": true}})
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "prompt")
+	if tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) != true {
+		t.Fatal("a helper's tool use while running was not redundant")
+	}
+	hook(bus, "agent.waiting", "s", "/w", "claude", "reason", "permission")
+	if tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) {
+		t.Fatal("a helper's tool use that ends a wait in the turn was redundant")
+	}
+	helperTool() // the helper's approved tool ran
+	if st, _ := tr.State("s"); st.State != "running" {
+		t.Fatalf("a helper's approved tool left %+v", st)
+	}
+	hook(bus, "agent.finished", "s", "/w", "claude")
+	if !tr.Redundant("agent.started", map[string]any{"session": "s", "signal": "tool", "helper": true}) {
+		t.Fatal("a helper's tool use after the turn ended would be published")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "finished" {
+		t.Fatalf("a helper's tool after Stop made the session %s", st.State)
+	}
+	if got, _ := tr.Get("s#1"); got.State != "finished" || len(tr.List("s", 10)) != 1 {
+		t.Fatalf("turn %+v, %d turns", got, len(tr.List("s", 10)))
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "tool")
+	if st, _ := tr.State("s"); st.State != "running" {
+		t.Fatalf("the agent's own tool use after Stop left %s", st.State)
+	}
+}
+
+// A helper left running after the agent's Stop asks for a permission: the
+// session waits. Its tool running once that is granted ends the wait, and
+// the session is done again and takes a held prompt. Turn check's wait
+// (the agent's own question) stays.
+func TestAHelpersPermissionAfterStopEndsWithItsTool(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "s", Dir: "/w", Agent: "claude"})
+	helper := map[string]any{"session": "s", "signal": "tool", "helper": true}
+	helperTool := func() {
+		bus.Publish(events.Event{Type: "agent.started", Origin: "claude", Data: map[string]any{"session": "s", "path": "/w", "agent": "claude", "signal": "tool", "helper": true}})
+	}
+	hook(bus, "agent.started", "s", "/w", "claude", "signal", "prompt")
+	hook(bus, "agent.finished", "s", "/w", "claude")
+	hook(bus, "agent.waiting", "s", "/w", "claude", "reason", "permission")
+	if st, _ := tr.State("s"); st.State != "waiting" || tr.Ready("s") {
+		t.Fatalf("a helper's permission after Stop: %+v, ready %v", st, tr.Ready("s"))
+	}
+	if tr.Redundant("agent.started", helper) {
+		t.Fatal("the tool that ends the helper's wait would not be published")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "finished" || !tr.Ready("s") {
+		t.Fatalf("after the helper's tool: %+v, ready %v", st, tr.Ready("s"))
+	}
+	if len(tr.List("s", 10)) != 1 {
+		t.Fatalf("the helper made a turn: %+v", tr.List("s", 10))
+	}
+
+	end := hook(bus, "agent.finished", "s", "/w", "claude")
+	bus.Publish(events.Event{Type: "agent.waiting", Data: map[string]any{"session": "s", "path": "/w", "source": "turncheck", "seq": end.Seq}})
+	if !tr.Redundant("agent.started", helper) {
+		t.Fatal("a helper's tool use would be published at turn check's wait")
+	}
+	helperTool()
+	if st, _ := tr.State("s"); st.State != "waiting" || !st.SoftWait {
+		t.Fatalf("a helper's tool ended turn check's wait: %+v", st)
+	}
+}
+
 // E6: two agents in one worktree. Each one's hooks name its session, and
 // old hooks that only give a folder end no wait unless one agent fits.
 func TestAgentsSharingAWorktreeKeepTheirOwnTurns(t *testing.T) {
@@ -177,6 +255,106 @@ func TestAFinishedOnlyAgentWorksFromTheSend(t *testing.T) {
 	sent = bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": "cx"}})
 	if next, _ := tr.ForSent("cx", sent.Seq); next.State != "pending" {
 		t.Fatalf("with prompt hooks, a send is %s", next.State)
+	}
+}
+
+// Codex's notify comes at the end of each of its messages, not only the
+// turn's. Once its hooks said a prompt started, Stop alone ends the turn,
+// and the notify is not published; a Codex without hooks still ends its
+// turn with notify.
+func TestCodexNotifyEndsATurnOnlyWithoutHooks(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "cx", Dir: "/w", Agent: "codex"}, Session{Name: "old", Dir: "/v", Agent: "codex"})
+	hook(bus, "agent.ready", "cx", "/w", "codex")
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "prompt")
+	if !tr.Redundant("agent.finished", map[string]any{"session": "cx", "via": "notify"}) {
+		t.Fatal("a hooked Codex's notify would be published")
+	}
+	hook(bus, "agent.finished", "cx", "/w", "codex", "via", "notify") // its first message
+	if st, _ := tr.State("cx"); st.State != "running" || turnState(t, tr, "cx#1") != "running" {
+		t.Fatalf("after a notify mid-turn: session %+v, turn %s", st, turnState(t, tr, "cx#1"))
+	}
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "tool")
+	hook(bus, "agent.finished", "cx", "/w", "codex") // Stop
+	if st, _ := tr.State("cx"); st.State != "finished" || turnState(t, tr, "cx#1") != "finished" {
+		t.Fatalf("after Stop: session %+v, turn %s", st, turnState(t, tr, "cx#1"))
+	}
+	if tr.Redundant("agent.finished", map[string]any{"session": "cx"}) {
+		t.Fatal("Stop would not be published")
+	}
+
+	sent := bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": "old"}})
+	mine, _ := tr.ForSent("old", sent.Seq)
+	if tr.Redundant("agent.finished", map[string]any{"session": "old", "via": "notify"}) {
+		t.Fatal("the notify of a Codex without hooks would not be published")
+	}
+	hook(bus, "agent.finished", "old", "/v", "codex", "via", "notify")
+	if st := turnState(t, tr, mine.ID); st != "finished" {
+		t.Fatalf("without hooks, notify left the turn %s", st)
+	}
+}
+
+// Codex's question box is a tool: its PreToolUse makes the turn wait, and
+// the PostToolUse once it is answered has it running again. Any other tool
+// use after a turn ended (Codex carrying on by itself once a background
+// command finishes) shows the agent working.
+func TestACodexQuestionWaitsUntilItIsAnswered(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "cx", Dir: "/w", Agent: "codex"})
+	hook(bus, "agent.ready", "cx", "/w", "codex")
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "prompt")
+	hook(bus, "agent.waiting", "cx", "/w", "codex", "reason", "question") // PreToolUse request_user_input_async
+	got, _ := tr.Get("cx#1")
+	if st, _ := tr.State("cx"); st.State != "waiting" || got.State != "waiting" || len(got.Waits) != 1 || got.Waits[0].Reason != "question" {
+		t.Fatalf("asking: session %+v, turn %+v", st, got)
+	}
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "tool") // PostToolUse, answered
+	got, _ = tr.Get("cx#1")
+	if st, _ := tr.State("cx"); st.State != "running" || got.State != "running" || got.Waits[0].End.IsZero() {
+		t.Fatalf("answered: session %+v, turn %+v", st, got)
+	}
+	hook(bus, "agent.finished", "cx", "/w", "codex")
+	if tr.Redundant("agent.started", map[string]any{"session": "cx", "signal": "tool"}) {
+		t.Fatal("a tool use after the turn ended would not be published")
+	}
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "tool") // PreToolUse Bash
+	if st, _ := tr.State("cx"); st.State != "running" {
+		t.Fatalf("a tool use after the turn ended left the session %+v", st)
+	}
+	if all := tr.List("cx", 10); len(all) != 1 || all[0].State != "finished" {
+		t.Fatalf("a tool use made or reopened a turn: %+v", all)
+	}
+}
+
+// Codex asks with its async question box and ends its turn: the turn is
+// over, but the session still waits for the answer, until you prompt again.
+func TestATurnThatEndsOnItsQuestionStillWaits(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "cx", Dir: "/w", Agent: "codex"})
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "prompt")
+	hook(bus, "agent.waiting", "cx", "/w", "codex", "reason", "question", "question_box", "async")
+	// The question box redraws the screen; that is not an answer.
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "tool", "source", "screen")
+	hook(bus, "agent.finished", "cx", "/w", "codex")
+	got, _ := tr.Get("cx#1")
+	if st, _ := tr.State("cx"); st.State != "waiting" || got.State != "finished" {
+		t.Fatalf("ended on its question: session %+v, turn %+v", st, got)
+	}
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "prompt")
+	if st, _ := tr.State("cx"); st.State != "running" {
+		t.Fatalf("answered: session %+v", st)
+	}
+	// Work after the question means it may have been answered: the end is an end.
+	hook(bus, "agent.waiting", "cx", "/w", "codex", "reason", "question", "question_box", "async")
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "tool")
+	hook(bus, "agent.finished", "cx", "/w", "codex")
+	if st, _ := tr.State("cx"); st.State != "finished" {
+		t.Fatalf("worked on after asking: session %+v", st)
+	}
+	// A question that blocks the turn (Plan mode's, or a structured
+	// driver's) is answered within it, so its turn's end is an end.
+	hook(bus, "agent.started", "cx", "/w", "codex", "signal", "prompt")
+	hook(bus, "agent.waiting", "cx", "/w", "codex", "reason", "question")
+	hook(bus, "agent.finished", "cx", "/w", "codex")
+	if st, _ := tr.State("cx"); st.State != "finished" {
+		t.Fatalf("ended after a blocking question: session %+v", st)
 	}
 }
 
@@ -398,5 +576,229 @@ func TestANewSessionDoesNotInheritAnOlderFolderState(t *testing.T) {
 	bus.Publish(events.Event{Type: "session.started", Time: time.Now(), Data: map[string]any{"name": "fresh", "path": "/w", "agent": "claude"}})
 	if st, _ := turns.State("fresh"); st.State != "" {
 		t.Fatalf("a new session took the folder's old state: %+v", st)
+	}
+}
+
+// screenPoll is one poll of the screen adapter over a session showing
+// screen: it publishes what the screen reports, as pollScreens does.
+func screenPoll(tr *Turns, bus *events.Bus, name, screen string) {
+	if typ, data := tr.screenEvent(name, screen); typ != "" {
+		bus.Publish(events.Event{Type: typ, Origin: "screen", Data: data})
+	}
+}
+
+// Claude Code's question form (AskUserQuestion) at the bottom of its pane.
+var claudeQuestion = strings.Join([]string{
+	"⏺ Before I start, one question about the rollout.",
+	"",
+	" ☐ Rollout",
+	"",
+	"Ship it behind a flag?",
+	"",
+	"❯ 1. Yes",
+	"     Behind a flag",
+	"  2. No",
+	"     For everyone at once",
+	"  3. Type something.",
+	"  4. Chat about this",
+	"",
+	"Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+}, "\n")
+
+// A worker started with its first prompt: the prompt is sent before its
+// hooks have said anything, so its turn starts as one the screen ends. Then
+// its hooks report a question. The screen used to read no question there,
+// end the wait as if answered and, once quiet, the turn: the card read
+// Done while the agent asked. Whatever the screen shows, a wait the hooks
+// reported is theirs to end, and so is the turn.
+func TestAWaitTheHooksReportedIsNotEndedByTheScreen(t *testing.T) {
+	for _, shown := range []struct{ name, screen string }{
+		{"its question", claudeQuestion},
+		{"a question the screen cannot read", "⏺ Which region should the job run in?\n\n  waiting…"},
+	} {
+		t.Run(shown.name, func(t *testing.T) {
+			s := "acme-feat-claude"
+			tr, bus := ledger(t, Session{Name: s, Dir: "/w/feat", Agent: "claude"})
+			sent := bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": s, "from": "berth"}})
+			mine, _ := tr.ForSent(s, sent.Seq)
+			if mine.State != "running" || mine.Fidelity != "screen" {
+				t.Fatalf("first prompt: %+v", mine)
+			}
+			hook(bus, "agent.waiting", s, "/w/feat", "claude", "reason", "permission")
+			screenPoll(tr, bus, s, "⏺ Reading the issue…")
+			for range screenQuiet + 2 {
+				screenPoll(tr, bus, s, shown.screen)
+			}
+			got, _ := tr.Get(mine.ID)
+			if st, _ := tr.State(s); st.State != "waiting" || got.State != "waiting" || len(got.Waits) != 1 || !got.Waits[0].End.IsZero() {
+				t.Fatalf("the screen settled the hooks' wait: session %+v, turn %+v", st, got)
+			}
+			// Its hooks speak for it now: the screen no longer has to.
+			if open := tr.openForScreen(); len(open) != 0 {
+				t.Fatalf("still left for the screen: %v", open)
+			}
+			hook(bus, "agent.started", s, "/w/feat", "claude", "signal", "tool") // answered
+			for range screenQuiet + 2 {
+				screenPoll(tr, bus, s, "⏺ Adding the flag…")
+			}
+			if st := turnState(t, tr, mine.ID); st != "running" {
+				t.Fatalf("after the answer, a quiet screen left the turn %s", st)
+			}
+			hook(bus, "agent.finished", s, "/w/feat", "claude")
+			if got, _ := tr.Get(mine.ID); got.State != "finished" || got.Fidelity != "partial" || got.Waits[0].End.IsZero() {
+				t.Fatalf("after its Stop: %+v", got)
+			}
+		})
+	}
+}
+
+// A wait the hooks reported before berthd restarted is still theirs: the
+// screen, settling the turns left open, does not call it finished.
+func TestAWaitOpenAcrossARestartIsNotFinishedByTheScreen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "turns.json")
+	first := &Turns{Path: path}
+	bus := &events.Bus{Sequence: true}
+	first.Attach(bus)
+	bus.Publish(events.Event{Type: "session.started", Data: map[string]any{"name": "a", "path": "/w/a", "agent": "claude"}})
+	hook(bus, "agent.ready", "a", "/w/a", "claude")
+	hook(bus, "agent.started", "a", "/w/a", "claude", "signal", "prompt")
+	hook(bus, "agent.waiting", "a", "/w/a", "claude", "reason", "question")
+	first.save()
+
+	second := &Turns{Path: path}
+	bus2 := &events.Bus{Sequence: true}
+	second.Attach(bus2)
+	for range screenQuiet + 2 {
+		screenPoll(second, bus2, "a", "⏺ Which region should the job run in?")
+	}
+	if st := turnState(t, second, "a#1"); st != "waiting" {
+		t.Fatalf("a#1 = %s", st)
+	}
+	hook(bus2, "agent.finished", "a", "/w/a", "claude")
+	if st := turnState(t, second, "a#1"); st != "finished" {
+		t.Fatalf("a#1 = %s after its Stop", st)
+	}
+}
+
+// An agent without hooks: the screen reports its question, ends the wait
+// when the question goes, and ends the turn when the screen is quiet.
+func TestTheScreenEndsTheWaitsItReported(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "x", Dir: "/w/x", Agent: "aider"})
+	sent := bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": "x"}})
+	mine, _ := tr.ForSent("x", sent.Seq)
+	screenPoll(tr, bus, "x", claudeQuestion)
+	if got, _ := tr.Get(mine.ID); got.State != "waiting" || len(got.Waits) != 1 || got.Waits[0].Reason != "screen" {
+		t.Fatalf("the question: %+v", got)
+	}
+	screenPoll(tr, bus, "x", "Adding the flag…")
+	if got, _ := tr.Get(mine.ID); got.State != "running" || got.Waits[0].End.IsZero() {
+		t.Fatalf("answered: %+v", got)
+	}
+	for range screenQuiet + 1 { // the first sees it anew
+		screenPoll(tr, bus, "x", "Adding the flag…")
+	}
+	if got, _ := tr.Get(mine.ID); got.State != "finished" || got.Fidelity != "screen" {
+		t.Fatalf("quiet: %+v", got)
+	}
+}
+
+// Screens that ask nothing of a key: Remote Control's menu after /rc,
+// Claude Code's prompt once the mode menu switched it to bypass, and its
+// prompt under a last message that asks in words (its footer ends in
+// "/rc"). A turn the screen settles never waits on them.
+func TestScreensWithNoQuestionAreNoWait(t *testing.T) {
+	for _, f := range []string{"remote-control.ansi", "bypass-switched.ansi", "asked-in-reply.ansi"} {
+		raw := fixture(t, "screens", f)
+		if got := adapters.ScreenState(raw); got != "" {
+			t.Fatalf("%s reads %q", f, got)
+		}
+		tr, bus := ledger(t, Session{Name: "x", Dir: "/w/x", Agent: "aider"})
+		sent := bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": "x"}})
+		mine, _ := tr.ForSent("x", sent.Seq)
+		screenPoll(tr, bus, "x", raw)
+		if got, _ := tr.Get(mine.ID); got.State == "waiting" || len(got.Waits) != 0 {
+			t.Fatalf("%s: %+v", f, got)
+		}
+	}
+}
+
+// The screen can see a question before the hook for it arrives: the wait
+// is then the hooks' as well, and the screen leaves it to them.
+func TestAWaitTheScreenSawFirstIsTheHooksOnceTheyReportIt(t *testing.T) {
+	s := "acme-feat-claude"
+	tr, bus := ledger(t, Session{Name: s, Dir: "/w/feat", Agent: "claude"})
+	sent := bus.Publish(events.Event{Type: "session.sent", Data: map[string]any{"name": s, "from": "berth"}})
+	mine, _ := tr.ForSent(s, sent.Seq)
+	screenPoll(tr, bus, s, claudeQuestion)
+	hook(bus, "agent.waiting", s, "/w/feat", "claude", "reason", "permission")
+	for range screenQuiet + 2 {
+		screenPoll(tr, bus, s, "⏺ Which region should the job run in?")
+	}
+	if got, _ := tr.Get(mine.ID); got.State != "waiting" || len(got.Waits) != 1 || !got.Waits[0].Hooked || !got.Waits[0].End.IsZero() {
+		t.Fatalf("the screen settled a wait the hooks reported: %+v", got)
+	}
+}
+
+// Codex's shared daemon runs every session's hooks with the BERTH_SESSION
+// of the session that started it (cosscom/shipyard#8): here cx1's. An event
+// from another session's directory goes by its directory, and a
+// conversation a session holds is that session's whatever name its events
+// carry. Claude's hooks are taken by name as before.
+func TestACodexDaemonsHooksReachTheirOwnSession(t *testing.T) {
+	tr, bus := ledger(t,
+		Session{Name: "cx1", Dir: "/w/one", Agent: "codex"},
+		Session{Name: "cx2", Dir: "/w/two", Agent: "codex"},
+		Session{Name: "cx3", Dir: "/w/one", Agent: "codex"},
+		Session{Name: "cl", Dir: "/w/cl", Agent: "claude"})
+	state := func(name string) SessionState { st, _ := tr.State(name); return st }
+	hook(bus, "agent.started", "cx1", "/w/one", "codex", "signal", "prompt", "agent_session_id", "t1")
+	// cx2's turn, named cx1 by the daemon, from cx2's directory.
+	hook(bus, "agent.started", "cx1", "/w/two", "codex", "signal", "prompt", "agent_session_id", "t2")
+	if st := state("cx2"); st.State != "running" || st.AgentSessionID != "t2" {
+		t.Fatalf("cx2 = %+v", st)
+	}
+	hook(bus, "agent.finished", "cx1", "/w/two", "codex", "agent_session_id", "t2")
+	if cx1, cx2 := state("cx1"), state("cx2"); cx1.State != "running" || cx1.AgentSessionID != "t1" || cx2.State != "finished" {
+		t.Fatalf("cx1 = %+v, cx2 = %+v", cx1, cx2)
+	}
+	// cx3 shares cx1's directory: once its own hooks named its conversation,
+	// the daemon's events for it are its own.
+	hook(bus, "agent.started", "cx3", "/w/one", "codex", "signal", "prompt", "agent_session_id", "t3")
+	hook(bus, "agent.finished", "cx1", "/w/one", "codex", "agent_session_id", "t3")
+	if cx1, cx3 := state("cx1"), state("cx3"); cx1.State != "running" || cx3.State != "finished" {
+		t.Fatalf("cx1 = %+v, cx3 = %+v", cx1, cx3)
+	}
+	if got := tr.SessionOf(map[string]any{"session": "cx1", "agent": "codex", "path": "/w/two"}); got != "cx2" {
+		t.Fatalf("SessionOf = %q", got)
+	}
+	hook(bus, "agent.started", "cl", "/w/elsewhere", "claude", "signal", "prompt")
+	if st := state("cl"); st.State != "running" {
+		t.Fatalf("claude by name: %+v", st)
+	}
+}
+
+// Another Claude in the same folder (one in an editor, or a one-off
+// `claude -p` a tool runs) names no session. Its starting and exiting are
+// not the session's, whose agent is in a conversation of its own: once
+// marked exited, a live session read as working for good.
+func TestAnotherAgentInTheSameFolderIsNotTheSessions(t *testing.T) {
+	tr, bus := ledger(t, Session{Name: "cl", Dir: "/w/app", Agent: "claude"})
+	state := func() SessionState { st, _ := tr.State("cl"); return st }
+	hook(bus, "agent.started", "cl", "/w/app", "claude", "signal", "prompt", "agent_session_id", "mine")
+	hook(bus, "agent.finished", "cl", "/w/app", "claude", "agent_session_id", "mine")
+	if st := state(); st.State != "finished" || st.AgentSessionID != "mine" {
+		t.Fatalf("before: %+v", st)
+	}
+
+	hook(bus, "agent.ready", "", "/w/app", "claude", "agent_session_id", "other")
+	hook(bus, "agent.exited", "", "/w/app", "claude", "agent_session_id", "other")
+	if st := state(); st.State != "finished" || st.AgentSessionID != "mine" {
+		t.Fatalf("another conversation in the folder changed the session: %+v", st)
+	}
+
+	// Its own conversation, unnamed (an older hook), still reaches it.
+	hook(bus, "agent.started", "", "/w/app", "claude", "signal", "prompt", "agent_session_id", "mine")
+	if st := state(); st.State != "running" {
+		t.Fatalf("its own conversation by folder: %+v", st)
 	}
 }

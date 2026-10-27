@@ -97,6 +97,11 @@ func runAgent(l laptop) error {
 	ctx, stop := signalContext()
 	defer stop()
 	cfg := agent.Config{Dir: l.dir, Socket: l.socket()}
+	if spec, err := agentService(l); err == nil {
+		if _, err := service.Migrate(spec); err != nil {
+			fmt.Fprintf(os.Stderr, "berth agent: updating its service: %v\n", err)
+		}
+	}
 	// The app's Copy diagnostics shows what `berth doctor` would (GET /v1/doctor).
 	cfg.Doctor = func(ctx context.Context) []doctor.Check { return laptopChecks(ctx, l) }
 	// A second agent (a test, a throwaway home) needs its own ports.
@@ -106,6 +111,8 @@ func runAgent(l laptop) error {
 	if a := os.Getenv("BERTH_UI_ADDR"); a != "" {
 		cfg.UIAddr = a
 	}
+	// Another plugin listing than the public one (Settings → Plugins → Browse).
+	cfg.PluginRegistry = os.Getenv("BERTH_PLUGIN_REGISTRY")
 	err := agent.Run(ctx, cfg)
 	if errors.Is(err, agent.ErrAlreadyRunning) {
 		fmt.Fprintln(os.Stderr, "berth: an agent is already running for this home; exiting")

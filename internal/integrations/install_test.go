@@ -1,6 +1,7 @@
 package integrations
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -102,6 +103,37 @@ func TestQuotedBinaryPaths(t *testing.T) {
 	}
 }
 
+// Codex's question box and tool uses come through PreToolUse and
+// PostToolUse. A hooks.json from an older berth, without them, reads as
+// outdated so an upgrade adds them: once, after the hooks already there.
+func TestCodexToolHooksAreAddedToAnOlderInstallOnce(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hooks.json")
+	os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/opt/berthd hook codex Stop"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"my-guard"}]}]}}`), 0o644)
+	if hooked, current := accountHooks("codex", dir); !hooked || current {
+		t.Fatalf("older hooks: hooked %v current %v", hooked, current)
+	}
+	if changed, err := InstallCodexHooks(path, "/opt/berthd"); !changed || err != nil {
+		t.Fatalf("install: %v changed=%v", err, changed)
+	}
+	if changed, _ := InstallCodexHooks(path, "/opt/berthd"); changed {
+		t.Fatal("a second install changed the file again")
+	}
+	hooks := readJSON(t, path)["hooks"].(map[string]any)
+	for event, n := range map[string]int{"SessionStart": 1, "UserPromptSubmit": 1, "PreToolUse": 2, "PostToolUse": 1, "PermissionRequest": 1, "Stop": 1} {
+		if list, _ := hooks[event].([]any); len(list) != n {
+			t.Errorf("%s hooks = %v", event, list)
+		}
+	}
+	pre := hooks["PreToolUse"].([]any)
+	if !containsCommand(pre[:1], "my-guard") || !containsCommand(pre[1:], "/opt/berthd hook codex PreToolUse") {
+		t.Fatalf("PreToolUse hooks = %v", pre)
+	}
+	if hooked, current := accountHooks("codex", dir); !hooked || !current {
+		t.Fatalf("after install: hooked %v current %v", hooked, current)
+	}
+}
+
 func TestNewAgentHooksInstallOnceAndKeepOtherSettings(t *testing.T) {
 	dir := t.TempDir()
 	gem := filepath.Join(dir, "settings.json")
@@ -138,5 +170,71 @@ func TestNewAgentHooksInstallOnceAndKeepOtherSettings(t *testing.T) {
 		if !strings.Contains(string(b), "hook claude "+ev) {
 			t.Errorf("claude settings lack %s", ev)
 		}
+	}
+}
+
+func TestInstallOmpExtensionWritesBerthsFileOnce(t *testing.T) {
+	ext := filepath.Join(t.TempDir(), "agent", "extensions", "berth.ts")
+	if changed, err := InstallOmpExtension(ext, "/opt/berthd"); !changed || err != nil {
+		t.Fatalf("first install: %v %v", changed, err)
+	}
+	if changed, _ := InstallOmpExtension(ext, "/opt/berthd"); changed {
+		t.Fatal("extension rewritten unchanged")
+	}
+	b, _ := os.ReadFile(ext)
+	for _, want := range []string{`"/opt/berthd"`, "hook omp", "agent_start", "agent_end", "tool_approval_requested", "hasUI"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("extension missing %q:\n%s", want, b)
+		}
+	}
+	if changed, _ := InstallOmpExtension(ext, "/usr/bin/berthd"); !changed {
+		t.Fatal("extension kept a stale berth path")
+	}
+}
+
+func TestInstallToolOmpAddsTheMCPServerAndKeepsOthers(t *testing.T) {
+	home := t.TempDir()
+	mcp := filepath.Join(home, ".omp", "agent", "mcp.json")
+	os.MkdirAll(filepath.Dir(mcp), 0o755)
+	os.WriteFile(mcp, []byte(`{"mcpServers":{"jev":{"type":"stdio","command":"jev"}},"disabledServers":["x"]}`), 0o600)
+	var out bytes.Buffer
+	if err := InstallTool(home, "omp", "/opt/berthd", &out); err != nil {
+		t.Fatal(err)
+	}
+	root := readJSON(t, mcp)
+	servers := root["mcpServers"].(map[string]any)
+	berth, _ := servers["berth"].(map[string]any)
+	if berth["command"] != "/opt/berthd" || berth["type"] != "stdio" || servers["jev"] == nil || root["disabledServers"] == nil {
+		t.Fatalf("mcp.json = %v", root)
+	}
+	out.Reset()
+	InstallTool(home, "omp", "/opt/berthd", &out)
+	if !strings.Contains(out.String(), "MCP server already present") {
+		t.Fatalf("second install changed the file: %s", out.String())
+	}
+}
+
+func TestInstallToolOmpSkipsTheMCPServerForTheLaptopBinary(t *testing.T) {
+	home := t.TempDir()
+	if err := InstallTool(home, "omp", "/opt/berth", &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".omp", "agent", "mcp.json")); err == nil {
+		t.Fatal("wrote an MCP server the laptop binary cannot serve")
+	}
+}
+
+func TestInstallToolOmpPutsTheExtensionInOmpsAgentFolder(t *testing.T) {
+	home := t.TempDir()
+	var out bytes.Buffer
+	if err := InstallTool(home, "omp", "/opt/berthd", &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".omp", "agent", "extensions", "berth.ts")); err != nil {
+		t.Fatalf("extension not written: %v", err)
+	}
+	omp, _ := ToolByID("omp")
+	if !omp.Hooked(home) || !omp.Current(home) {
+		t.Fatal("omp is not hooked after install")
 	}
 }

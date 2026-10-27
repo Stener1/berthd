@@ -1,0 +1,15 @@
+.cv-md .cv-pre[data-test-result]:not([data-test-source]) > pre { display: none; }
+.cv-md .cv-pre[data-test-source] > .cv-test-host { display: none; }
+.cv-test-slot { display: inline-flex; align-items: center; }
+.cv-test-source { height: 1.375rem; padding: 0 0.375rem; border-radius: var(--radius-sm, 0.375rem); color: var(--muted-foreground); cursor: pointer; outline: none; }
+.cv-test-source:hover { color: var(--foreground); background: var(--accent); }
+.cv-test-source:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.cv-test-card { background: var(--card); font-size: 0.8125rem; }
+.cv-test-summary { display: flex; min-height: 2.75rem; align-items: center; gap: 0.5rem; padding: 0.625rem 0.875rem; }
+.cv-test-summary strong { font-weight: 600; }
+.cv-test-failure { display: flex; gap: 0.625rem; border-top: 1px solid var(--border); padding: 0.625rem 0.875rem; }
+.cv-test-failure-mark { color: var(--destructive-foreground); font-size: 1.125rem; line-height: 1.1; }
+.cv-test-file { display: inline-flex; max-width: 100%; align-items: center; gap: 0.25rem; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--link, var(--foreground)); font-family: var(--font-mono); font-size: 0.6875rem; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 2px; cursor: pointer; outline: none; }
+.cv-test-file:hover { text-decoration-color: currentColor; }
+.cv-test-file:focus-visible { box-shadow: 0 0 0 2px var(--ring); }
+.cv-test-more { margin: 0; border-top: 1px solid var(--border); padding: 0.375rem 0.875rem; color: var(--muted-foreground); font-size: 0.75rem; }

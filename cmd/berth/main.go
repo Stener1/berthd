@@ -58,10 +58,15 @@ Boxes
                                          Machines on the tailnet that could be boxes
   berth boxes [--json]                   List paired boxes and whether they are online
   berth ping BOX [-c N]                  Check a box answers and still trusts you, and its latency
-  berth upgrade BOX [--check] [--json]   Upgrade the box's daemon over berth (no SSH); --check only reports
+  berth upgrade BOX [--check] [--json] [--force]
+                                         Upgrade the box's daemon over berth (no SSH); --check only reports.
+                                         A box on a newer release is left alone; --force downgrades it
   berth kit add|apply|list|save …        Set projects up the same way on every box; see berth kit help
   berth team show|setup|status|retry …   Set a box up the way your team's are, from <org>/.berth
                                          on GitHub (read with gh); see berth team help
+  berth review OWNER/NAME#N [--box BOX] [--as EMAIL] [--path /x] [--yes] [--json]
+                                         Open a teammate's PR on your box, at the commit
+                                         shown, set up by your team's kit; see berth review help
   berth edit BOX/PROJECT[/WT] [FILE[:LINE[:COL]]] [--in EDITOR]
                                          Open a worktree, or a file at a line, in your editor
                                          (EDITOR: cursor, vscode, windsurf or zed; default: the first installed)
@@ -177,6 +182,8 @@ func run(args []string) error {
 		return kitCommand(l, rest)
 	case "team":
 		return teamCommand(l, rest)
+	case "review":
+		return reviewCommand(l, rest)
 	case "ssh-config":
 		return sshConfigCommand(l, rest)
 	case "edit":
