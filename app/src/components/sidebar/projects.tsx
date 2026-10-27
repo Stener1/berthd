@@ -457,7 +457,7 @@ const WorktreeRow = memo(function WorktreeRow({ box, loc, wt, sessions, data, se
               </span>
             )}
             {project && (
-              <span data-testid="worktree-row-project" className={cn("min-w-0 max-w-max shrink grow basis-0 truncate text-tag", ink.faint)}>
+              <span data-testid="worktree-row-project" className={cn("max-w-[35%] shrink-0 truncate text-tag", ink.faint)}>
                 {project}
               </span>
             )}
