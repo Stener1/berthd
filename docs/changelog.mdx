@@ -18,6 +18,12 @@ again.
   are kept on this computer, and a worktree's pin goes when you archive or
   remove it.
 
+- **Upgrading a box no longer leaves dead processes behind.** Each upgrade
+  left the terminals that were open on the box, and any command berthd had
+  running, as zombie processes under berthd until it restarted for good. A
+  box now closes its terminals before it switches to the new build, and the
+  new build cleans up whatever the old one left. Your sessions keep running,
+  and the app reattaches its terminals as before.
 - **Switching projects no longer opens a new task.** Clicking a project on
   the rail (or in the projects column) with no agent at work in it now takes
   you to the worktree of it you were in last, or its main checkout, instead
