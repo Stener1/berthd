@@ -59,7 +59,7 @@ export async function run({ page, shot, step, expect }) {
   await expect(form).toHaveCount(0);
   const answered = pane.locator("[data-testid=chat-item][data-kind=question]");
   await expect(answered.getByTestId("answer-attachments")).toHaveText("notes.md, shot.png, flow-step-3.png");
-  await expect(pane.getByTestId("chat")).toContainText(/the banner step was off \[attached: \S+-notes\.md \S+-shot\.png \S+-flow-step-3\.png\]/);
+  await expect(pane.getByTestId("chat")).toContainText(/the banner step was off \[attached: \S+-notes\.md, \S+-shot\.png, \S+-flow-step-3\.png\]/);
   await expect(composer.getByTestId("attachment-chip")).toHaveCount(0);
   await shot("4-answered");
 }

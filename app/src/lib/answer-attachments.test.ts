@@ -7,11 +7,13 @@ import { attachedTo, shownName, splitAttached } from "./attachments.ts";
 const shot =
   "/home/acme/shop/.berth/attachments/20261025-152924-pasted-152924.webp";
 const log = "/home/acme/shop/.berth/attachments/20261025-152931-checkout.png";
+const spaced =
+  "/Users/acme/My Projects/shop/.berth/attachments/20261025-152931-1-flow step.png";
 
 test("files attached to an answer go after its words, on the same line", () => {
   assert.equal(
     attachedTo("this step  was off\n", [shot, log]),
-    `this step was off [attached: ${shot} ${log}]`,
+    `this step was off [attached: ${shot}, ${log}]`,
   );
 });
 
@@ -35,7 +37,22 @@ test("an answer splits back into its words and the files attached to it", () => 
   });
 });
 
+test("a path with a space, a comma or a bracket stays one path", () => {
+  const odd = "/home/acme/a, b [c]/d.png";
+  assert.deepEqual(splitAttached(attachedTo("see these", [spaced, odd, log])), {
+    words: "see these",
+    paths: [spaced, odd, log],
+  });
+});
+
+test("an answer without a path in its brackets is all words", () => {
+  const answer = "the cart [attached: none]";
+  assert.deepEqual(splitAttached(answer), { words: answer, paths: [] });
+});
+
 test("an attachment is shown by the name it was given", () => {
   assert.equal(shownName(shot), "pasted-152924.webp");
+  assert.equal(shownName(spaced), "flow step.png");
+  assert.equal(shownName("/a/20261025-152924-12-shot.png"), "shot.png");
   assert.equal(shownName("notes.md"), "notes.md");
 });
