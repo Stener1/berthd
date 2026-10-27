@@ -119,7 +119,14 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
     if (!deps.runs?.onBox(box) || params.sessions.length > MAX_ITEMS || params.worktrees.length > MAX_ITEMS) continue;
     asks.push(
       startStopRun(deps.runs, box, { title, group: ref, params }, deps.every).then(
-        (id) => void (id && started.push({ box, id, params })),
+        (id) => {
+          if (!id) return;
+          started.push({ box, id, params });
+          // Kept at once, so a relaunch while another box is still asked
+          // brings this one's run back.
+          const onBox = new Set(started.map((s) => s.box));
+          remember({ ref, title, started: Date.now(), runs: started.map(({ box: b, id: r }) => ({ box: b, id: r })), items: items.filter((i) => onBox.has(i.group)) });
+        },
         // It may have the run: the app doesn't do it as well.
         (err) => {
           unanswered.add(box);
@@ -130,10 +137,6 @@ export async function runStopJob(rows: StopItem[], archive: boolean, deps: StopD
   }
   if (asks.length) await Promise.all(asks);
   const local = rows.filter((r) => !unanswered.has(r.box) && !started.some((s) => s.box === r.box));
-  if (started.length) {
-    const onBox = new Set(started.map((s) => s.box));
-    remember({ ref, title, started: Date.now(), runs: started.map(({ box, id }) => ({ box, id })), items: items.filter((i) => onBox.has(i.group)) });
-  }
   const tallies = await Promise.all([
     ...started.map(async ({ box, id, params }) => {
       for (const w of params.worktrees) if (!removalOf(useRemovals.getState().byKey, box, w.path)) markRemoving(box, w.path, "archive", w.name);
