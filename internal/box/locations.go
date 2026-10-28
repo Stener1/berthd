@@ -417,7 +417,17 @@ func (l *Locations) RemoveWorktree(ctx context.Context, location, name string, f
 		if force {
 			args = append(args, "--force")
 		}
-		if out, err := git(ctx, args...); err != nil {
+		out, err := git(ctx, args...)
+		// git refuses any worktree with a submodule checked out, however
+		// clean, and only --force gets past it. Look for the work git won't,
+		// and force only when there is none to lose.
+		if err != nil && !force && strings.Contains(string(out), "containing submodules") {
+			if why := unsavedWork(ctx, w.Path); why != "" {
+				return httpError{status: http.StatusConflict, msg: fmt.Sprintf("git worktree remove: '%s' %s, use --force to delete it", w.Path, why)}
+			}
+			out, err = git(ctx, append(args, "--force")...)
+		}
+		if err != nil {
 			return fmt.Errorf("git worktree remove: %s", strings.TrimSpace(string(out)))
 		}
 		// A worktree made again under the same name starts without a title.
@@ -547,6 +557,106 @@ func dirtyWorktree(dir string) bool {
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+// unsavedWork says what removing a worktree with submodules would lose, or
+// "" for nothing: changes in it or its submodules, or submodule commits or
+// stashes no remote has (any local ref's: a branch's, a tag's, the stash),
+// since a worktree keeps its submodules' repositories inside its own git
+// folder. A ref's name on history a remote has is not kept: whether a
+// remote has the tag itself would take asking it, on every removal.
+// Untracked files count whatever status.showUntrackedFiles says, and when
+// git can't tell, that counts as something to lose.
+func unsavedWork(ctx context.Context, dir string) string {
+	out, err := git(ctx, "-C", dir, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none")
+	if err != nil {
+		return "could not be checked for changes"
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return "contains modified or untracked files"
+	}
+	// Each checked-out submodule is asked itself too, so its own config
+	// (status.showUntrackedFiles, submodule.<name>.ignore for the ones
+	// inside it) can't hide a change from the status above.
+	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive",
+		"git status --porcelain --untracked-files=normal --ignore-submodules=none")
+	if err != nil {
+		return "has submodules that could not be checked for changes"
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		return "contains modified or untracked files in a submodule"
+	}
+	// Every submodule repository the removal deletes, against every local
+	// ref it has: those in the worktree's git folder, checked out or not (a
+	// deinit leaves one behind), and those a checked-out submodule keeps in
+	// its own .git (one made with git clone), with the ones under that .git
+	// in turn.
+	gitDir, err := git(ctx, "-C", dir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "has submodules that could not be checked for unpushed work"
+	}
+	repos, err := moduleRepos(filepath.Join(strings.TrimSpace(string(gitDir)), "modules"))
+	if err != nil {
+		return "has submodules that could not be checked for unpushed work"
+	}
+	out, err = git(ctx, "-C", dir, "submodule", "foreach", "--quiet", "--recursive", "git rev-parse --absolute-git-dir")
+	if err != nil {
+		return "has submodules that could not be checked for unpushed work"
+	}
+	for _, repo := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if repo == "" {
+			continue
+		}
+		nested, err := moduleRepos(filepath.Join(repo, "modules"))
+		if err != nil {
+			return "has submodules that could not be checked for unpushed work"
+		}
+		for _, r := range append([]string{repo}, nested...) {
+			if !slices.Contains(repos, r) {
+				repos = append(repos, r)
+			}
+		}
+	}
+	for _, repo := range repos {
+		out, err := git(ctx, "--git-dir="+repo, "rev-list", "-1", "--all", "--not", "--remotes")
+		if err != nil {
+			return "has submodules that could not be checked for unpushed work"
+		}
+		if strings.TrimSpace(string(out)) != "" {
+			return "contains submodule commits or stashes that no remote has"
+		}
+	}
+	return ""
+}
+
+// moduleRepos lists the submodule repositories git keeps under a modules
+// folder, nested submodules' included. A name may hold slashes, so any
+// folder that isn't a repository is looked into.
+func moduleRepos(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var repos []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if _, err := os.Stat(filepath.Join(p, "HEAD")); err == nil {
+			repos = append(repos, p)
+			p = filepath.Join(p, "modules")
+		}
+		nested, err := moduleRepos(p)
+		if err != nil {
+			return nil, err
+		}
+		repos = append(repos, nested...)
+	}
+	return repos, nil
 }
 
 func expandHome(path string) string {

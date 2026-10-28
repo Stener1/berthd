@@ -9,7 +9,15 @@ upgrades with `berth upgrade BOX`, or by running the
 [install command](/getting-started/add-a-box#with-the-install-command)
 again.
 
-## Unreleased
+## v0.3.31
+
+- **Worktrees with submodules can be removed.** git refuses to remove any
+  worktree with a submodule checked out, even a clean one, so removing or
+  archiving one failed. Shipyard now checks the worktree and its submodules
+  itself and removes it when nothing would be lost. If a submodule has
+  changes, stashes, or commits that aren't pushed anywhere (a commit only a
+  local tag points at counts), the worktree is kept and you can still choose
+  **Remove anyway**.
 
 - **Pin worktrees to the top of the sidebar.** Right-click a worktree, or
   open its ⋯ menu, and choose **Pin to top**. Pinned worktrees sit in their
@@ -32,6 +40,11 @@ again.
   the question, and a helper reporting back no longer counts as your
   answer. A card with nothing to pick says **Reply below to answer it**,
   and what you type there is the answer.
+- **A chat no longer goes blank at the top mid-turn.** When the agent's
+  long reply folded into **Working** and the chat got short enough to fit,
+  the Mac app could leave your prompt and the first steps undrawn, with
+  empty space where they belonged. They now stay drawn.
+
 - **An agent waiting on its own work no longer looks like a live turn.**
   When turn check reads a finished turn as work still running (a build, a
   deploy, a task it waits on), the sidebar and its tab show an hourglass
