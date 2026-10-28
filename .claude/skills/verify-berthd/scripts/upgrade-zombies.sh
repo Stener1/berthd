@@ -53,13 +53,19 @@ build "$from" "$dir/from" ""
 # Stripped, so the TO build's bytes differ from FROM's even when the refs
 # are the same.
 build "$to" "$dir/to" "-s -w"
-mv "$dir/to/berthd" "$dir/to/berthd-linux-amd64"
+# berth upgrade sends berthd-<os>-<arch> for the arch the box reports.
+mv "$dir/to/berthd" "$dir/to/berthd-linux-$(go env GOARCH)"
 box() { env "${box_env[@]}" "$dir/from/berthd" "$@"; }
 lap() { env "${lap_env[@]}" "$dir/to/berth" "$@"; }
 
 env "${box_env[@]}" nohup "$dir/from/berthd" serve --listen "$addr" >"$dir/berthd.log" 2>&1 &
 box_pid=$!
-until grep -q "berthd serving" "$dir/berthd.log"; do sleep 0.5; done
+for _ in $(seq 40); do
+  grep -q "berthd serving" "$dir/berthd.log" && break
+  kill -0 "$box_pid" 2>/dev/null || break
+  sleep 0.5
+done
+grep -q "berthd serving" "$dir/berthd.log" || { echo "berthd did not start:" >&2; cat "$dir/berthd.log" >&2; exit 1; }
 lap pair "$(box pair --address "$addr" --json | jq -r .link)" --name devz >/dev/null
 repo=$dir/acme-shop
 git init -q -b main "$repo" && echo "# acme shop" >"$repo/README.md"
@@ -70,13 +76,15 @@ box session new acme-shop --name z1 -- sh -c 'while :; do sleep 60; done' >/dev/
 for _ in $(seq "$attach"); do
   # A held-open stdin: the terminal stays attached until the box goes. Its
   # own process group, so cleanup ends the sleep too.
-  setsid env "${lap_env[@]}" bash -c "sleep 600 | script -qfc '$dir/to/berth attach devz/z1' /dev/null" </dev/null >/dev/null 2>&1 &
+  setsid env "${lap_env[@]}" bash -c 'sleep 600 | script -qfc "$(printf %q "$1") attach devz/z1" /dev/null' _ "$dir/to/berth" </dev/null >/dev/null 2>&1 &
   pids+=($!)
 done
 clients() { ps -eo ppid=,comm= | awk -v p="$box_pid" '$1==p && $2=="tmux:"' | wc -l; }
 zombies() { ps -eo stat=,ppid= | awk -v p="$box_pid" '$1~/Z/ && $2==p' | wc -l; }
 for _ in $(seq 40); do (($(clients) >= attach)) && break; sleep 0.5; done
 attached=$(clients)
+# Fewer clients than asked for would read as fewer zombies, not as a failure.
+((attached == attach)) || { echo "only $attached of $attach terminals attached" >&2; exit 1; }
 before=$(zombies)
 
 lap upgrade devz --force >"$dir/upgrade.log" 2>&1
