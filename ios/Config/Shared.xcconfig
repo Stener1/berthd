@@ -1,0 +1,9 @@
+// Defaults that build anywhere (the simulator needs no signing). To install
+// on a phone, copy Local.xcconfig.example to Local.xcconfig and set your team
+// and a bundle id of your own; Local.xcconfig is never committed.
+PRODUCT_BUNDLE_IDENTIFIER = dev.shipyard.phone
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+#include? "Local.xcconfig"
