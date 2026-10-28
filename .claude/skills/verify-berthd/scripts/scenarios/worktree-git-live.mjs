@@ -32,6 +32,9 @@ export async function run({ page, shot, step, expect, call }) {
   const repo = (await location()).path;
   const path = `${repo}-${NAME}`;
   const remote = (() => { try { return git(repo, "remote", "get-url", "origin"); } catch { return ""; } })();
+  // Cleanup removes only what this run made, never a worktree or branch
+  // that was there before.
+  let created = false;
   try {
     step("the box answers twice from what it kept");
     const before = await location();
@@ -39,6 +42,7 @@ export async function run({ page, shot, step, expect, call }) {
 
     step("a worktree added with git shows up");
     git(repo, "worktree", "add", "-q", "-b", NAME, path);
+    created = true;
     await expect(row).toBeVisible({ timeout: 30_000 });
     await poll(async () => (await probe())?.branch, "the box lists the worktree on its branch").toBe(NAME);
     await shot("worktree-added");
@@ -75,8 +79,11 @@ export async function run({ page, shot, step, expect, call }) {
     await expect(row).toHaveCount(0);
     await shot("worktree-removed");
   } finally {
-    try { git(repo, "worktree", "remove", "--force", path); } catch {}
-    try { git(repo, "branch", "-D", NAME, `${NAME}-2`); } catch {}
+    if (created) {
+      // Twice --force removes it even if a failed step left it locked.
+      try { git(repo, "worktree", "remove", "--force", "--force", path); } catch {}
+      try { git(repo, "branch", "-D", NAME, `${NAME}-2`); } catch {}
+    }
     if (remote) git(repo, "remote", "set-url", "origin", remote);
     else try { git(repo, "remote", "remove", "origin"); } catch {}
   }

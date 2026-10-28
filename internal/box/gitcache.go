@@ -152,7 +152,7 @@ func refStores(common string) []string {
 // worktreeStamp covers what `git worktree list --porcelain` reports: the
 // worktrees, each one's HEAD and branch, and its lock.
 func worktreeStamp(g gitDirs) string {
-	files := append(refStores(g.common), filepath.Join(g.common, "config"), filepath.Join(g.common, "worktrees"))
+	files := append(refStores(g.common), filepath.Join(g.common, "config"), filepath.Join(g.git, "config.worktree"), filepath.Join(g.common, "worktrees"))
 	files = append(files, headFiles(g.common, filepath.Join(g.common, "HEAD"))...)
 	ents, _ := os.ReadDir(filepath.Join(g.common, "worktrees"))
 	for _, e := range ents {

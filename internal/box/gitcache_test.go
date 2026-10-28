@@ -20,7 +20,7 @@ func countGit(t *testing.T) func() []string {
 	}
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls")
-	script := "#!/bin/sh\necho \"$*\" >> '" + log + "'\nexec '" + real + "' \"$@\"\n"
+	script := "#!/bin/sh\necho \"$*\" >> " + shellQuote(log) + "\nexec " + shellQuote(real) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

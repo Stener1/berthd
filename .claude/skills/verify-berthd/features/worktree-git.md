@@ -14,7 +14,7 @@ The sidebar's projects and worktrees come from the box's location list (GET `/v1
 
 ## How to get to it (user POV)
 
-- Work in a project's checkout from a terminal: add a worktree, commit, switch branches, remove it. The sidebar follows without a reload.
+- Work in a project's checkout from a terminal: add a worktree, commit, switch branches, remove it. The sidebar follows additions and changes without a reload; an app that is already open needs a reload to drop a removed worktree's row (below).
 
 ## Driving it with drive.mjs
 
@@ -39,4 +39,4 @@ sudo timeout -s INT 40 bpftrace -e 'tracepoint:syscalls:sys_enter_execve /curtas
 
 - An app that is already open keeps the row of a worktree removed with git, though the box drops it from its list at once and its watcher sends `worktree.removed` (on main before the cache too). The scenario reads the removal from the box, then reloads the app to see the row gone.
 
-- A global `url.*.insteadOf` or an included git config changing a remote's URL shows within a minute, not at once: the box doesn't watch files outside `.git` other than `~/.gitconfig` and `~/.config/git/config`.
+- A global `url.*.insteadOf` or an included git config changing a remote's URL shows within a minute, not at once: the box doesn't watch files outside `.git` other than `~/.gitconfig` and `$XDG_CONFIG_HOME/git/config` (default `~/.config/git/config`).

@@ -70,7 +70,7 @@ func (b *Box) handleStats(w http.ResponseWriter, r *http.Request) error {
 // its state. It needs only where the worktrees are, where Locations.List
 // also reads every config (the app reads stats on every agent event), and
 // nothing when no agent runs. The worktree list is git's, kept until the
-// repository changes (gitcache.go).
+// repository changes or a minute passes (gitcache.go).
 func (b *Box) placeAgents(ctx context.Context, agents []Agent) {
 	if len(agents) == 0 {
 		return
