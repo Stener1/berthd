@@ -1,0 +1,1 @@
+berthd: BERTH_SESSION is set by berthd for every session and can't be set for one

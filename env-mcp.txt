@@ -1,0 +1,4 @@
+ACME_ACCOUNT=box
+ACME_REGION=ap-south
+ACME_RUN=mcp-43
+ACME_TICKET=repo

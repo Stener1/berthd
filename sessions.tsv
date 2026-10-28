@@ -1,0 +1,4 @@
+acme-shop-env-mcp-claude-j6g	claude	acme-shop/env-mcp
+acme-shop-env-task-claude-j6f	claude	acme-shop/env-task
+env-session	claude	acme-shop
+env-term	terminal	acme-shop/env-task

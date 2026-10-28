@@ -1,0 +1,4 @@
+ACME_ACCOUNT=box
+ACME_REGION=eu-north
+ACME_RUN=task run 41
+ACME_TICKET=repo

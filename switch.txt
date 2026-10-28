@@ -1,0 +1,20 @@
+# chat (structured), pane 188623
+ACME_ACCOUNT=box
+ACME_REGION=ap-south
+ACME_RUN=mcp-43
+ACME_TICKET=repo
+BERTH_DRIVER=structured
+{"name":"acme-shop-env-mcp-claude-j6g","location":"acme-shop/env-mcp","dir":"/tmp/vb-2631/acme-shop-env-mcp","command":"claude --resume '412fca1e-b756-4e9e-86f9-c4b4398fc86b' --permission-mode bypassPermissions","created":"2026-10-28T22:00:56Z","attached":0,"exited":false,"agent":"claude","agent_sta
+# after switch to terminal, pane 193169
+ACME_ACCOUNT=box
+ACME_REGION=ap-south
+ACME_RUN=mcp-43
+ACME_TICKET=repo
+BERTH_DRIVER=
+{"name":"acme-shop-env-mcp-claude-j6g","location":"acme-shop/env-mcp","dir":"/tmp/vb-2631/acme-shop-env-mcp","command":"'/home/stener/work/berthd-bra-2631-per-session-env/bin/berthd' 'agent-host' --dir '/tmp/vb-2631/box-home/box/conversations/tnn15k-94e5af2bdac7' --socket '/tmp/berth-1004/tnn15k-94e
+# after switch back to chat, pane 194715
+ACME_ACCOUNT=box
+ACME_REGION=ap-south
+ACME_RUN=mcp-43
+ACME_TICKET=repo
+BERTH_DRIVER=structured
