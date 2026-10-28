@@ -238,11 +238,11 @@ CLAUDE_WINDOWS = (("five_hour", "primary", 300), ("seven_day", "secondary", 7 * 
 
 
 def claude_limits():
-    """The plan limits Claude Code last passed to a status line, from
-    ~/.berth/limits/<account>.json: {"at": ISO time, "limits": the status
-    line's rate_limits}. Claude Code writes them nowhere else, so a status
-    line has to record them (see the README); without the file there are
-    none."""
+    """The plan limits a Claude Code agent last reported, from
+    ~/.berth/limits/<account>.json: {"at": ISO time, "limits": the windows
+    in a status line's rate_limits shape}. berthd writes it from each
+    structured turn, and a status line can too (see the README); without
+    the file there are none."""
     out = []
     for name, _ in claude_dirs():
         o = read_json(LIMITS / f"{name}.json")

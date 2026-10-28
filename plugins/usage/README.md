@@ -26,15 +26,17 @@ The numbers come from the files each agent writes on the box. Nothing is estimat
 | --- | --- | --- |
 | Claude Code | `~/.claude/projects/**/*.jsonl` and each account's `<dir>/projects` | `message.usage` on each assistant message, deduplicated by message and request id. It also holds Claude Code's own per-session `totalCostUSD`. |
 | Codex | `~/.codex/sessions/**/*.jsonl` and each account's `<dir>/sessions` | `token_count` events (cumulative totals per session) and the `rate_limits` Codex last saw. |
-| Claude Code limits | `~/.berth/limits/<account>.json`, written by your status line | The `rate_limits` Claude Code last passed to the status line. |
+| Claude Code limits | `~/.berth/limits/<account>.json`, written by the box (and by your status line, if you add the lines below) | The account's 5-hour and weekly windows as of the last turn a Claude Code agent took. |
 
 - **Input** excludes cached input. Cache reads and writes are shown separately; Codex's `input_tokens` includes its cached tokens, so the plugin subtracts them.
 - **Cost** is shown only for Claude Code, and only as Claude Code's own estimate at API list prices. On a subscription (Claude Max or Pro) the screen says the plan covers the use. Codex gets no dollar figure: it records none, and the plugin keeps no price table.
-- **Plan limits** show the 5-hour and weekly windows, "as of" the last turn the agent took. A window that has reset since says so instead of showing an old percentage. Codex writes them into its transcripts. Claude Code passes them only to its [status line](https://code.claude.com/docs/en/statusline), so Claude Code's show once your status line records them (below).
+- **Plan limits** show the 5-hour and weekly windows, "as of" the last turn the agent took. A window that has reset since says so instead of showing an old percentage. Codex writes them into its transcripts. Claude Code writes them nowhere, so the box records them (below).
 
 ### Claude Code's plan limits
 
-Claude Code gives a status line its `rate_limits` (Pro and Max plans, after the session's first reply) and writes them nowhere else. To see them here, have your status line script save them, one file per account:
+Each turn of a structured Claude Code agent (`claude -p`, the way Shipyard starts agents) tells the box how much of the account's windows is used, in a `rate_limit_event` (Pro and Max plans). berthd saves the latest reading to `~/.berth/limits/<account>.json`, one file per account: `{"account", "dir", "at", "limits": {"five_hour": {"used_percentage", "resets_at"}, "seven_day": {…}}}`. It keeps the newest reading: one older than the file's `at` changes nothing, and a window a turn leaves out keeps what the file had. Readings in a log read back after berthd restarts are old and aren't saved.
+
+An agent in Claude Code's own terminal screen sends no such event. Claude Code gives its [status line](https://code.claude.com/docs/en/statusline) the same `rate_limits` instead, so if you use that screen, have your status line script save them to the same file:
 
 ```sh
 in=$(cat)   # the JSON Claude Code passes your status line
@@ -49,7 +51,7 @@ fi
 # …then print your status line from "$in" as before.
 ```
 
-The account is `default` for `~/.claude` and the folder's name for `~/.berth/accounts/claude/<name>`. A file for any other name is ignored. The screen shows the limits as of `at`, so a box whose status line hasn't run for a while shows an old reading, labelled with its age.
+The account is `default` for `~/.claude` and the folder's name for `~/.berth/accounts/claude/<name>`. A file for any other name is ignored. The screen shows the limits as of `at`, so an account no agent has used for a while shows an old reading, labelled with its age. Any other keys in the file are ignored.
 
 ### How it runs on the box
 

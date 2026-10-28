@@ -46,6 +46,14 @@ again.
   branch, and asks git again only when the repository changes (or after a
   minute).
 
+- **Claude Code's 5-hour and weekly limits on the Usage screen.** Each
+  turn of a structured Claude Code agent says how much of its account's
+  plan limits is used, and the box now keeps that in
+  `~/.berth/limits/<account>.json`. The Usage screen and the Home widget
+  show it beside Codex's: how much is used, as of when, and when each
+  window resets. An agent in Claude Code's own terminal screen can add
+  its readings from a status line; the plugin's README has the lines.
+
 ## v0.3.31
 
 - **Worktrees with submodules can be removed.** git refuses to remove any
@@ -111,13 +119,6 @@ again.
   turn.** Tool use by a Claude Code subagent left running after the
   agent's turn ended used to put the session back to running until your
   next prompt.
-- **Claude Code's 5-hour and weekly limits on the Usage screen.** Claude
-  Code passes its plan limits only to a status line, so once your status
-  line saves them to `~/.berth/limits/<account>.json`, the Usage screen
-  and the Home widget show them beside Codex's: how much is used, as of
-  when, and when each window resets. The plugin's README has the lines to
-  add to a status line.
-
 - **Stopping several agents can archive their worktrees too.** The Agent
   Dashboard's Stop and Clean up dialogs have a box, **Archive their
   worktrees where it's safe**. Ticked, each stopped agent's worktree is
