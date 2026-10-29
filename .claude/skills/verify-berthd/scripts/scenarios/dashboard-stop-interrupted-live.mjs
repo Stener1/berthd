@@ -1,7 +1,8 @@
 // dashboard-stop-interrupted-live: a removal git doesn't finish in time,
 // on a real box (dev-box.sh's devq), as features/dashboard-stop.md
 // describes. The box is restarted with a git on its PATH that, for
-// verify-slow only, deletes the worktree's .git and then hangs, as a
+// verify-slow only, deletes the worktree's .git and .gitignore (so its
+// node_modules reads as new) and then hangs, as a
 // `git worktree remove` of a big folder on a busy box did, and with
 // BERTH_WORKTREE_REMOVE_TIMEOUT=5s. A bulk Stop of verify-slow and
 // verify-ok must report the cause in words (timed out), never a bare
@@ -11,7 +12,7 @@
 // VERIFY_BERTHD=<berthd> runs it on another build (a before: an old box
 // stops git after 60 s and says nothing).
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +45,7 @@ export async function run({ page, shot, step, expect, call }) {
   step(`restart the box with a git that deletes ${SLOW}'s .git and then hangs, and a 5 s removal budget`);
   const bin = mkdtempSync(join(tmpdir(), "verify-git-"));
   const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
-  writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$3 $4 $5" in\n  "worktree remove "*/acme-shop-${SLOW}) rm -f "$5/.git"; exec sleep 900 ;;\nesac\nexec ${real} "$@"\n`);
+  writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$3 $4 $5" in\n  "worktree remove "*/acme-shop-${SLOW}) rm -f "$5/.git" "$5/.gitignore"; exec sleep 900 ;;\nesac\nexec ${real} "$@"\n`);
   chmodSync(join(bin, "git"), 0o755);
   step(restartBox({ PATH: `${bin}:${process.env.PATH}`, BERTH_WORKTREE_REMOVE_TIMEOUT: "5s" }));
   try {
@@ -57,9 +58,18 @@ export async function run({ page, shot, step, expect, call }) {
 async function stopAndFinish({ page, shot, step, expect, call, post, tray, dialog, title }) {
   // The restarted box answers again before anything is asked of it.
   await expect.poll(async () => (await call(`${API}/locations`).catch(() => [])).length, { timeout: 30_000 }).toBeGreaterThan(0);
-  step(`make ${SLOW} and ${OK} in acme-shop, a Claude Code in each`);
+  // A removal stopped halfway can delete .gitignore before what it ignores.
+  const acme = (await call(`${API}/locations`)).find((l) => l.name === "acme-shop").path;
+  if (!existsSync(join(acme, ".gitignore"))) {
+    writeFileSync(join(acme, ".gitignore"), "node_modules\n");
+    execFileSync("git", ["-C", acme, "add", ".gitignore"]);
+    execFileSync("git", ["-C", acme, "-c", "user.name=acme", "-c", "user.email=dev@acme.test", "commit", "-qm", "ignore node_modules"]);
+  }
+  step(`make ${SLOW} and ${OK} in acme-shop, a Claude Code in each, and node_modules in ${SLOW}`);
   const paths = {};
   for (const n of [SLOW, OK]) paths[n] = (await post("/locations/acme-shop/worktrees", { name: n })).path;
+  mkdirSync(join(paths[SLOW], "node_modules", "left-pad"), { recursive: true });
+  writeFileSync(join(paths[SLOW], "node_modules", "left-pad", "index.js"), "module.exports = 1\n");
   for (const n of [SLOW, OK]) await post("/sessions", { name: `${n}-claude`, location: `acme-shop/${n}`, agent: "claude", title: title(n) });
   const repo = (await call(`${API}/locations`)).find((l) => l.name === "acme-shop").path;
   const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" });
@@ -94,7 +104,7 @@ async function stopAndFinish({ page, shot, step, expect, call, post, tray, dialo
   if (listed.includes(`worktree ${paths[OK]}\n`)) throw new Error(`${OK}'s worktree is still there`);
   const entry = listed.split("\n\n").find((e) => e.startsWith(`worktree ${paths[SLOW]}\n`));
   if (!entry?.includes("prunable")) throw new Error(`git doesn't list ${SLOW} as prunable:\n${listed}`);
-  if (existsSync(join(paths[SLOW], ".git")) || !existsSync(join(paths[SLOW], "README.md"))) throw new Error(`${SLOW} isn't half removed`);
+  if (existsSync(join(paths[SLOW], ".git")) || existsSync(join(paths[SLOW], ".gitignore")) || !existsSync(join(paths[SLOW], "node_modules"))) throw new Error(`${SLOW} isn't half removed`);
   step(`git worktree list:\n${listed.trim()}`);
   await job.getByRole("button", { name: "Dismiss" }).click();
 
