@@ -1,0 +1,6 @@
+Config/Local.xcconfig
+Shipyard.xcodeproj/
+Shipyard/Info.plist
+build/
+DerivedData/
+*.xcuserstate
