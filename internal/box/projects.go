@@ -96,11 +96,13 @@ func (b *Box) listFolder(w http.ResponseWriter, r *http.Request) error {
 }
 
 func remoteURL(ctx context.Context, repo string) string {
-	out, err := git(ctx, "-C", repo, "remote", "get-url", "origin")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return cachedGit(repo, "remote", configStamp, func() (string, bool) {
+		out, err := git(ctx, "-C", repo, "remote", "get-url", "origin")
+		if err != nil {
+			return "", gitAnswered(err)
+		}
+		return strings.TrimSpace(string(out)), true
+	})
 }
 
 var scpLike = regexp.MustCompile(`^[\w.-]+@([\w.-]+):(.+)$`)
@@ -160,13 +162,20 @@ func repoName(remote string) string {
 }
 
 func defaultBranch(ctx context.Context, repo string) string {
-	if out, err := git(ctx, "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
-	}
-	if out, err := git(ctx, "-C", repo, "symbolic-ref", "--short", "HEAD"); err == nil {
-		return strings.TrimSpace(string(out))
-	}
-	return ""
+	return cachedGit(repo, "default-branch", defaultBranchStamp, func() (string, bool) {
+		out, err := git(ctx, "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+		if err == nil {
+			return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/"), true
+		}
+		if !gitAnswered(err) {
+			return "", false
+		}
+		out, err = git(ctx, "-C", repo, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return "", gitAnswered(err)
+		}
+		return strings.TrimSpace(string(out)), true
+	})
 }
 
 // freeLocationName picks name, or name-2, name-3… if a location has it.
