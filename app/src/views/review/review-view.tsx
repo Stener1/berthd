@@ -19,7 +19,8 @@ import { type ApproveMode, ApproveDialog, DiscardDialog, SendBackDialog } from "
 import { ReviewDetail } from "@/views/review/review-detail";
 import { CompareStrip, CompareView } from "@/views/review/compare-view";
 import { allRuns, useRuns } from "@/lib/runs";
-import { markReviewed, type ReviewEntry, refreshReview, reviewName, useReview, useReviewName, visibleEntries, watchReview } from "@/views/review/review-store";
+import { byProject, markReviewed, type ProjectGroup, type ReviewEntry, refreshReview, reviewName, rowMeta, useReview, useReviewName, visibleEntries, watchReview } from "@/views/review/review-store";
+import { ProjectLabel } from "@/views/automations/flows/project-label";
 import { Tip } from "@/components/tip";
 import { BoxError, NeedsUpdate } from "@/components/upgrade-box";
 
@@ -32,7 +33,12 @@ export function ReviewView() {
   // array on every read.
   const all = useReview((s) => s.entries);
   const reviewed = useReview((s) => s.reviewed);
-  const entries = useMemo(() => visibleEntries({ entries: all, reviewed }), [all, reviewed]);
+  // Grouped by project, the most recent first; entries is the order the
+  // list shows them in, so J and K walk it top to bottom across groups.
+  const groups = useMemo(() => byProject(visibleEntries({ entries: all, reviewed })), [all, reviewed]);
+  const entries = useMemo(() => groups.flatMap((g) => g.entries), [groups]);
+  // One project needs no heading: its rows say where they are instead.
+  const grouped = groups.length > 1;
   const loaded = useReview((s) => s.loaded);
   const loading = useReview((s) => s.loading);
   const outdated = useReview((s) => s.outdated);
@@ -166,16 +172,25 @@ export function ReviewView() {
         <div className="flex min-h-0 flex-1">
           <aside aria-label="Work to review" className="flex w-80 shrink-0 flex-col border-r max-xl:w-64">
             <ul className="min-h-0 flex-1 overflow-y-auto px-edge py-2" aria-label="Work to review">
-              {entries.map((e) => (
-                <Row key={e.key} entry={e} active={e.key === selected?.key} onSelect={() => setSelectedKey(e.key)} onOpen={() => void focusSession(e.box, e.session)} />
-              ))}
+              {grouped
+                ? groups.map((g) => (
+                    <li key={g.key} className="not-first:mt-3">
+                      <ProjectHeading group={g} />
+                      <ul aria-label={`${g.location} on ${g.box}`}>
+                        {g.entries.map((e) => (
+                          <Row key={e.key} entry={e} grouped active={e.key === selected?.key} onSelect={() => setSelectedKey(e.key)} onOpen={() => void focusSession(e.box, e.session)} />
+                        ))}
+                      </ul>
+                    </li>
+                  ))
+                : entries.map((e) => <Row key={e.key} entry={e} grouped={false} active={e.key === selected?.key} onSelect={() => setSelectedKey(e.key)} onOpen={() => void focusSession(e.box, e.session)} />)}
             </ul>
             <footer className="flex shrink-0 items-center gap-2.5 overflow-hidden whitespace-nowrap border-t px-edge py-2 text-tag text-muted-foreground">
               {(
                 [
                   ["J K", "move"],
-                  ["A", "approve"],
-                  ["S", "send back"],
+                  ["↵", "open"],
+                  ["E", "reviewed"],
                   ["D", "discard"],
                 ] as const
               ).map(([keys, label]) => (
@@ -217,7 +232,18 @@ function Notices({ outdated, errors }: { outdated: string[]; errors: Record<stri
   );
 }
 
-function Row({ entry, active, onSelect, onOpen }: { entry: ReviewEntry; active: boolean; onSelect(): void; onOpen(): void }) {
+// ProjectHeading names a group of rows: the project, its repository and
+// its box, as the Worktrees table heads its groups.
+function ProjectHeading({ group }: { group: ProjectGroup }) {
+  return (
+    <div className="flex h-bar-pane items-center gap-2 px-3 text-label">
+      <ProjectLabel box={group.box} scope={`repo:${group.location}`} className="flex-1" />
+      <span className="shrink-0 font-normal text-muted-foreground tabular-nums">{group.entries.length}</span>
+    </div>
+  );
+}
+
+function Row({ entry, grouped, active, onSelect, onOpen }: { entry: ReviewEntry; grouped: boolean; active: boolean; onSelect(): void; onOpen(): void }) {
   const pr = useReview((s) => s.prs[entry.key]);
   const run = useReview((s) => s.runs[entry.key]);
   const files = entry.files.length || entry.committed.length;
@@ -244,13 +270,9 @@ function Row({ entry, active, onSelect, onOpen }: { entry: ReviewEntry; active: 
           <span className="min-w-0 flex-1 truncate text-row">{work ?? name}</span>
           <span className={cn("shrink-0 text-meta tabular-nums", waiting ? "text-warning-foreground" : "text-muted-foreground")}>{waiting ? "needs you" : ago(entry.state_since)}</span>
         </span>
-        <span className="truncate pl-5.5 text-meta text-muted-foreground">
-          {work && `${name} · `}
-          {entry.box} · {entry.location}
-          {entry.branch && <span> · {entry.branch}</span>}
-        </span>
+        <span className="truncate pl-5.5 text-meta text-muted-foreground">{rowMeta(entry, { name, titled: !!work, grouped })}</span>
         <span className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap pl-5.5 text-meta text-muted-foreground">
-          <span>
+          <span className="tabular-nums">
             {files} file{files === 1 ? "" : "s"}
           </span>
           <span className="font-mono tabular-nums">
