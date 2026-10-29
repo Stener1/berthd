@@ -9,10 +9,11 @@ import (
 
 // lookGuard keeps an agent from starting unseen in a worktree on its way
 // out. A removal holds its folder from its last look for agents until the
-// folder is gone (removeAfter), and a session start holds its own folder
-// while it starts (startUnseen). Each waits only for the other in the same
-// folder, or one holding a folder around it, so a removal that takes git
-// minutes holds up no session anywhere else on the box.
+// removal ends, the folder gone or not (removeAfter), and a session start
+// holds its own folder while it starts (startUnseen). Each waits only for
+// the other in the same folder, or one holding a folder around it, so a
+// removal that takes git minutes holds up no session anywhere else on the
+// box.
 type lookGuard struct {
 	mu       sync.Mutex
 	changed  *sync.Cond
