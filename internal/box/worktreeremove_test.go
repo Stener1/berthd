@@ -149,6 +149,27 @@ func TestAHalfRemovedWorktreeIsFinished(t *testing.T) {
 	}
 }
 
+// A listing read before the .git went (a cached one) still shows what is
+// left as git dropped: whether it has a .git is looked at afresh.
+func TestAListingFromBeforeTheGitWentShowsItDropped(t *testing.T) {
+	_, repo, wt := worktreeIn(t, "billing")
+	out, err := exec.Command("git", "-C", repo, "worktree", "list", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if err := os.Remove(filepath.Join(wt.Path, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range parseWorktrees(out, repo) {
+		if w.Path == wt.Path && !w.Prunable {
+			t.Fatalf("%s reads as a live worktree from an older listing", w.Name)
+		}
+		if w.Main && w.Prunable {
+			t.Fatal("the main checkout reads as dropped")
+		}
+	}
+}
+
 // A folder git dropped the link to is only deleted when nothing in it is
 // work: a file changed or added since, as git worktree remove would see it,
 // keeps it, in git's words. Remove anyway still deletes it.

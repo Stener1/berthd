@@ -665,6 +665,11 @@ func parseWorktrees(out []byte, repo string) []Worktree {
 	live := all[:0]
 	for _, w := range all {
 		if _, err := os.Stat(w.Path); err == nil {
+			// git calls one prunable when its .git is gone, but out may be
+			// older than that (a cached listing), so look afresh.
+			if _, err := os.Lstat(filepath.Join(w.Path, ".git")); !w.Main && errors.Is(err, fs.ErrNotExist) {
+				w.Prunable = true
+			}
 			live = append(live, w)
 		}
 	}
