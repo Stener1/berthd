@@ -255,7 +255,7 @@ def claude_limits():
                 windows[slot] = {"used_percent": w["used_percentage"], "window_minutes": minutes, "resets_at": int(w["resets_at"])}
         at = iso(o.get("at") or "")
         if windows and at:
-            out.append({"agent": "claude", "account": name, "at": at, "limits": windows})
+            out.append({"agent": "claude", "account": name, "at": at, "day": local_day(at), "limits": windows})
     return out
 
 
@@ -335,7 +335,7 @@ def report(days):
                 if m not in row["models"]:
                     row["models"].append(m)
         if s.get("limits") and (account not in limits or s["limits_at"] > limits[account]["at"]):
-            limits[account] = {"agent": agent, "account": account, "at": s["limits_at"], "limits": s["limits"]}
+            limits[account] = {"agent": agent, "account": account, "at": s["limits_at"], "day": local_day(s["limits_at"]), "limits": s["limits"]}
 
     out = {
         "generated": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),

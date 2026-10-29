@@ -1159,6 +1159,9 @@ func TestAClaudeAccountIsNamedAsTheUsagePluginNamesIt(t *testing.T) {
 		"$HOME/.berth/accounts/claude/max":        "max",
 		"/":                                       "",
 		"relative/dir":                            "",
+		"/home/acme/elsewhere/work":               "",
+		"/home/acme/.berth/accounts/claude":       "",
+		"/home/acme/.berth/accounts/codex/work":   "",
 	} {
 		if got := claudeAccountName(home, dir); got != want {
 			t.Errorf("claudeAccountName(%q) = %q, want %q", dir, got, want)

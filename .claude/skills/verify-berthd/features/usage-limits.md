@@ -5,7 +5,7 @@ The Usage plugin (`plugins/usage`, off until turned on in Settings → Plugins) 
 ## Sub-features
 
 - `limits-structured`: a turn of a structured Claude Code agent writes its account's file: `used_percentage` is the event's utilization × 100, `resets_at` in seconds. A newer reading replaces an older one, a window the turn leaves out keeps the file's, and a log read back after berthd restarts writes nothing. All of that is unit-tested in `internal/box/claudedriver_test.go` (`TestAStructuredSessionRecordsItsAccountsPlanLimits`, `TestPlanLimitsKeepTheLatestReading`).
-- `limits-account`: the file is named as the plugin names the account: `default` for `~/.claude`, the folder's name for `~/.berth/accounts/claude/<name>` (`TestAClaudeAccountIsNamedAsTheUsagePluginNamesIt`).
+- `limits-account`: the file is named as the plugin names the account: `default` for `~/.claude`, the folder's name for `~/.berth/accounts/claude/<name>`, and no file for any other folder (`TestAClaudeAccountIsNamedAsTheUsagePluginNamesIt`).
 - `limits-screen`: the Usage tab's Claude Code panel shows the file's windows as meters ("5-hour limit", "Weekly limit"), the same numbers Claude Code's own `/usage` shows. Home's **Agent usage** widget shows them too.
 
 ## How to get to it (user POV)
@@ -17,9 +17,9 @@ The Usage plugin (`plugins/usage`, off until turned on in Settings → Plugins) 
 - `../scripts/scenarios/usage-limits-live.mjs`, on a real box: it needs a signed-in Claude account and costs one short Haiku turn. The dev box gets a HOME of its own (so it never writes the real `~/.berth/limits`) with the account linked in as `acme-max`:
 
   ```sh
-  export VERIFY_BOX_DIR=/tmp/vb-limits VERIFY_BOX_HOME=/tmp/vb-limits/home VERIFY_CLAUDE_ACCOUNT=<a signed-in CLAUDE_CONFIG_DIR> VERIFY_DRIVER=claude
-  ../scripts/dev-box.sh up && eval "$(../scripts/dev-box.sh env)"
-  node ../scripts/drive.mjs usage-limits-live --port $PORT --agent http://127.0.0.1:9378
+  export VERIFY_BOX_DIR=/tmp/vb-limits VERIFY_BOX_HOME=/tmp/vb-limits/home VERIFY_CLAUDE_ACCOUNT=/path/to/signed-in/claude-config-dir VERIFY_DRIVER=claude
+  .claude/skills/verify-berthd/scripts/dev-box.sh up && eval "$(.claude/skills/verify-berthd/scripts/dev-box.sh env)"
+  node .claude/skills/verify-berthd/scripts/drive.mjs usage-limits-live --port $PORT --agent http://127.0.0.1:9378
   ```
 
   It turns the plugin on, picks acme-max for the box in the Accounts tab, starts session `limits` (structured, Haiku, "Reply with just: ok"), waits for `acme-max.json`, reads `/usage` with `../scripts/claude-usage.sh` and checks that the file, `/usage` and the screen's meters agree. It removes the session after; `dev-box.sh down` removes the rest.

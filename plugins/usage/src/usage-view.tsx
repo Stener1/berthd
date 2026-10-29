@@ -277,7 +277,7 @@ function dedupeLimits(agent: Agent, sources: Source[], accounts: Record<string, 
   const out = new Map<string, SharedLimits>();
   for (const { box, report } of sources) {
     const from = firstDay(report.today, period);
-    for (const l of report.limits.filter((x) => x.agent === agent && x.at.slice(0, 10) >= from)) {
+    for (const l of report.limits.filter((x) => x.agent === agent && x.day >= from)) {
       const a = accounts[box]?.find((x) => x.agent === agent && x.id === l.account);
       const k = identity(a, box, l.account);
       const label = a?.email ?? (l.account === "default" ? box : `${box} · ${l.account}`);

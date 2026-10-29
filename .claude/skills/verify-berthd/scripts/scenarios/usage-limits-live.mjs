@@ -9,7 +9,7 @@
 // On a dev box with a HOME of its own and a signed-in account linked in
 // (../dev-box.sh):
 //
-//   export VERIFY_BOX_DIR=/tmp/vb-limits VERIFY_BOX_HOME=/tmp/vb-limits/home VERIFY_CLAUDE_ACCOUNT=<a signed-in CLAUDE_CONFIG_DIR>
+//   export VERIFY_BOX_DIR=/tmp/vb-limits VERIFY_BOX_HOME=/tmp/vb-limits/home VERIFY_CLAUDE_ACCOUNT=/path/to/signed-in/claude-config-dir
 //   dev-box.sh up && eval "$(dev-box.sh env)"
 //   node drive.mjs usage-limits-live --port $PORT --agent http://127.0.0.1:9378
 //
@@ -59,8 +59,9 @@ export async function run({ page, shot, step, expect, call }) {
 
   step("one cheap structured turn on acme-max");
   const started = Date.now();
-  await call(`/v1/boxes/${BOX}/api/sessions`, { method: "POST", body: JSON.stringify({ name: SESSION, location: "acme-shop", agent: "claude", driver: "claude", model: "haiku", prompt: "Reply with just: ok" }) });
   try {
+    // Inside the try: a POST that times out may still have started it.
+    await call(`/v1/boxes/${BOX}/api/sessions`, { method: "POST", body: JSON.stringify({ name: SESSION, location: "acme-shop", agent: "claude", driver: "claude", model: "haiku", prompt: "Reply with just: ok" }) });
     await checkLimits({ page, shot, step, expect, started });
   } finally {
     // Gone before the dev box is: an agent still running when it goes
@@ -74,7 +75,8 @@ async function checkLimits({ page, shot, step, expect, started }) {
   const file = limitsFile();
   const five = Math.round(file.limits.five_hour.used_percentage);
   const week = Math.round(file.limits.seven_day.used_percentage);
-  if (Date.parse(file.at) < started - 5_000) throw new Error(`the file's reading is older than the turn: ${file.at}`);
+  const at = Date.parse(file.at);
+  if (!Number.isFinite(at) || at < started - 5_000) throw new Error(`the file's reading isn't from this turn: ${file.at}`);
   step(`the box wrote acme-max.json: 5-hour ${five}%, weekly ${week}%, as of ${file.at}`);
 
   const truth = execFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "claude-usage.sh"), [ACCOUNT], { encoding: "utf8" }).trim();

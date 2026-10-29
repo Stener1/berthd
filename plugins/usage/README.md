@@ -34,7 +34,7 @@ The numbers come from the files each agent writes on the box. Nothing is estimat
 
 ### Claude Code's plan limits
 
-Each turn of a structured Claude Code agent (`claude -p`, the way Shipyard starts agents) tells the box how much of the account's windows is used, in a `rate_limit_event` (Pro and Max plans). berthd saves the latest reading to `~/.berth/limits/<account>.json`, one file per account: `{"account", "dir", "at", "limits": {"five_hour": {"used_percentage", "resets_at"}, "seven_day": {…}}}`. It keeps the newest reading: one older than the file's `at` changes nothing, and a window a turn leaves out keeps what the file had. Readings in a log read back after berthd restarts are old and aren't saved.
+Each turn of a structured Claude Code agent (one Shipyard starts and follows, with `claude -p`) tells the box how much of the account's windows is used, in a `rate_limit_event` (Pro and Max plans). berthd saves the latest reading to `~/.berth/limits/<account>.json`, one file per account: `{"account", "dir", "at", "limits": {"five_hour": {"used_percentage", "resets_at"}, "seven_day": {…}}}`. It keeps the newest reading: one older than the file's `at` changes nothing, and a window a turn leaves out keeps what the file had. Readings in a log read back after berthd restarts are old and aren't saved. A `claude -p` you run yourself, outside Shipyard, isn't followed, so it records nothing.
 
 An agent in Claude Code's own terminal screen sends no such event. Claude Code gives its [status line](https://code.claude.com/docs/en/statusline) the same `rate_limits` instead, so if you use that screen, have your status line script save them to the same file:
 
@@ -43,15 +43,22 @@ in=$(cat)   # the JSON Claude Code passes your status line
 limits=$(printf '%s' "$in" | jq -c '.rate_limits // empty')
 if [ -n "$limits" ]; then
   dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}; dir=${dir%/}
-  account=$(basename "$dir"); [ "$dir" = "$HOME/.claude" ] && account=default
-  mkdir -p ~/.berth/limits
-  jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson limits "$limits" '{at: $at, limits: $limits}' \
-    > ~/.berth/limits/"$account".tmp && mv ~/.berth/limits/"$account".tmp ~/.berth/limits/"$account".json
+  case $dir in
+    "$HOME/.claude") account=default ;;
+    "$HOME"/.berth/accounts/claude/*) account=$(basename "$dir") ;;
+    *) account= ;;
+  esac
+  if [ -n "$account" ]; then
+    mkdir -p ~/.berth/limits
+    tmp=~/.berth/limits/"$account".$$.tmp   # one per run: sessions on one account can overlap
+    jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson limits "$limits" '{at: $at, limits: $limits}' > "$tmp" \
+      && mv "$tmp" ~/.berth/limits/"$account".json
+  fi
 fi
 # …then print your status line from "$in" as before.
 ```
 
-The account is `default` for `~/.claude` and the folder's name for `~/.berth/accounts/claude/<name>`. A file for any other name is ignored. The screen shows the limits as of `at`, so an account no agent has used for a while shows an old reading, labelled with its age. Any other keys in the file are ignored.
+The account is `default` for `~/.claude` and the folder's name for `~/.berth/accounts/claude/<name>`. A file for any other name is ignored. The screen shows the limits as of `at`, labelled with its age, as long as `at` falls in the period it shows (today, 7 or 30 days), as Codex's do: an account no agent has used in that period shows none. Any other keys in the file are ignored.
 
 ### How it runs on the box
 

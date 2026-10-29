@@ -46,7 +46,7 @@ export function summarizeUsage(reports: { box: string; report: Report }[], faile
     // The newest limits each login reported this week.
     const newest = new Map<string, (typeof report.limits)[number]>();
     for (const l of report.limits) {
-      if (l.at.slice(0, 10) < from) continue;
+      if (l.day < from) continue;
       const k = `${l.agent}/${l.account}`;
       if (!newest.has(k) || newest.get(k)!.at < l.at) newest.set(k, l);
     }

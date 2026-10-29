@@ -52,20 +52,21 @@ type limitWindow struct {
 }
 
 // claudeAccountName is what the Usage plugin calls the Claude Code account
-// in dir: "default" for ~/.claude, else the folder's name
-// (~/.berth/accounts/claude/<name>). "" when dir names no folder.
+// in dir: "default" for ~/.claude, the folder's name for
+// ~/.berth/accounts/claude/<name>. "" for any other folder: the plugin
+// knows no other, and one elsewhere named like an account isn't it.
 func claudeAccountName(home, dir string) string {
 	if dir == "" {
 		return "default"
 	}
 	d := integrations.ExpandAccountDir(home, dir)
 	switch {
-	case d == "" || filepath.Dir(d) == d:
-		return ""
 	case d == filepath.Join(home, ".claude"):
 		return "default"
+	case d != "" && filepath.Dir(d) == integrations.AccountsDir(home, "claude"):
+		return filepath.Base(d)
 	}
-	return filepath.Base(d)
+	return ""
 }
 
 // recordLimits keeps what a rate_limit_event at at says of the session's

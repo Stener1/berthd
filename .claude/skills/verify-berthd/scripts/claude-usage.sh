@@ -9,12 +9,14 @@
 # servers, which stay out of evidence.
 set -euo pipefail
 dir=${1:?usage: claude-usage.sh CLAUDE_CONFIG_DIR [WORKDIR]}
-work=${2:-/tmp/claude-usage-w}
+# The default folder keeps its path, so Claude Code asks to trust it only
+# once, and is emptied every run so nothing from another one is in it.
+if [[ -n ${2:-} ]]; then work=$2; else work=/tmp/claude-usage-w; rm -rf "$work"; fi
 sock=$(mktemp -d /tmp/claude-usage-tmux.XXXXXX)
 tm() { env TMUX_TMPDIR="$sock" tmux -L usage "$@"; }
 trap 'tm kill-server 2>/dev/null || true; rm -rf "$sock"' EXIT
 mkdir -p "$work"
-tm new-session -d -s u -x 160 -y 60 -c "$work" "env CLAUDE_CONFIG_DIR=$dir claude --model haiku"
+tm new-session -d -s u -x 160 -y 60 -c "$work" -e "CLAUDE_CONFIG_DIR=$dir" claude --model haiku
 screen() { tm capture-pane -p -t u -S -80; }
 # Until its prompt shows, saying yes to the folder's trust question. Its
 # cursor starts on "No, exit" and the screen shows before it reads keys,
