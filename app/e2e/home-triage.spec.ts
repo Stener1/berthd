@@ -58,6 +58,8 @@ test("the notification centre sits under the top band, and its Needs you titles 
   const needs = centre.locator("section").filter({ has: app.page.getByRole("heading", { name: /Needs you/ }) });
   await expect(needs.locator("[data-note]").first()).toBeVisible();
   for (const title of await needs.locator("[data-note] .text-desc").allInnerTexts()) expect(title).not.toMatch(/needs you$/i);
+  // Its second line leads with where, as Home does: project, box, then agent.
+  await expect(needs.locator("[data-note]").filter({ hasText: "Fix checkout webhook retries" }).getByText(/^shop \/ checkout-fix · devl · Claude Code/)).toBeVisible();
   // Clear of the band its toolbar sits in.
   const band = await app.page.getByTestId("nav-home").evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize) * 2.5);
   const box = await centre.boundingBox();

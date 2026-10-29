@@ -39,7 +39,7 @@ import { Menu, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator
 import { Sheet, SheetPopup, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Session } from "@/lib/api";
-import { sessionAgent, sessionName, sessionPlace, sessionState } from "@/lib/derive";
+import { sessionAgent, sessionName, sessionPlace, sessionState, worktreeOf } from "@/lib/derive";
 import {
   type Category,
   categoryInfo,
@@ -66,7 +66,7 @@ import {
 } from "@/lib/notifications";
 import { type BoxData, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { titleAt } from "@/lib/worktree-names";
+import { placeLabel } from "@/lib/worktree-names";
 
 // useMinute re-renders once a minute, so relative times and snoozes move.
 export function useMinute(): number {
@@ -195,19 +195,23 @@ function short(iso: string, now: number): string {
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-// contextOf says where a note happened the way the sidebar does: "shop /
-// checkout-fix · devl", or "shop · devl" for a main checkout.
+// contextOf says where a note happened the way Home's widgets do, project
+// first (placeLabel): "shop / checkout-fix · devl", or "shop · devl" for a
+// main checkout. The box only when there is more than one.
 function contextOf(n: Note, boxes: Record<string, BoxData>): string {
-  // A worktree given a display name since is called by it.
-  const wt = (n.box && n.path && !placeIsMain(n) && titleAt(n.box, n.path, boxes)) || n.worktree;
-  let where = n.project ? (wt && wt !== n.project ? `${n.project} / ${wt}` : n.project) : wt;
+  let where: string | undefined;
+  if (n.box && n.path && n.project) where = placeLabel({ box: n.box, location: n.project, worktree: n.worktree ?? n.project, path: n.path, main: placeIsMain(n) }, boxes);
+  else where = n.project ? (n.worktree && n.worktree !== n.project ? `${n.project} / ${n.worktree}` : n.project) : n.worktree;
   if (!where && n.box && n.session) {
     const data = boxes[n.box];
     const s = data?.sessions?.find((x) => x.name === n.session);
     if (s) where = sessionPlace(s, data?.locations);
   }
-  return [where, n.box].filter(Boolean).join(" · ");
+  return [where, where ? boxOf(n.box, boxes) : n.box].filter(Boolean).join(" · ");
 }
+
+// boxOf names the box only when there is more than one, as Home does.
+const boxOf = (box: string | undefined, boxes: Record<string, BoxData>) => (Object.keys(boxes).length > 1 ? box : undefined);
 
 const placeIsMain = (n: Note) => !n.worktree && !!n.project;
 
@@ -280,7 +284,10 @@ function liveWaiting(boxes: Record<string, BoxData>, notes: Note[]): Live[] {
       if (s.exited || sessionState(s, data.stats) !== "waiting") continue;
       const covered = notes.some((n) => n.category === "waiting" && !n.resolved && n.box === box && (n.session ? n.session === s.name : n.path === s.dir));
       if (covered) continue;
-      out.push({ key: `${box}|${s.name}`, box, session: s, name: sessionName(s, { sessions: data.sessions }), place: [sessionAgent(s), sessionPlace(s, data.locations), box].filter(Boolean).join(" · ") });
+      // Where first, as everywhere: "shop / checkout-fix · devl · Claude Code".
+      const wt = worktreeOf(data.locations, s);
+      const where = wt ? placeLabel({ box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main }, boxes) : sessionPlace(s, data.locations);
+      out.push({ key: `${box}|${s.name}`, box, session: s, name: sessionName(s, { sessions: data.sessions }), place: [where, boxOf(box, boxes), sessionAgent(s)].filter(Boolean).join(" · ") });
     }
   }
   return out;
