@@ -211,6 +211,11 @@ function contextOf(n: Note, boxes: Record<string, BoxData>): string {
 
 const placeIsMain = (n: Note) => !n.worktree && !!n.project;
 
+// Under the Needs you heading a title doesn't say it again: "Fix checkout
+// needs you" reads "Fix checkout". The note keeps its words (the system
+// notification and the screen reader's label say them).
+const underNeeds = (title: string) => title.replace(/\s+needs you$/i, "");
+
 // An item is one row: a note, or resolved repeats of one folded together.
 interface Item {
   note: Note;
@@ -317,9 +322,9 @@ export function NotificationCenter() {
   const anyEarlier = notes.some((n) => !needsYou(n, now));
   // The panel is as tall as its rows, up to the window. A box without a set
   // height can't pass one down, so the list's viewport is capped itself:
-  // the window less the inset (2rem), the status bar the sheet stays
-  // above (26px), the header and the banners.
-  const chrome = 32 + STATUS_BAR + 49 + (quiet ? 29 : 0) + (error ? 33 : 0);
+  // the window less the inset (2rem), the top band it sits under, the
+  // status bar it stays above (26px), the header and the banners.
+  const chrome = 32 - 8 + STATUS_BAR + 49 + (quiet ? 29 : 0) + (error ? 33 : 0);
   const current = FILTERS.find((f) => f.id === filter) ?? FILTERS[0];
   const tabStop = items.some((i) => i.note.id === active) || live.some((l) => l.key === active) ? active : (items[0]?.note.id ?? live[0]?.key);
 
@@ -396,7 +401,10 @@ export function NotificationCenter() {
     <Sheet open={open} onOpenChange={setNotificationsOpen}>
       <SheetPopup
         variant="inset"
-        className="outline-none sm:h-auto sm:max-h-[calc(100%-26px)] sm:max-w-[420px] sm:self-start"
+        // Below the window's top band (h-bar), 8px clear of it, so the
+        // band's buttons never show along its edge; the viewport's inset
+        // (1rem) is already above it.
+        className="outline-none sm:mt-[calc(var(--spacing-bar)-0.5rem)] sm:h-auto sm:max-h-[calc(100%-26px-var(--spacing-bar)+0.5rem)] sm:max-w-[420px] sm:self-start"
         showCloseButton={false}
         initialFocus={panel}
         data-notification-center=""
@@ -503,7 +511,7 @@ export function NotificationCenter() {
         ) : (
           <ScrollArea
             className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:max-h-(--list-max)"
-            style={{ "--list-max": `calc(100dvh - ${chrome}px)` } as React.CSSProperties}
+            style={{ "--list-max": `calc(100dvh - ${chrome}px - var(--spacing-bar))` } as React.CSSProperties}
             scrollFade
           >
             <div ref={list} className="px-1.5 pt-1.5 pb-2">
@@ -654,7 +662,7 @@ function Row({
       ) : (
         <div className="min-w-0 flex-1">
           <div className="flex h-5 items-center gap-1.5">
-            <span className={cn("min-w-0 truncate text-desc", n.read ? "text-foreground/80" : "font-medium text-foreground")}>{n.title}</span>
+            <span className={cn("min-w-0 truncate text-desc", n.read ? "text-foreground/80" : "font-medium text-foreground")}>{needs ? underNeeds(n.title) : n.title}</span>
             {item.count > 1 && <span className="shrink-0 text-tag text-muted-foreground tabular-nums">×{item.count}</span>}
             <span className="flex-1" />
             {time}
@@ -714,7 +722,7 @@ function LiveRow({ live, now, tabStop, onFocus }: { live: Live; now: number; tab
       </Tip>
       <div className="min-w-0 flex-1">
         <div className="flex h-5 items-center gap-1.5">
-          <span className="min-w-0 truncate font-medium text-desc text-foreground">{live.name} needs you</span>
+          <span className="min-w-0 truncate font-medium text-desc text-foreground">{live.name}</span>
           <span className="flex-1" />
           {since && <span className="shrink-0 text-tag text-muted-foreground tabular-nums">{short(since, now)}</span>}
         </div>
