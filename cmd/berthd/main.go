@@ -24,6 +24,7 @@ import (
 	"github.com/cosscom/shipyard/internal/agenthost"
 	"github.com/cosscom/shipyard/internal/box"
 	"github.com/cosscom/shipyard/internal/boxcmd"
+	"github.com/cosscom/shipyard/internal/childreap"
 	"github.com/cosscom/shipyard/internal/debugserver"
 	"github.com/cosscom/shipyard/internal/doctor"
 	"github.com/cosscom/shipyard/internal/events"
@@ -260,6 +261,10 @@ func utf8Locale() {
 }
 
 func serve(b boxHome, args []string) error {
+	// Children of this process now were started by the build it was
+	// before an upgrade exec'd this one (upgrade.go): nothing else would
+	// ever wait for them. Looked at first, before this build starts any.
+	inherited := childreap.Inherited()
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := fs.String("listen", "", "address to listen on (default: this box's tailnet address only)")
 	if err := fs.Parse(args); err != nil {
@@ -299,6 +304,12 @@ func serve(b boxHome, args []string) error {
 		return err
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
+	if len(inherited) > 0 {
+		go func() {
+			n := childreap.Reap(ctx, inherited, 5*time.Second)
+			logger.Printf("berthd: reaped %d of %d processes the build before this one left", n, len(inherited))
+		}()
+	}
 	s := &wire.Server{
 		Identity: id,
 		Clients:  b.clients(),
@@ -386,7 +397,9 @@ func serve(b boxHome, args []string) error {
 	// serves anything, so the first service finds them up, and stopped
 	// with it. A new build taking over starts them again itself.
 	bx.Helpers = &box.Helpers{Dir: filepath.Join(b.dir, "helpers"), Box: hostname, Logf: logger.Printf}
-	bx.Update.BeforeRestart = func() { shares.StopAll(); bx.Helpers.Stop(); ln.Close() }
+	// Terminals' tmux clients end and are waited for before the exec: the
+	// new build couldn't wait for them (the sessions keep running).
+	bx.Update.BeforeRestart = func() { shares.StopAll(); bx.Helpers.Stop(); bx.Sessions.Detach(2 * time.Second); ln.Close() }
 	bx.Helpers.Start()
 	defer bx.Helpers.Stop()
 	// A worktree that is removed, however it was, is one they forget.
