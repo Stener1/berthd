@@ -10,13 +10,18 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
-
 - **Upgrading a box no longer leaves dead processes behind.** Each upgrade
   left the terminals that were open on the box, and any command berthd had
   running, as zombie processes under berthd until it restarted for good. A
   box now closes its terminals before it switches to the new build, and the
   new build cleans up whatever the old one left. Your sessions keep running,
   and the app reattaches its terminals as before.
+- **A box with many projects sits idle again.** berthd ran three or four
+  git commands per project every time the app, a plugin, the MCP or its
+  own worktree watcher listed them, dozens a second on a box with a few
+  dozen projects. It now keeps each project's worktrees, remote and default
+  branch, and asks git again only when the repository changes (or after a
+  minute).
 
 ## v0.3.31
 
