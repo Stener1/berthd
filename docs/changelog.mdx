@@ -36,6 +36,16 @@ again.
   a time, so you can archive several in a row. It shows in the tray too,
   until the worktree is gone, archive script and all, and a note says when
   it's done, or that one with uncommitted changes was left as it is.
+- **An archive that fails says why, and one stopped halfway can be
+  finished.** A big worktree on a busy box could take git over a minute
+  to remove. Shipyard then stopped it, so the row read only
+  `Couldn't archive: git worktree remove:` and the folder was left half
+  deleted, with no way to archive it again. Removal now has 10 minutes
+  (`BERTH_WORKTREE_REMOVE_TIMEOUT` on the box sets another limit). When it
+  still fails, the row says how: timed out, stopped, or failed with no
+  output. Archiving a worktree that git has already let go of (its `.git`
+  is gone, or its whole folder) now removes what's left and keeps its
+  branch, as any archive does.
 
 ## v0.3.31
 

@@ -171,6 +171,65 @@ func TestAStopRunArchivesOnlyWhatIsSafe(t *testing.T) {
 	}
 }
 
+// A removal stopped halfway leaves a folder with no .git, or none at all:
+// the stop run finishes both, and keeps their branches.
+func TestAStopRunFinishesAHalfRemovedWorktree(t *testing.T) {
+	// Its archive script ran before the removal that was stopped: it isn't
+	// run again on what's left, which may no longer have what it needs.
+	f := newStopFixture(t, "echo run >> COUNT", "half", "gone", "dirty")
+	os.WriteFile(filepath.Join(f.repo, ".git", "info", "exclude"), []byte("node_modules\n"), 0o644)
+	items := []map[string]string{f.item(t, "half"), f.item(t, "gone"), f.item(t, "dirty")}
+	os.WriteFile(filepath.Join(items[2]["path"], "notes.txt"), []byte("wip"), 0o600)
+	os.Remove(filepath.Join(items[2]["path"], ".git"))
+	half, gone := items[0]["path"], items[1]["path"]
+	os.MkdirAll(filepath.Join(half, "node_modules", "left"), 0o755)
+	os.WriteFile(filepath.Join(half, "node_modules", "left", "index.js"), []byte("x"), 0o644)
+	if err := os.Remove(filepath.Join(half, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	s := f.start(t, []string{f.agents["half"], f.agents["gone"], f.agents["dirty"]}, items)
+	r := waitRunStatus(t, f.b, s.ID, runs.Failed, runs.Succeeded)
+	for path, out := range map[string][2]string{"1.i0.0": {runs.Succeeded, stopArchived}, "1.i1.0": {runs.Succeeded, "already gone"}, "1.i2.0": {runs.Skipped, keptDirty}} {
+		if st, _ := stepAt(r.Steps, path); st.Status != out[0] || st.Output != out[1] {
+			t.Errorf("step %s = %+v, want %s %q", path, st, out[0], out[1])
+		}
+	}
+	if n := f.archives(); n != 0 {
+		t.Errorf("the archive script ran %d times on what was left", n)
+	}
+	if _, err := os.Stat(filepath.Join(items[2]["path"], "notes.txt")); err != nil {
+		t.Errorf("the half-removed worktree with work in it lost it: %v", err)
+	}
+	if _, err := os.Stat(half); !os.IsNotExist(err) {
+		t.Errorf("what was left of the half-removed worktree is still there: %v", err)
+	}
+	out, _ := git(context.Background(), "-C", f.repo, "worktree", "list", "--porcelain")
+	if strings.Contains(string(out), half) || strings.Contains(string(out), gone) {
+		t.Errorf("git still lists them:\n%s", out)
+	}
+	for _, br := range []string{"half", "gone", "dirty"} {
+		if !branchExists(context.Background(), f.repo, "refs/heads/"+br) {
+			t.Errorf("branch %s went", br)
+		}
+	}
+}
+
+// A removal git fails without a word says how it ended, never a bare
+// "git worktree remove:".
+func TestAStopRunSaysWhyARemovalFailed(t *testing.T) {
+	f := newStopFixture(t, "", "stuck")
+	fakeGitRemove(t, "exit 1")
+	s := f.start(t, []string{f.agents["stuck"]}, []map[string]string{f.item(t, "stuck")})
+	r := waitRunStatus(t, f.b, s.ID, runs.Failed, runs.Succeeded)
+	st, _ := stepAt(r.Steps, "1.i0.0")
+	if st.Status != runs.Failed || !strings.Contains(st.Error, "failed with no output (exit status 1)") {
+		t.Fatalf("archive step = %+v, want it failed, saying git exited 1 with no output", st)
+	}
+}
+
 // berthd stopping in the middle of a worktree's archive script: the
 // resumed run goes on from there and never runs a script twice.
 func TestAResumedStopRunNeverArchivesTwice(t *testing.T) {
@@ -306,17 +365,22 @@ func TestStopRunsOnABoxArchiveOneAtATime(t *testing.T) {
 // No session starts between a stop run's last look for agents and its
 // worktree going: one asked for meanwhile waits, then finds no folder.
 func TestNoAgentStartsUnseenAsAWorktreeGoes(t *testing.T) {
-	f := newStopFixture(t, "", "last")
+	f := newStopFixture(t, "", "last", "elsewhere")
 	looking, done := make(chan struct{}), make(chan struct{})
 	removed := make(chan error, 1)
 	go func() {
-		removed <- f.b.removeAfter(func() error {
+		removed <- f.b.removeAfter(f.worktree("last").Path, func() error {
 			close(looking)
 			<-done
 			return nil
 		}, func() error { return f.b.Locations.RemoveWorktree(context.Background(), "cal", "last", true) })
 	}()
 	<-looking
+	// A session anywhere else starts meanwhile: a removal git takes
+	// minutes over holds up only its own folder.
+	if st := f.do("POST", "/v1/sessions", SessionRequest{Name: "bystander", Location: "cal/elsewhere", Command: "claude"}, nil); st != 200 {
+		t.Fatalf("a session in another worktree during the last look: %d", st)
+	}
 	started := make(chan int, 1)
 	go func() {
 		started <- f.do("POST", "/v1/sessions", SessionRequest{Name: "latecomer", Location: "cal/last", Command: "claude"}, nil)

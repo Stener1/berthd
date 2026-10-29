@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,10 +136,10 @@ type Box struct {
 	// else asked meanwhile (dropWorktree).
 	dropMu   sync.Mutex
 	dropping map[string][]func(error)
-	// lastLook is held for writing from a removal's last look for agents
-	// until the folder is gone, and for reading while a session starts
-	// (startSession), so no agent starts unseen in between.
-	lastLook sync.RWMutex
+	// lastLook holds a worktree's folder from a removal's last look for
+	// agents until the folder is gone, and a session's while it starts
+	// (startUnseen), so no agent starts unseen in between (lastlook.go).
+	lastLook lookGuard
 	// archiveLine lets a box's stop runs archive one worktree at a time
 	// (archiveTurn).
 	archiveOnce sync.Once
@@ -609,7 +610,7 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 	// forced. Ask before anything is torn down, so an archive script never
 	// runs on work that git will then keep, and before it counts as on its
 	// way out, so a second ask hears the same.
-	if !force && dirtyWorktree(dir) {
+	if !force && dirtyWorktree(loc.Path, dir) {
 		return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
 	}
 	if !b.dropBegin(dir, done) {
@@ -651,14 +652,16 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 		}
 	}
 	// A worktree with an archive script is torn down in the background: the
-	// script may take minutes, and removal only follows if it succeeds.
-	if loc.Scripts.Archive != "" {
+	// script may take minutes, and removal only follows if it succeeds. What
+	// a removal stopped halfway left was past its script already, and may
+	// no longer have what the script needs.
+	if loc.Scripts.Archive != "" && !halfRemoved(loc, dir) {
 		go func() {
 			ran := false
 			var removeErr error
 			b.lifecycle(from, "archive", loc, dir, name, loc.Scripts.Archive, func() error {
 				ran = true
-				if removeErr = b.removeAfter(keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); removeErr != nil {
+				if removeErr = b.removeAfter(dir, keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); removeErr != nil {
 					return removeErr
 				}
 				removed(context.Background())
@@ -671,7 +674,7 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 		}()
 		return true, nil
 	}
-	if err := b.removeAfter(keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); err != nil {
+	if err := b.removeAfter(dir, keep, func() error { return b.Locations.RemoveWorktree(context.Background(), loc.Name, name, force) }); err != nil {
 		return false, err
 	}
 	removed(context.Background())
@@ -679,15 +682,21 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 	return false, nil
 }
 
-// removeAfter removes a worktree with remove once keep, when set, has no
-// objection. No session starts from keep's look until the folder is gone,
-// so an agent either counts or finds no folder (startSession).
-func (b *Box) removeAfter(keep func() error, remove func() error) error {
+// halfRemoved says loc's worktree at dir is what a removal stopped halfway
+// left: git has dropped its link.
+func halfRemoved(loc Location, dir string) bool {
+	return slices.ContainsFunc(loc.Worktrees, func(w Worktree) bool { return w.Path == dir && w.Prunable })
+}
+
+// removeAfter removes the worktree at dir with remove once keep, when set,
+// has no objection. No session starts in dir from keep's look until the
+// folder is gone, so an agent either counts or finds no folder
+// (startUnseen); sessions elsewhere don't wait.
+func (b *Box) removeAfter(dir string, keep func() error, remove func() error) error {
 	if keep == nil {
 		return remove()
 	}
-	b.lastLook.Lock()
-	defer b.lastLook.Unlock()
+	defer b.lastLook.remove(dir)()
 	if err := keep(); err != nil {
 		return err
 	}
@@ -730,8 +739,7 @@ func (b *Box) dropEnd(dir string, err error) {
 // its last look for agents (removeAfter): one that waited for it finds its
 // folder gone, or counted.
 func (b *Box) startUnseen(dir string, start func() (Session, error)) (Session, error) {
-	b.lastLook.RLock()
-	defer b.lastLook.RUnlock()
+	defer b.lastLook.start(dir)()
 	if dir != "" {
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 			return Session{}, httpError{http.StatusConflict, fmt.Sprintf("%s is gone: its worktree was archived or removed", dir)}
