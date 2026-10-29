@@ -208,3 +208,85 @@ func TestAnAgentThatNeedsYouIsPushedToNtfy(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+func TestThePhoneReadsASessionsChatAndNothingMore(t *testing.T) {
+	b, _, h := phoneBox(t)
+	if _, err := b.Sessions.Create(context.Background(), "agent", "", t.TempDir(), "cat", nil); err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	w := phoneReq(t, h, "GET", "/phone/v1/info", phoneAddr, "right-token", "")
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil || strings.Join(info.Capabilities, ",") != "transcript,answer" {
+		t.Fatalf("info: %s", w.Body)
+	}
+	path := "/phone/v1/sessions/agent/transcript?since=3&gen=g1"
+	if w := phoneReq(t, h, "GET", path, phoneAddr, "", ""); w.Code != 401 {
+		t.Fatalf("no token got %d", w.Code)
+	}
+	if w := phoneReq(t, h, "GET", "/phone/v1/sessions/nobody/transcript", phoneAddr, "right-token", ""); w.Code != 404 {
+		t.Fatalf("an unknown session got %d: %s", w.Code, w.Body)
+	}
+	// A terminal-only session has no chat: the app falls back to its screen.
+	w = phoneReq(t, h, "GET", path, phoneAddr, "right-token", "")
+	var res struct {
+		Source string           `json:"source"`
+		Items  []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != 200 || res.Source != "none" || res.Items == nil {
+		t.Fatalf("transcript: %d %s", w.Code, w.Body)
+	}
+	// Tool output stays on the box: the detail route is not the phone's.
+	if w := phoneReq(t, h, "GET", "/phone/v1/sessions/agent/transcript/tool/x", phoneAddr, "right-token", ""); w.Code != 404 {
+		t.Fatalf("tool detail answered %d", w.Code)
+	}
+}
+
+func TestAChoiceFromThePhoneIsTypedAsTheDesktopDoes(t *testing.T) {
+	b, _, h := phoneBox(t)
+	if _, err := b.Sessions.Create(context.Background(), "agent", "", t.TempDir(), "cat", nil); err != nil {
+		t.Fatal(err)
+	}
+	// A numbered option is its key alone; a plain answer is the word and Enter.
+	for _, body := range []string{`{"text":"2","enter":false}`, `{"text":"yes"}`} {
+		if w := phoneReq(t, h, "POST", "/phone/v1/sessions/agent/send", phoneAddr, "right-token", body); w.Code != 200 {
+			t.Fatalf("send %s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w := phoneReq(t, h, "GET", "/phone/v1/sessions/agent/screen", phoneAddr, "right-token", "")
+		if strings.Contains(w.Body.String(), "2yes") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the choices never arrived: %s", w.Body)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestAFormOfQuestionsIsAnsweredFromThePhoneThroughTheSameChecks(t *testing.T) {
+	b, _, h := phoneBox(t)
+	if _, err := b.Sessions.Create(context.Background(), "agent", "", t.TempDir(), "cat", nil); err != nil {
+		t.Fatal(err)
+	}
+	answer := func(path, token, body string) int {
+		return phoneReq(t, h, "POST", path, phoneAddr, token, body).Code
+	}
+	body := `{"tool":"toolu_1","answers":[{"picks":["Yes"]}]}`
+	if c := answer("/phone/v1/sessions/agent/answer", "", body); c != 401 {
+		t.Fatalf("no token got %d", c)
+	}
+	if c := answer("/phone/v1/sessions/nobody/answer", "right-token", body); c != 404 {
+		t.Fatalf("an unknown session got %d", c)
+	}
+	if c := answer("/phone/v1/sessions/agent/answer", "right-token", `{"answers":[]}`); c != 400 {
+		t.Fatalf("an answer to no question got %d", c)
+	}
+	// A terminal that asks nothing is the box's refusal, not the phone's.
+	if c := answer("/phone/v1/sessions/agent/answer", "right-token", body); c < 400 {
+		t.Fatalf("an answer to a session that asks nothing got %d", c)
+	}
+}
