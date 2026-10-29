@@ -91,6 +91,14 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 		}
 	}
 	if wt.Path == "" || (path != "" && wt.Path != path) {
+		// Its folder gone while git still has it (a removal stopped
+		// halfway, then the rest deleted): what git kept goes too, so a
+		// worktree can be made there again.
+		if g, ok := goneWorktree(ctx, loc, name); ok && (path == "" || g.Path == path) {
+			if err := b.Locations.RemoveWorktree(ctx, location, name, false); err != nil {
+				return fail(err)
+			}
+		}
 		return runs.Result{Status: runs.Succeeded, Out: "already gone"}
 	}
 	if wt.Main {
@@ -104,7 +112,7 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 	if why != "" {
 		return kept(why)
 	}
-	if dirtyWorktree(wt.Path) {
+	if dirtyWorktree(loc.Path, wt.Path) {
 		return kept(keptDirty)
 	}
 	if err := b.beforeAs(ctx, origOf(x), "worktree.remove", map[string]any{"location": loc.Name, "name": wt.Name, "path": wt.Path}); err != nil {

@@ -250,6 +250,19 @@ test("a box with runs does its share as one run; a box without gets the app's lo
   assert.equal(res.clean, true);
 });
 
+test("an archive the box failed shows the box's own words: a timeout is a failure, not kept", async () => {
+  const timedOut = "git worktree remove timed out after 10 min and was stopped; the folder may be partly removed, and archiving it again finishes it";
+  const silent = "git worktree remove failed with no output (exit status 1)";
+  const { runs } = runsBox({ archive: { slow: { status: "failed", error: timedOut }, mute: { status: "failed", error: silent } } });
+  const { deps } = fakeBoxes({ runs, every: 1 });
+  const res = await runStopJob([row("a", "slow"), row("b", "mute")], true, deps);
+  assert.deepEqual(itemsOf(res.job), {
+    "devl/a": `failed: Stopped · Couldn't archive: ${timedOut}`,
+    "devl/b": `failed: Stopped · Couldn't archive: ${silent}`,
+  });
+  assert.equal(jobOf(res.job)!.summary, "2 stopped, 2 failed");
+});
+
 test("a box offline at the start, or from before stop runs, gets the app's loop for its rows", async () => {
   const { runs, started } = runsBox({ onBox: (box) => box !== "gpu", refuses: ["devl"] });
   const { deps, calls } = fakeBoxes({ runs, every: 1 });
