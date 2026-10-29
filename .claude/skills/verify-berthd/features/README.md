@@ -26,6 +26,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 | Chat and board: no question card or answers but the options the agent's screen shows; the mode menu while turn check waits; a structured agent's form while its helpers report back, and a reply box that answers a card with nothing to pick | [chat-ask-card.md](chat-ask-card.md) | `chat-ask-card`, `chat-structured-ask-live` (a real box, `--agent`); `app/e2e/ask-card.spec.ts` on a stand-in box |
 | The board's cards for agents in chat: what they ask with its answers, their reply's last lines, the prompt they started with; never the host's frames or "stdio" | [chat-board-cards.md](chat-board-cards.md) | `chat-board-cards`; `app/e2e/dashboard-chat-cards.spec.ts` asserts it |
 | Turn check's "working": an hourglass with why in the sidebar, the tab and the rail's card, not a live turn's spinner; a handoff reads as done | [turn-check-indicator.md](turn-check-indicator.md) | `turn-check-indicator`; `app/e2e/sidebar-turn-check.spec.ts` asserts it, `TestTurnCheckLive` asks the real provider |
+| The Agent Dashboard's live status cards (a switch in Settings › Agents, off by default): the step now and its clock, model, Step N of M with its pills, this turn's timed steps; Pause and Stop, Approve and Deny, Done in … | [dashboard-cards.md](dashboard-cards.md) | `dashboard-status-cards`; `app/e2e/dashboard-cards.spec.ts` asserts it |
 
 ## Proof and skip reporting
 
