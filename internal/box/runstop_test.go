@@ -378,8 +378,17 @@ func TestNoAgentStartsUnseenAsAWorktreeGoes(t *testing.T) {
 	<-looking
 	// A session anywhere else starts meanwhile: a removal git takes
 	// minutes over holds up only its own folder.
-	if st := f.do("POST", "/v1/sessions", SessionRequest{Name: "bystander", Location: "cal/elsewhere", Command: "claude"}, nil); st != 200 {
-		t.Fatalf("a session in another worktree during the last look: %d", st)
+	bystander := make(chan int, 1)
+	go func() {
+		bystander <- f.do("POST", "/v1/sessions", SessionRequest{Name: "bystander", Location: "cal/elsewhere", Command: "claude"}, nil)
+	}()
+	select {
+	case st := <-bystander:
+		if st != 200 {
+			t.Errorf("a session in another worktree during the last look: %d", st)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("a session in another worktree waited for the last look")
 	}
 	started := make(chan int, 1)
 	go func() {
