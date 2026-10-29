@@ -12,7 +12,7 @@
 // VERIFY_BERTHD=<berthd> runs it on another build (a before: an old box
 // stops git after 60 s and says nothing).
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,7 @@ export async function run({ page, shot, step, expect, call }) {
     await stopAndFinish({ page, shot, step, expect, call, post, tray, dialog, title });
   } finally {
     step(`give the box its own git back: ${restartBox({})}`);
+    rmSync(bin, { recursive: true, force: true });
   }
 }
 
