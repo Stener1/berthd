@@ -170,6 +170,57 @@ func TestAListingFromBeforeTheGitWentShowsItDropped(t *testing.T) {
 	}
 }
 
+// A removal stopped halfway can delete the .gitignore files before what
+// they ignore: node_modules then reads as new files. They are asked about
+// with the .gitignore files put back as committed, so what's left goes,
+// and a file that is really new still keeps it.
+func TestAHalfRemovedWorktreeThatLostItsGitignore(t *testing.T) {
+	for name, extra := range map[string]string{"ignored only": "", "with a new file": "notes.txt"} {
+		t.Run(name, func(t *testing.T) {
+			l, repo, wt := worktreeIn(t, "billing")
+			os.WriteFile(filepath.Join(repo, ".git", "info", "exclude"), nil, 0o644)
+			for _, dir := range []string{repo, wt.Path} {
+				os.MkdirAll(filepath.Join(dir, "web"), 0o755)
+				os.WriteFile(filepath.Join(dir, "web", ".gitignore"), []byte("dist/\n"), 0o644)
+				os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n"), 0o644)
+			}
+			for _, args := range [][]string{{"add", "."}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "ignore"}} {
+				if out, err := exec.Command("git", append([]string{"-C", wt.Path}, args...)...).CombinedOutput(); err != nil {
+					t.Fatalf("%v: %s", err, out)
+				}
+			}
+			os.MkdirAll(filepath.Join(wt.Path, "node_modules", "left"), 0o755)
+			os.WriteFile(filepath.Join(wt.Path, "node_modules", "left", "index.js"), []byte("x"), 0o644)
+			os.MkdirAll(filepath.Join(wt.Path, "web", "dist"), 0o755)
+			os.WriteFile(filepath.Join(wt.Path, "web", "dist", "app.js"), []byte("x"), 0o644)
+			if extra != "" {
+				os.WriteFile(filepath.Join(wt.Path, extra), []byte("mine"), 0o644)
+			}
+			for _, gone := range []string{".gitignore", "web/.gitignore", "README", ".git"} {
+				if err := os.Remove(filepath.Join(wt.Path, gone)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := l.RemoveWorktree(context.Background(), "cal", wt.Name, false)
+			if extra == "" {
+				if err != nil {
+					t.Fatalf("archiving it: %v", err)
+				}
+				if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+					t.Fatalf("its folder is still there: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "contains modified or untracked files") {
+				t.Fatalf("archiving it with a new file = %v, want git's refusal", err)
+			}
+			if _, err := os.Stat(filepath.Join(wt.Path, extra)); err != nil {
+				t.Fatalf("the new file went: %v", err)
+			}
+		})
+	}
+}
+
 // A folder git dropped the link to is only deleted when nothing in it is
 // work: a file changed or added since, as git worktree remove would see it,
 // keeps it, in git's words. Remove anyway still deletes it.

@@ -569,18 +569,55 @@ func gitInside(dir string) string {
 // a removal stopped halfway already deleted are nothing to lose, since
 // they are in a commit, and ignored ones are what git deletes anyway. A
 // changed, staged or new file is work, as it would be to git worktree
-// remove, and when git can't tell, that counts too.
+// remove, and when git can't tell, that counts too. The removal may have
+// deleted .gitignore files before what they ignore (node_modules would
+// then read as new), so those are put back as committed and git is asked
+// again.
 func leftoverWork(ctx context.Context, record, path string) string {
-	out, err := git(ctx, "--no-optional-locks", "--git-dir="+record, "--work-tree="+path, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none")
+	changed, ignores, err := leftoverStatus(ctx, record, path)
+	if err == nil && changed && len(ignores) > 0 {
+		args := append([]string{"-C", path, "--git-dir=" + record, "--work-tree=" + path, "checkout-index", "--"}, ignores...)
+		if out, cerr := git(ctx, args...); cerr != nil {
+			err = gitFailed("git checkout-index", out, cerr)
+		} else {
+			changed, _, err = leftoverStatus(ctx, record, path)
+		}
+	}
 	if err != nil {
 		return "could not be checked for changes"
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if line != "" && !strings.HasPrefix(line, " D ") {
-			return "contains modified or untracked files"
-		}
+	if changed {
+		return "contains modified or untracked files"
 	}
 	return ""
+}
+
+// leftoverStatus is git status of what's left of a worktree: whether
+// anything but a deleted file shows, and the deleted .gitignore files.
+func leftoverStatus(ctx context.Context, record, path string) (changed bool, ignores []string, err error) {
+	out, err := git(ctx, "--no-optional-locks", "--git-dir="+record, "--work-tree="+path, "status", "--porcelain", "-z", "--untracked-files=normal", "--ignore-submodules=none")
+	if err != nil {
+		return false, nil, err
+	}
+	entries := strings.Split(string(out), "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if e == "" {
+			continue
+		}
+		if len(e) < 4 || e[:3] != " D " {
+			changed = true
+			// A rename's entry is followed by its old path.
+			if e[0] == 'R' || e[0] == 'C' {
+				i++
+			}
+			continue
+		}
+		if filepath.Base(e[3:]) == ".gitignore" {
+			ignores = append(ignores, e[3:])
+		}
+	}
+	return changed, ignores, nil
 }
 
 // worktreeRecord is the folder git keeps a linked worktree's record in,
