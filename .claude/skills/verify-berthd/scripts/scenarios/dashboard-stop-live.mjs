@@ -5,17 +5,14 @@
 // an uncommitted file; stops the three with archiving ticked, and reads
 // the result back from git on the box: two worktrees gone with their
 // branches kept, the dirty one still there. Then it archives a fourth from
-// the sidebar. Nothing it didn't make is touched; dev-box.sh down removes
-// the lot.
+// the sidebar. The box does both as stop runs, which its runs list shows.
+// Nothing it didn't make is touched; dev-box.sh down removes the lot.
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const live = true;
 export const params = { sidebar: "list" };
-// The box refuses to archive the dirty worktree up front, 400 in git's
-// words, and the browser logs it. run() checks it is that request alone.
-export const allowErrors = [/status of 400/];
 
 const API = "/v1/boxes/devq/api";
 const STOPPED = ["verify-stop-a", "verify-stop-b", "verify-stop-c"];
@@ -26,8 +23,8 @@ export async function run({ page, shot, step, expect, call }) {
   const tray = page.getByRole("region", { name: "Background jobs" });
   const dialog = page.getByRole("alertdialog");
   const title = (n) => `Throwaway ${n}`;
-  const refused = [];
-  page.on("response", (r) => r.status() === 400 && refused.push(`${r.request().method()} ${new URL(r.url()).pathname}`));
+  // The box's stop runs, newest first, by title.
+  const stopRuns = async () => (await call(`${API}/runs?template=stop&limit=20`)).map((r) => `${r.title}: ${r.status}`);
 
   step("make four worktrees of acme-shop, a Claude Code in three of them, and an uncommitted file in verify-stop-c");
   const paths = {};
@@ -75,8 +72,11 @@ export async function run({ page, shot, step, expect, call }) {
   const kept = branches();
   for (const n of STOPPED) if (!kept.split("\n").some((b) => b.endsWith(n))) throw new Error(`${n}'s branch is gone`);
   step(`git worktree list:\n${after.trim()}\ngit branch:\n${kept.trim()}`);
-  if (refused.join() !== `DELETE ${API}/locations/acme-shop/worktrees/verify-stop-c`) throw new Error(`unexpected 400s: ${refused.join(", ") || "none"}`);
-  step(`the one 400 is the box refusing the dirty worktree: ${refused[0]}`);
+  // The box keeps the dirty one inside its run (a skipped step), so no
+  // request was refused: the tray's row and git above say it was kept.
+  const runsNow = await stopRuns();
+  if (!runsNow.includes("Stopping 3 agents: succeeded")) throw new Error(`the box has no finished stop run for it: ${runsNow.join(", ")}`);
+  step(`the box did it as a stop run: ${runsNow[0]}`);
   const sessions = await call(`${API}/sessions`);
   for (const n of STOPPED) if (sessions.some((s) => s.name === `${n}-claude` && !s.exited)) throw new Error(`${n}-claude still runs`);
   step("the box lists none of the three agents");
@@ -93,4 +93,7 @@ export async function run({ page, shot, step, expect, call }) {
   if (worktrees().includes(paths[SOLO])) throw new Error(`${SOLO}'s worktree is still there`);
   if (!branches().split("\n").some((b) => b.endsWith(SOLO))) throw new Error(`${SOLO}'s branch is gone`);
   step(`git agrees: ${SOLO}'s worktree is gone, its branch kept`);
+  const solos = await stopRuns();
+  if (!solos.includes(`Archive ${SOLO}: succeeded`)) throw new Error(`the box has no finished stop run for ${SOLO}: ${solos.join(", ")}`);
+  step(`the box did it as a stop run too: ${solos[0]}`);
 }
