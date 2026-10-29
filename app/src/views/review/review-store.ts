@@ -7,7 +7,7 @@ import { type FlowRun, flowsApi } from "@/lib/flows";
 import { shareByKey } from "@/lib/share";
 import { load, save } from "@/lib/storage";
 import { useStore } from "@/lib/store";
-import { titleAt, useTitleAt } from "@/lib/worktree-names";
+import { placeLabel, titleAt, useTitleAt } from "@/lib/worktree-names";
 
 // The review inbox: agents' finished work on every box, from each box's
 // GET review. An item leaves when its agent works again, its changes are
@@ -99,6 +99,43 @@ export const entryKey = (box: string, path: string) => `${box}|${path}`;
 // name when it was given one (lib/worktree-names), else its name.
 export const reviewName = (e: ReviewEntry) => titleAt(e.box, e.path) ?? (e.main ? e.location : e.worktree);
 export const useReviewName = (e: ReviewEntry) => useTitleAt(e.box, e.path) ?? (e.main ? e.location : e.worktree);
+
+// ProjectGroup is one project's items on one box, as the inbox lists them.
+export interface ProjectGroup {
+  key: string;
+  box: string;
+  location: string;
+  entries: ReviewEntry[];
+}
+
+// byProject groups the inbox by project and box, keeping its order: the
+// project with the most recent work first, and its items newest first.
+export function byProject(entries: ReviewEntry[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  for (const e of entries) {
+    const key = `${e.box}|${e.location}`;
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { key, box: e.box, location: e.location, entries: [] }));
+    g.entries.push(e);
+  }
+  return [...groups.values()];
+}
+
+// The branch, unless it only repeats the worktree's name ("me/search-perf"
+// in search-perf): the detail always shows it.
+const telling = (e: ReviewEntry) => (e.branch && e.branch !== e.worktree && !e.branch.endsWith(`/${e.worktree}`) ? e.branch : undefined);
+
+// placeOf says where an item is, project first: "shop / checkout-fix · devl"
+// under a title that names the work, "shop · devl" under the worktree's own
+// name.
+export const placeOf = (e: ReviewEntry, titled: boolean) => `${titled ? placeLabel(e) : e.location} · ${e.box}`;
+
+// rowMeta is the line under a row's title: where it is, then its branch.
+// Under a project's heading, the project and box go without saying.
+export function rowMeta(e: ReviewEntry, { name, titled, grouped }: { name: string; titled: boolean; grouped: boolean }): string {
+  if (!grouped) return [placeOf(e, titled), telling(e)].filter(Boolean).join(" · ");
+  return [titled && name, telling(e) ?? (!titled && e.branch)].filter(Boolean).join(" · ");
+}
 
 // where is the exec location for an item: "shop" or "shop/checkout".
 export const where = (e: ReviewItem) => (e.main ? e.location : `${e.location}/${e.worktree}`);

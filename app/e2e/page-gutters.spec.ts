@@ -33,6 +33,20 @@ test("the Worktrees view's filters start under its title", async ({ app }) => {
   await expect.poll(() => lined(app.page, "Worktrees", "header + div > :first-child")).toBe(true);
 });
 
+test("Kits' cards start under its title, and a row of them ends on one line", async ({ app }) => {
+  mockOnly();
+  await app.open();
+  await app.page.getByTestId("nav-more").click();
+  await app.page.getByRole("menuitem", { name: /Kits/ }).click();
+  const cards = app.page.locator("[data-slot=card]");
+  await expect(cards.nth(1)).toBeVisible();
+  await expect.poll(() => lined(app.page, "Kits", "[data-slot=card]")).toBe(true);
+  // Side by side, the two are one height, so their footers line up.
+  const [a, b] = [await cards.nth(0).boundingBox(), await cards.nth(1).boundingBox()];
+  expect(Math.round(a!.y)).toBe(Math.round(b!.y));
+  expect(Math.round(a!.height)).toBe(Math.round(b!.height));
+});
+
 test("Review's work starts under its title", async ({ app }) => {
   mockOnly();
   await app.open();
