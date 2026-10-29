@@ -13,7 +13,7 @@
 
 export const params = { sidebar: "list", view: "conversation", scene: "question-links" };
 
-const LINK_URL = "https://example-shop.myshopify.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
+const LINK_URL = "https://shop.example.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
 const OPTION_URL = `${LINK_URL}&grant_options%5B%5D=per-user`;
 
 export async function run({ page, shot, step, expect }) {

@@ -4,7 +4,7 @@ import { expect, mockOnly, test } from "./fixtures";
 // up): they wrap inside the card, link to the whole address, and a link in
 // an option opens without picking it. One the box cut short isn't linked.
 
-const LINK_URL = "https://example-shop.myshopify.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
+const LINK_URL = "https://shop.example.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
 const OPTION_URL = `${LINK_URL}&grant_options%5B%5D=per-user`;
 
 const opened = (app: { page: import("@playwright/test").Page }) => app.page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
@@ -65,6 +65,9 @@ test("a link in an option opens it and leaves the pick alone, by mouse and by ke
   await expect.poll(() => opened(app)).toEqual([OPTION_URL, OPTION_URL]);
   await expect(approved).not.toBeChecked();
   await expect(link).toBeFocused();
+  // The radio group's arrow keys don't reach in and pick either.
+  await app.page.keyboard.press("ArrowDown");
+  await expect(form.getByRole("radio", { checked: true })).toHaveCount(0);
 
   // The question's own link opens too; the rest of the row still picks.
   await form.getByRole("link", { name: LINK_URL, exact: true }).click();

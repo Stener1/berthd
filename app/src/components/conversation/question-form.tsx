@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, CopyIcon, ListChecksIcon, PencilIcon, RotateCwIcon, SendHorizontalIcon, SquareTerminalIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 
 import { LinkedText } from "@/components/conversation/linked-text";
 import { ErrorText } from "@/components/error-note";
@@ -161,7 +161,12 @@ function InTerminal({ it, who }: { it: Item; who: string }) {
                   <LinkedText text={q.question} />
                 </p>
                 <p className="wrap-anywhere text-muted-foreground text-meta">
-                  {q.options.map((o) => o.label).join(" · ")}
+                  {q.options.map((o, j) => (
+                    <Fragment key={o.label}>
+                      {j > 0 && " · "}
+                      <LinkedText text={o.label} />
+                    </Fragment>
+                  ))}
                   {q.multi ? " — pick any" : ""}
                 </p>
               </div>
@@ -296,7 +301,7 @@ function Form({ it, who, stuck, onSubmit }: { it: Item; who: string; stuck?: str
           </Alert>
         </div>
       )}
-      {/* At a phone's width Back and Submit answers don't fit beside each other: the button goes under, on the right. */}
+      {/* At a phone's width Back, the status (min-w-32) and Submit answers don't fit on one line: the button goes under, on the right. */}
       <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3">
         {steps > 1 && (
           <Button size="sm" variant="ghost" disabled={busy || step === 0} onClick={() => go(step - 1)}>
@@ -304,7 +309,7 @@ function Form({ it, who, stuck, onSubmit }: { it: Item; who: string; stuck?: str
             Back
           </Button>
         )}
-        <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">{busy ? `Answering in ${who}'s form…` : failed ? "Not sent yet" : review ? "Check your answers, then submit" : `${who} waits for your answer`}</span>
+        <span className="min-w-32 flex-1 truncate text-meta text-muted-foreground">{busy ? `Answering in ${who}'s form…` : failed ? "Not sent yet" : review ? "Check your answers, then submit" : `${who} waits for your answer`}</span>
         <Button size="sm" className="ml-auto" disabled={busy || (review ? !done.every(Boolean) : !done[step])} onClick={next}>
           {busy ? <Spinner className="size-3.5" /> : last ? <SendHorizontalIcon /> : null}
           {last ? (reviewed ? "Submit answers" : "Submit") : step === qs.length - 1 ? "Review" : "Next"}

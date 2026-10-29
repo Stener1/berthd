@@ -113,10 +113,13 @@ test("an address in a question its screen shows is a link that opens it whole", 
   await expect(card).toContainText("Needs your answer");
   const link = card.getByRole("link", { name: URL });
   await expect(link).toHaveAttribute("href", URL);
+  expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await link.click();
   await expect.poll(() => app.page.evaluate(() => (window as unknown as { __opened: string[] }).__opened)).toEqual([URL]);
-  expect(agent.sends).toEqual([]);
-  expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // A pick after it is the only thing sent: the link's click sent nothing,
+  // even late.
+  await card.getByRole("button", { name: /Keep mine/ }).click();
+  await expect.poll(() => agent.sends.map((s) => s.text)).toEqual(["2"]);
 });
 
 // The board's card offers the options of a menu on the agent's screen as

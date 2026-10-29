@@ -158,7 +158,7 @@ const RELEASE_QUESTIONS: Question[] = [
 // ?scene=question-links: questions with long addresses in them, as a
 // sign-in page's (made up), and one the box cut short (its "…"), which
 // is shown but not linked.
-const LINK_URL = "https://example-shop.myshopify.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
+const LINK_URL = "https://shop.example.com/admin/oauth/authorize?client_id=0000example0000example&scope=read_products,write_products,read_orders&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
 const CUT_URL = "https://logs.example.com/explorer?query=resource.type%3D%22cloud_run_revision%22%20severity%3E%3DERROR&cursorTimestamp=2026-10-27T15:00:00Z&duration=PT1H&project=acme-shop&";
 const LINK_QUESTIONS: Question[] = [
   {

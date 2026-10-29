@@ -20,6 +20,8 @@ export function LinkedText({ text }: { text: string }) {
           e.stopPropagation();
           void openUrl(p.url!);
         }}
+        // Its keys stay its own: an arrow would reach the option's radio
+        // group and pick. The app's shortcuts listen before this (capture).
         onKeyDown={(e) => e.stopPropagation()}
       >
         {p.text}

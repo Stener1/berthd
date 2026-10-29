@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import { linkParts } from "./link-text.ts";
 
-const OAUTH = "https://example-shop.myshopify.com/admin/oauth/authorize?client_id=0000example&scope=read_products,write_products&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
+const OAUTH = "https://shop.example.com/admin/oauth/authorize?client_id=0000example&scope=read_products,write_products&redirect_uri=https%3A%2F%2Fapp.example.com%2Fauth%2Fcallback&state=mock-state-1234567890abcdef";
 
 test("a long sign-in address with a query string is one link, whole", () => {
   assert.deepEqual(linkParts(`Open ${OAUTH} to approve the app`), [{ text: "Open " }, { text: OAUTH, url: OAUTH }, { text: " to approve the app" }]);
@@ -42,6 +42,9 @@ test("an address with an apostrophe that the box cut short is not linked either"
 
 test("an ellipsis inside the text is not the box's cut", () => {
   assert.deepEqual(linkParts("Try https://example.com/a… or not"), [{ text: "Try " }, { text: "https://example.com/a", url: "https://example.com/a" }, { text: "… or not" }]);
+  // A sentence's punctuation before the ellipsis stays out of the link too.
+  assert.deepEqual(linkParts("Try https://example.com/a.… or not"), [{ text: "Try " }, { text: "https://example.com/a", url: "https://example.com/a" }, { text: ".… or not" }]);
+  assert.deepEqual(linkParts("(try https://example.com/a)… or not"), [{ text: "(try " }, { text: "https://example.com/a", url: "https://example.com/a" }, { text: ")… or not" }]);
 });
 
 test("an address that ended before the cut is still a link", () => {
