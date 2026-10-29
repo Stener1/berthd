@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cosscom/shipyard/internal/events"
 )
 
 // fakeGitRemove puts a git first on PATH that does `worktree remove` its own
@@ -32,7 +34,7 @@ func worktreeIn(t *testing.T, name string) (*Locations, string, Worktree) {
 	t.Helper()
 	repo := gitRepo(t)
 	// What a removal stopped halfway leaves is mostly what git ignores.
-	os.WriteFile(filepath.Join(repo, ".git", "info", "exclude"), []byte("node_modules\n"), 0o644)
+	write(t, filepath.Join(repo, ".git", "info", "exclude"), "node_modules\n")
 	l := NewLocations(filepath.Join(t.TempDir(), "locations.json"))
 	if _, err := l.Add(context.Background(), "cal", repo); err != nil {
 		t.Fatal(err)
@@ -85,7 +87,7 @@ func TestAWorktreeRemoveThatTimesOutSaysSo(t *testing.T) {
 
 func TestAWorktreeRemoveKeepsGitsOwnWords(t *testing.T) {
 	l, _, wt := worktreeIn(t, "billing")
-	os.WriteFile(filepath.Join(wt.Path, "wip.txt"), []byte("unsaved"), 0o644)
+	write(t, filepath.Join(wt.Path, "wip.txt"), "unsaved")
 	err := l.RemoveWorktree(context.Background(), "cal", wt.Name, false)
 	if err == nil || !strings.Contains(err.Error(), "contains modified or untracked files") {
 		t.Fatalf("a dirty worktree's removal = %v, want git's refusal", err)
@@ -108,15 +110,16 @@ func TestAHalfRemovedWorktreeIsFinished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(wt.Path, "README"))
+	if err := os.Remove(filepath.Join(wt.Path, "README")); err != nil {
+		t.Fatal(err)
+	}
 	for _, w := range []Worktree{wt, other} {
-		os.MkdirAll(filepath.Join(w.Path, "node_modules", "left"), 0o755)
-		os.WriteFile(filepath.Join(w.Path, "node_modules", "left", "index.js"), []byte("x"), 0o644)
+		write(t, filepath.Join(w.Path, "node_modules", "left", "index.js"), "x")
 		if err := os.Remove(filepath.Join(w.Path, ".git")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	os.WriteFile(filepath.Join(live.Path, "wip.txt"), []byte("unsaved"), 0o644)
+	write(t, filepath.Join(live.Path, "wip.txt"), "unsaved")
 
 	if err := l.RemoveWorktree(context.Background(), "cal", wt.Name, false); err != nil {
 		t.Fatalf("archiving a half-removed worktree: %v", err)
@@ -160,13 +163,20 @@ func TestAListingFromBeforeTheGitWentShowsItDropped(t *testing.T) {
 	if err := os.Remove(filepath.Join(wt.Path, ".git")); err != nil {
 		t.Fatal(err)
 	}
+	found := false
 	for _, w := range parseWorktrees(out, repo) {
-		if w.Path == wt.Path && !w.Prunable {
-			t.Fatalf("%s reads as a live worktree from an older listing", w.Name)
-		}
 		if w.Main && w.Prunable {
 			t.Fatal("the main checkout reads as dropped")
 		}
+		if w.Path == wt.Path {
+			found = true
+			if !w.Prunable {
+				t.Fatalf("%s reads as a live worktree from an older listing", w.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s is missing from the listing, so nothing was checked", wt.Name)
 	}
 }
 
@@ -263,7 +273,7 @@ func TestAHalfRemovedWorktreeHoldingARepositoryIsKept(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-q", inner).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	os.WriteFile(filepath.Join(inner, "wip.txt"), []byte("unsaved"), 0o644)
+	write(t, filepath.Join(inner, "wip.txt"), "unsaved")
 	if err := os.Remove(filepath.Join(wt.Path, ".git")); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +283,43 @@ func TestAHalfRemovedWorktreeHoldingARepositoryIsKept(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(inner, "wip.txt")); err != nil {
 		t.Fatalf("the repository inside lost its work: %v", err)
+	}
+}
+
+// A half-removed worktree that will be kept is refused before anything is
+// torn down: its services still run.
+func TestAHalfRemovedWorktreeThatIsKeptKeepsItsServices(t *testing.T) {
+	ctx := context.Background()
+	l, _, wt := worktreeIn(t, "billing")
+	ops, calls := fakeService()
+	b := &Box{Name: "devbox", Locations: l, Events: &events.Bus{}, Units: &Units{Dir: t.TempDir(), svc: ops}}
+	if err := l.SetLocalConfig("cal", RepoConfig{Services: []WorktreeService{{Name: "web", Run: "sleep 600"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.StartService(ctx, "cal", wt.Name, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "init", "-q", filepath.Join(wt.Path, "node_modules", "vendored")).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if err := os.Remove(filepath.Join(wt.Path, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	loc, err := l.Get(ctx, "cal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !halfRemoved(loc, wt.Path) {
+		t.Fatal("the worktree doesn't read as half removed")
+	}
+	_, err = b.dropWorktree("", loc, wt.Name, wt.Path, "", false, "archived", nil)
+	if err == nil || !strings.Contains(err.Error(), "has a git repository in it") {
+		t.Fatalf("archiving it = %v, want it kept for the repository inside", err)
+	}
+	for _, c := range *calls {
+		if strings.HasPrefix(c, "uninstall ") {
+			t.Fatalf("its service was stopped though it was kept: %v", *calls)
+		}
 	}
 }
 

@@ -98,6 +98,10 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 			if err := b.Locations.RemoveWorktree(ctx, location, name, false); err != nil {
 				return fail(err)
 			}
+			// As any removal does: the watcher can't have said so if
+			// berthd was down when the folder went.
+			b.Locations.Ports.Release(g.Path)
+			b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: origOf(x), Data: map[string]any{"location": loc.Name, "name": name, "path": g.Path}})
 		}
 		return runs.Result{Status: runs.Succeeded, Out: "already gone"}
 	}
