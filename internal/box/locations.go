@@ -507,29 +507,9 @@ func goneWorktree(ctx context.Context, loc Location, name string) (Worktree, boo
 // never a folder nothing lists. Unless forced, only when nothing would be
 // lost (leftoverWork). The branch is kept.
 func finishRemoval(ctx context.Context, loc Location, w Worktree, force bool) error {
-	// Never a folder git still treats as a worktree: git also calls one
-	// prunable when only its own record is broken, with the .git still there.
-	if _, err := os.Lstat(filepath.Join(w.Path, ".git")); !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("git worktree remove: '%s' has a .git that git can't read, so it was left as it is; run `git -C %s worktree repair %s` and try again", w.Path, loc.Path, w.Path)
-	}
-	for _, o := range loc.Worktrees {
-		if o.Path != w.Path && strings.HasPrefix(o.Path, w.Path+string(filepath.Separator)) {
-			return fmt.Errorf("git worktree remove: '%s' holds the worktree %s, so it was left as it is", w.Path, o.Path)
-		}
-	}
-	// Nor one with any repository in it, a worktree of another's under an
-	// ignored folder included, which git status here wouldn't see.
-	if inner := gitInside(w.Path); inner != "" {
-		return fmt.Errorf("git worktree remove: '%s' has a git repository in it at %s, so it was left as it is", w.Path, inner)
-	}
-	record, err := worktreeRecord(ctx, loc.Path, w.Path)
+	record, err := leftoverRefusal(ctx, loc, w, force)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Lstat(w.Path); !force && err == nil {
-		if why := leftoverWork(ctx, record, w.Path); why != "" {
-			return httpError{status: http.StatusConflict, msg: fmt.Sprintf("git worktree remove: '%s' %s, use --force to delete it", w.Path, why)}
-		}
 	}
 	if err := os.RemoveAll(w.Path); err != nil {
 		return fmt.Errorf("removing what was left of %s: %w", w.Path, err)
@@ -538,6 +518,37 @@ func finishRemoval(ctx context.Context, loc Location, w Worktree, force bool) er
 		return fmt.Errorf("removing git's record of %s: %w", w.Path, err)
 	}
 	return nil
+}
+
+// leftoverRefusal is why finishRemoval would leave what's left of w as it
+// is, or nil with git's record of it, so a removal can ask before anything
+// is torn down.
+func leftoverRefusal(ctx context.Context, loc Location, w Worktree, force bool) (record string, err error) {
+	// Never a folder git still treats as a worktree: git also calls one
+	// prunable when only its own record is broken, with the .git still there.
+	if _, err := os.Lstat(filepath.Join(w.Path, ".git")); !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("git worktree remove: '%s' has a .git that git can't read, so it was left as it is; run `git -C %s worktree repair %s` and try again", w.Path, loc.Path, w.Path)
+	}
+	for _, o := range loc.Worktrees {
+		if o.Path != w.Path && strings.HasPrefix(o.Path, w.Path+string(filepath.Separator)) {
+			return "", fmt.Errorf("git worktree remove: '%s' holds the worktree %s, so it was left as it is", w.Path, o.Path)
+		}
+	}
+	// Nor one with any repository in it, a worktree of another's under an
+	// ignored folder included, which git status here wouldn't see.
+	if inner := gitInside(w.Path); inner != "" {
+		return "", fmt.Errorf("git worktree remove: '%s' has a git repository in it at %s, so it was left as it is", w.Path, inner)
+	}
+	record, err = worktreeRecord(ctx, loc.Path, w.Path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(w.Path); !force && err == nil {
+		if why := leftoverWork(ctx, record, w.Path); why != "" {
+			return "", httpError{status: http.StatusConflict, msg: fmt.Sprintf("git worktree remove: '%s' %s, use --force to delete it", w.Path, why)}
+		}
+	}
+	return record, nil
 }
 
 // gitInside is the first folder under dir with a .git in it, or "". A

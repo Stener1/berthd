@@ -613,6 +613,16 @@ func (b *Box) dropWorktreeIf(from string, loc Location, name, dir, branch string
 	if !force && dirtyWorktree(loc.Path, dir) {
 		return false, fmt.Errorf("git worktree remove: '%s' contains modified or untracked files, use --force to delete it", dir)
 	}
+	// What a removal stopped halfway left is finished only when that's
+	// safe (finishRemoval): asked here too, so a refusal tears nothing down.
+	if i := slices.IndexFunc(loc.Worktrees, func(w Worktree) bool { return w.Path == dir && w.Prunable }); i >= 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		_, err := leftoverRefusal(ctx, loc, loc.Worktrees[i], force)
+		cancel()
+		if err != nil {
+			return false, err
+		}
+	}
 	if !b.dropBegin(dir, done) {
 		return true, nil
 	}
