@@ -73,6 +73,18 @@ again.
   command; **Approve** (`Y`) and **Deny** (`N`) take the controls' place
   without the card moving. A form of questions gets **Answer**, and a
   finished card says "Done in 13s · 6 files changed".
+- **There is a Shipyard app for iPhone, in `ios/`.** It is a SwiftUI client of
+  the phone companion: every agent on every box on one board (those waiting for
+  you first), a session's screen with a message box and quick keys, and runs
+  with their gates. Pair it with the code or link from Settings → Phone. You
+  build it yourself for now; see `ios/README.md`.
+- **The iPhone app shows a session as a chat.** Your prompts and the agent's
+  replies as bubbles, its tool calls as small cards, pages it published as
+  links that open in Safari, and what it asks (a permission, a plan, a form of
+  questions) as a card with a button for each answer and a field for your own
+  words. A toggle switches to the screen. The box's phone companion serves it
+  (`transcript` and `answer` in `GET /phone/v1/info`); with an older box, or an
+  agent that has no chat, the app keeps showing the screen.
 - **The app has a new icon:** a box in its tray with the amber lamp lit on
   top. A dev build wears the same box on orange.
 - **A structured agent's questions can always be answered from the chat.**
