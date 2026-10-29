@@ -922,11 +922,11 @@ func (b *Box) attach(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	master, cmd, err := b.Sessions.Attach(ctx, r.PathValue("name"), max(cols, 20), max(rows, 5))
+	master, wait, err := b.Sessions.Attach(ctx, r.PathValue("name"), max(cols, 20), max(rows, 5))
 	if err != nil {
 		return err
 	}
-	defer cmd.Wait()
+	defer wait()
 	defer master.Close()
 	rc := http.NewResponseController(w)
 	rc.EnableFullDuplex()
