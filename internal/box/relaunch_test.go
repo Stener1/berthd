@@ -432,3 +432,27 @@ func TestAStartIsReadFromItsLog(t *testing.T) {
 		t.Fatalf("up, then ended later: %+v", f)
 	}
 }
+
+// A box that can't list its processes (macOS has no /proc) can't tell an
+// agent still running from one gone: it keeps their states, and only
+// forgets folders that are gone.
+func TestSettlingWithoutProcKeepsWhatMayStillRun(t *testing.T) {
+	dir := t.TempDir()
+	live, gone := t.TempDir(), filepath.Join(dir, "wt-1")
+	now := time.Now().UTC()
+	tr := &Turns{}
+	tr.init()
+	tr.loaded = true
+	tr.dirs[live] = dirState{"running", now.Add(-time.Hour)}
+	tr.dirs[gone] = dirState{"waiting", now.Add(-time.Hour)}
+	b := &Box{Turns: tr}
+	if n := b.settleAgentStates(filepath.Join(dir, "no-proc")); n != 1 {
+		t.Fatalf("settled %d", n)
+	}
+	if st, ok := tr.dirs[live]; !ok || st.State != "running" {
+		t.Fatalf("a folder that may still run is %+v", st)
+	}
+	if _, ok := tr.dirs[gone]; ok {
+		t.Fatal("a gone folder stayed")
+	}
+}

@@ -90,12 +90,20 @@ func (b *Box) placeAgents(ctx context.Context, agents []Agent) {
 
 // SettleAgentStates, as berthd starts, ends the states the ledger keeps by
 // folder for agents berth didn't start whose folder no agent process works
-// in any more (Turns.Settle).
+// in any more (Turns.Settle). Without /proc (macOS) it can't tell which
+// still run, so it only forgets folders that are gone or long quiet.
 func (b *Box) SettleAgentStates() int {
+	return b.settleAgentStates("/proc")
+}
+
+func (b *Box) settleAgentStates(proc string) int {
 	if b.Turns == nil {
 		return 0
 	}
-	agents := agentProcesses("/proc")
+	if _, err := os.Stat(filepath.Join(proc, "self")); err != nil {
+		return b.Turns.Settle(nil, time.Now())
+	}
+	agents := agentProcesses(proc)
 	return b.Turns.Settle(func(dir string) bool {
 		for _, a := range agents {
 			if sameDir(a.Path, dir) || strings.HasPrefix(a.Path, dir+"/") {

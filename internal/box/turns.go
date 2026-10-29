@@ -1037,7 +1037,9 @@ func (t *Turns) DirState(path string) (state string, at time.Time, ok bool) {
 // or idle with no agent working there (working says, by folder) is exited:
 // a reboot, or an agent killed with no hook to say so, leaves them behind.
 // A folder that is gone, or that no agent has reported from in
-// agentStateTTL, is forgotten. It returns how many it changed.
+// agentStateTTL, is forgotten. A nil working is a box that can't list its
+// processes (macOS has no /proc): there, no state is taken for ended. It
+// returns how many it changed.
 func (t *Turns) Settle(working func(dir string) bool, now time.Time) int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1050,7 +1052,7 @@ func (t *Turns) Settle(working func(dir string) bool, now time.Time) int {
 			n++
 			continue
 		}
-		if (st.State == "running" || st.State == "waiting" || st.State == "idle") && !working(d) {
+		if working != nil && (st.State == "running" || st.State == "waiting" || st.State == "idle") && !working(d) {
 			// Its time stays: a session started here later must not take
 			// this state as its own (track).
 			t.dirs[d] = dirState{"exited", st.At}
