@@ -10,6 +10,13 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
+- **Worktrees fits a narrow window.** With the sidebar open on a small
+  window, the table and its filters ran off the right edge. Now the Port
+  column steps aside first and "vs base" after it (both are in a
+  worktree's tooltip), the show-only filters fold into one Show menu, and
+  the last commit keeps room to be read. Kits' cards start under the
+  page's title and line up their footers, and icon buttons give a little
+  when you press them (not with reduced motion).
 - **Upgrading a box no longer leaves dead processes behind.** Each upgrade
   left the terminals that were open on the box, and any command berthd had
   running, as zombie processes under berthd until it restarted for good. A
