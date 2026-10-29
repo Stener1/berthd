@@ -52,6 +52,12 @@ again.
   dozen projects. It now keeps each project's worktrees, remote and default
   branch, and asks git again only when the repository changes (or after a
   minute).
+- **Upgrading a box no longer leaves dead processes behind.** Each upgrade
+  left the terminals that were open on the box, and any command berthd had
+  running, as zombie processes under berthd until it restarted for good. A
+  box now closes its terminals before it switches to the new build, and the
+  new build cleans up whatever the old one left. Your sessions keep running,
+  and the app reattaches its terminals as before.
 
 ## v0.3.31
 
