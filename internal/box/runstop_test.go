@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -359,6 +360,47 @@ func TestStopRunsOnABoxArchiveOneAtATime(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(f.count); string(b) != "start\nend\nstart\nend\n" {
 		t.Fatalf("the archive scripts ran side by side: %q", b)
+	}
+}
+
+// A review worktree whose folder went while berthd was down is finished
+// by a stop run like any other: its review mark and ref go, and the app
+// hears so.
+func TestAStopRunFinishingAGoneReviewWorktreeSaysTheReviewWent(t *testing.T) {
+	f := newStopFixture(t, "", "pr-7")
+	wt := f.worktree("pr-7")
+	f.b.Locations.setReview("cal", wt.Path, &ReviewMark{Repo: "acme/shop", PR: 7})
+	if out, err := exec.Command("git", "-C", f.repo, "update-ref", reviewRef(7), "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	item := f.item(t, "pr-7")
+	if err := os.RemoveAll(wt.Path); err != nil {
+		t.Fatal(err)
+	}
+	ch, unsubscribe := f.b.Events.Subscribe()
+	defer unsubscribe()
+	r := waitRunStatus(t, f.b, f.start(t, []string{}, []map[string]string{item}).ID, runs.Failed, runs.Succeeded)
+	if st, _ := stepAt(r.Steps, "1.i0.0"); st.Status != runs.Succeeded || st.Output != "already gone" {
+		t.Fatalf("archive step = %+v", st)
+	}
+	if _, m := f.b.Locations.reviewAt(wt.Path); m != nil {
+		t.Errorf("the review mark is still there: %+v", m)
+	}
+	if out, err := exec.Command("git", "-C", f.repo, "rev-parse", "--verify", "-q", reviewRef(7)).CombinedOutput(); err == nil {
+		t.Errorf("the review ref is still there: %s", out)
+	}
+	for {
+		select {
+		case e := <-ch:
+			if e.Type == "review.removed" {
+				if e.Data["pr"] != 7 || e.Data["path"] != wt.Path {
+					t.Errorf("review.removed = %+v", e.Data)
+				}
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no review.removed")
+		}
 	}
 }
 

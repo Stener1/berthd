@@ -95,6 +95,8 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 		// halfway, then the rest deleted): what git kept goes too, so a
 		// worktree can be made there again.
 		if g, ok := goneWorktree(ctx, loc, name); ok && (path == "" || g.Path == path) {
+			// RemoveWorktree forgets a review's mark: read it first.
+			_, mark := b.Locations.reviewAt(g.Path)
 			if err := b.Locations.RemoveWorktree(ctx, location, name, false); err != nil {
 				return fail(err)
 			}
@@ -102,6 +104,12 @@ func (h *runHost) archiveWorktree(ctx context.Context, x *runs.StepCtx) runs.Res
 			// berthd was down when the folder went.
 			b.Locations.Ports.Release(g.Path)
 			b.Events.Publish(events.Event{Type: "worktree.removed", Box: b.Name, Origin: origOf(x), Data: map[string]any{"location": loc.Name, "name": name, "path": g.Path}})
+			if mark != nil {
+				git(ctx, "-C", loc.Path, "update-ref", "-d", reviewRef(mark.PR))
+				b.Events.Publish(events.Event{Type: "review.removed", Box: b.Name, Origin: origOf(x), Data: map[string]any{
+					"location": loc.Name, "name": name, "path": g.Path, "repo": mark.Repo, "pr": mark.PR, "reason": "archived",
+				}})
+			}
 		}
 		return runs.Result{Status: runs.Succeeded, Out: "already gone"}
 	}

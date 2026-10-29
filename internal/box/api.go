@@ -700,8 +700,8 @@ func halfRemoved(loc Location, dir string) bool {
 
 // removeAfter removes the worktree at dir with remove once keep, when set,
 // has no objection. No session starts in dir from keep's look until the
-// folder is gone, so an agent either counts or finds no folder
-// (startUnseen); sessions elsewhere don't wait.
+// removal ends, the folder gone or not, so an agent either counts or finds
+// no folder (startUnseen); sessions elsewhere don't wait.
 func (b *Box) removeAfter(dir string, keep func() error, remove func() error) error {
 	if keep == nil {
 		return remove()
