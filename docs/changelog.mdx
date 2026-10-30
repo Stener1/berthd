@@ -10,6 +10,32 @@ upgrades with `berth upgrade BOX`, or by running the
 again.
 
 ## Unreleased
+- **Quiet projects are grayed out.** On the rail and in the two-column
+  sidebar, a project with no agent or shell open in it is grayed out, so
+  the ones you're using stand out. Switching to one of those opens New
+  task in it; a project whose agents are only idle or done just switches
+  to where you were, as before.
+- **Agents ask for secrets through a masked card.** Instead of having an
+  API key pasted into the chat, an agent runs `berthd secret request NAME
+  --reason …` (or the `berth_secret_request` tool), and a card shows
+  wherever a question does: a masked field, the agent's reason, where it
+  will be saved, and Save securely or Decline. The value goes from the app
+  to the box only, never into the chat, an event or a log, and the agent
+  gets a reference such as `box://ACME_TOKEN` to use in one command with
+  `berthd secret exec --env` or `--file`. Saved secrets live in the
+  Keychain on a Mac, a Secret Service or an encrypted file on Linux, or
+  Google Cloud Secret Manager, and Settings → Secrets lists and deletes
+  them. [Secrets](/guides/secrets#when-an-agent-asks-for-a-secret)
+- **Agents come back after a reboot.** Starting a chat agent again after
+  its box restarted ran its old command with its last word cut off, so
+  Claude refused to start ("argument missing") and the tab only said it had
+  ended. It now carries the conversation on with Claude's whole command and
+  `--resume`. An agent that exits as it starts says it couldn't start, with
+  what it said, instead of looking resumable, and berthd no longer stops
+  following a conversation that is started again on its own record. Another
+  agent working in the same folder never makes a conversation read as
+  running. When berthd starts, agents it remembered by folder that nothing
+  runs any more show as ended, and folders that are gone are forgotten.
 - **Worktrees fits a narrow window.** With the sidebar open on a small
   window, the table and its filters ran off the right edge. Now the Port
   column steps aside first and "vs base" after it (both are in a
