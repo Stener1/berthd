@@ -31,6 +31,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 | Turn check's "working": an hourglass with why in the sidebar, the tab and the rail's card, not a live turn's spinner; a handoff reads as done | [turn-check-indicator.md](turn-check-indicator.md) | `turn-check-indicator`; `app/e2e/sidebar-turn-check.spec.ts` asserts it, `TestTurnCheckLive` asks the real provider |
 | Upgrading a box: sessions keep running, and nothing the old build started stays a zombie under berthd | [box-upgrade.md](box-upgrade.md) | `../scripts/upgrade-zombies.sh FROM TO` (a real box, Linux); `go test ./internal/childreap` |
 | The Agent Dashboard's live status cards (a switch in Settings › Agents, off by default): the step now and its clock, model, Step N of M with its pills, this turn's timed steps; Pause and Stop, Approve and Deny, Done in … | [dashboard-cards.md](dashboard-cards.md) | `dashboard-status-cards`; `app/e2e/dashboard-cards.spec.ts` asserts it |
+| The Agent Dashboard's live status cards (a switch in Settings › Agents, off by default): the step now and its clock, model, Step N of M with its pills, this turn's timed steps; Pause and Stop, Approve and Deny, Done in …; the same card for plugins | [dashboard-cards.md](dashboard-cards.md) | `dashboard-status-cards`, `plugin-status-card` (as a plugin's `AgentStatusCard`); `app/e2e/dashboard-cards.spec.ts`, `plugin-status-card.spec.ts` assert it |
 
 ## Proof and skip reporting
 
