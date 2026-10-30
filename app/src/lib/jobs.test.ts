@@ -103,6 +103,13 @@ test("the pool runs a few at a time", async () => {
   assert.equal(most, 3);
 });
 
+test("the pool runs every item it's given, undefined too", async () => {
+  const seen: (string | undefined)[] = [];
+  const unsent = await runPool(["a", undefined, "b"], 2, async (item) => void seen.push(item));
+  assert.deepEqual(seen, ["a", undefined, "b"]);
+  assert.deepEqual(unsent, []);
+});
+
 test("folding the tray is remembered", () => {
   assert.equal(useJobs.getState().folded, true, "as it was left");
   setFolded(false);
