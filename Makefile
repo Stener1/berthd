@@ -155,3 +155,31 @@ publish:
 .PHONY: release-check
 release-check:
 	scripts/release-check.sh $(if $(DMG),--dmg $(DMG)) $(if $(FROM),--from $(FROM)) $(if $(UNIVERSAL),--universal) $(if $(REF),--ref $(REF)) $(if $(DIRTY),--dirty) --version $(STAMP)
+
+# The iPhone app (ios/): a SwiftUI client of the phone API. It is built with
+# xcodegen (brew install xcodegen) from ios/project.yml, so the Xcode project
+# itself is not kept in git. Derived data stays inside ios/build, out of git.
+IOS_SIM ?= iPhone 17 Pro
+IOS_DD := ios/build/DerivedData
+
+.PHONY: ios-project ios-build ios-test ios-install ios-clean
+
+ios-project:
+	cd ios && xcodegen generate
+
+ios-build: ios-project
+	xcodebuild build -project ios/Shipyard.xcodeproj -scheme Shipyard -destination 'platform=iOS Simulator,name=$(IOS_SIM)' -derivedDataPath $(IOS_DD) -quiet
+
+ios-test: ios-project
+	xcodebuild test -project ios/Shipyard.xcodeproj -scheme Shipyard -destination 'platform=iOS Simulator,name=$(IOS_SIM)' -derivedDataPath $(IOS_DD) -quiet
+
+# Build and install on a cable-connected iPhone. Needs ios/Config/Local.xcconfig
+# (see ios/README.md); DEVICE is its name or UDID from `xcrun devicectl list devices`.
+ios-install: ios-project
+	@test -f ios/Config/Local.xcconfig || { echo "make ios-install: copy ios/Config/Local.xcconfig.example to Local.xcconfig and set your team first"; exit 1; }
+	@test -n "$(DEVICE)" || { echo "make ios-install: DEVICE=<name or udid> (xcrun devicectl list devices)"; exit 1; }
+	xcodebuild build -project ios/Shipyard.xcodeproj -scheme Shipyard -configuration Release -destination 'generic/platform=iOS' -derivedDataPath $(IOS_DD) -allowProvisioningUpdates -quiet
+	xcrun devicectl device install app --device "$(DEVICE)" $(IOS_DD)/Build/Products/Release-iphoneos/Shipyard.app
+
+ios-clean:
+	rm -rf $(IOS_DD)
