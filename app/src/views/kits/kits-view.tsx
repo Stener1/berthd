@@ -42,7 +42,8 @@ export function KitsView() {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[calc(52rem+2*var(--spacing-page))] px-page pt-7 pb-24">
+        {/* On the header's gutter, not centred: the cards start under "Kits". */}
+        <div className="w-full max-w-[calc(52rem+2*var(--spacing-page))] px-page pt-7 pb-24">
           {error && <ErrorText className="mb-4 rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-destructive-foreground text-body" text={error} />}
           {!kits && !error && (
             <div className="grid gap-3 md:grid-cols-2">
@@ -125,7 +126,8 @@ function KitCard({ kit, installed }: { kit: KitInfo; installed: InstalledKitOn[]
 
   return (
     <Card className="gap-0 overflow-hidden p-0">
-      <button type="button" onClick={() => openKit(kit.id)} className="block w-full px-4 pt-3.5 pb-3 text-left hover:bg-accent/30">
+      {/* Grows to the row's tallest card, so every footer sits on one line. */}
+      <button type="button" onClick={() => openKit(kit.id)} className="flex w-full flex-1 flex-col justify-start px-4 pt-3.5 pb-3 text-left hover:bg-accent/30">
         <div className="flex items-start gap-2.5">
           <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/40">
             <PackageIcon className="size-3.5 text-muted-foreground" />
