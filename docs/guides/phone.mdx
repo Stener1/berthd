@@ -38,7 +38,21 @@ The phone can:
 
 - list sessions and their agents' states (needs you, working, done, ready);
 - read a session's screen;
+- read a session's chat, as the app's Conversation view shows it: your
+  prompts, the agent's replies, its tool calls in groups, the pages it
+  published (`GET /phone/v1/sessions/{name}/transcript?since=N&gen=G`, the
+  same answer as the [app API's](/reference/app-api) `transcript`, without
+  tool output or thinking). `GET /phone/v1/info` lists `transcript` in its
+  `capabilities` on a box that serves it; an older box doesn't, and the
+  phone falls back to the screen. A terminal-only agent answers
+  `source: "none"`, which is the same;
 - type a prompt into a session;
+- answer what an agent asks. A permission or a plan is answered with `send`:
+  the `key` of one of the waiting session's `ask.choices` (`1`, `2`, …),
+  typed without Enter, as the app does. A form of questions (Claude Code's
+  AskUserQuestion) is answered with `POST /phone/v1/sessions/{name}/answer`,
+  which takes what the app API's `answer` takes (`{ tool, answers: [{ picks?,
+  other? }] }`) and is listed as `answer` in `capabilities`;
 - press Enter, Esc, Ctrl-C, the up and down arrows, Tab, the digits 1–9,
   and y/n, which is what answering an agent's question takes;
 - list the box's [runs](/guides/runs), see a run's steps in outline,
@@ -79,8 +93,10 @@ does not serve them.
   can read its agents' screens and type into its sessions, which is enough to
   instruct an agent. Treat the code like a password: make a new one if a
   phone is lost, and turn phone access off on boxes you don't need it on.
-  `before:session.send` hooks see phone prompts and key presses
-  (`from: "phone"`, with `key` for a key) and can refuse them.
+  `before:session.send` hooks see phone prompts, key presses and answers
+  (`from: "phone"`, with `key` for a key and `answer` for a form's) and can
+  refuse them. The chat is the session's content like its screen, so it
+  needs the same token.
 - **Notifications** carry which worktree and box need you, never what the
   agent wrote. An ntfy topic is readable by anyone who knows its name, so
   the topic Shipyard makes is long and random; use your own ntfy server for
