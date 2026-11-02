@@ -75,6 +75,29 @@ export function inTurn<T>(box: string, job: () => Promise<T>): Promise<T> {
   return line(job);
 }
 
+// unmarked resolves once a worktree's mark is dropped: its box said it went
+// or that archiving failed, or stopped listing it. A mark gone stale lets
+// go too. Holding a box's turn (inTurn) until then keeps its archive scripts
+// from running side by side.
+export function unmarked(box: string, path: string): Promise<void> {
+  const key = removalKey(box, path);
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      const r = useRemovals.getState().byKey[key];
+      if (r && Date.now() - r.since < STALE_MS) return;
+      unsub();
+      clearTimeout(timer);
+      resolve();
+    };
+    const unsub = useRemovals.subscribe(check);
+    timer = setTimeout(check, STALE_MS);
+    // unref: node (pnpm test) needn't wait for it.
+    (timer as { unref?: () => void }).unref?.();
+    check();
+  });
+}
+
 // removalLabel is what a row says meanwhile.
 export const removalLabel = (r: Removal) => (r.kind === "archive" ? "Archiving…" : "Removing…");
 
