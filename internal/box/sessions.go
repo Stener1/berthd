@@ -69,6 +69,9 @@ type Session struct {
 	// its last message: the reply box answers it, and its screen shows its
 	// prompt, with no question there to read options from.
 	SoftWait bool `json:"soft_wait,omitempty"`
+	// SecretRequest is the secret the agent asked the person for, while
+	// the ask waits (secretrequests.go): never a value.
+	SecretRequest *SecretRequest `json:"secret_request,omitempty"`
 	// Service is set on a worktree service's own terminal (a service with
 	// "terminal": true): the service's name, kept as @berth_service. It is
 	// never an agent, whatever it runs.
@@ -85,6 +88,10 @@ type Session struct {
 	// the session list.
 	Scope string     `json:"scope,omitempty"`
 	Usage *ProcUsage `json:"usage,omitempty"`
+	// Failed is set on a structured session that ended because its agent,
+	// started again, exited as it started: how, and what it wrote to its
+	// stderr (relaunch.go).
+	Failed *LaunchFailure `json:"failed,omitempty"`
 
 	// commandFile is where the session's command is kept, when it is;
 	// panePID the process its pane runs.
