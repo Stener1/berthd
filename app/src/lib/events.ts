@@ -36,6 +36,9 @@ const refreshes: [prefix: string, parts: BoxPart[]][] = [
   ["agents.", ["info"]],
   // A secret asked for, saved, declined or timed out: the session's card.
   ["secret.", ["sessions"]],
+  // The sub-states changed: their revision says to read them again, and a
+  // waiting agent may read as another now.
+  ["substates.", ["info", "sessions"]],
 ];
 
 // The most recent events, newest first, for the Automations view.
