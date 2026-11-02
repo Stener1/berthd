@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -175,11 +176,13 @@ func TestAttachShowsTheSessionAndCarriesKeystrokes(t *testing.T) {
 	if _, err := s.Create(ctx, "echoer", "", t.TempDir(), "cat", nil); err != nil {
 		t.Fatal(err)
 	}
-	master, cmd, err := s.Attach(ctx, "echoer", 100, 30)
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	master, wait, err := s.Attach(actx, "echoer", 100, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { cancel(); wait() }()
 	defer master.Close()
 	var out syncBuffer
 	done := make(chan struct{})
@@ -213,11 +216,13 @@ func TestAttachPassesOSC8Hyperlinks(t *testing.T) {
 	if _, err := s.Create(ctx, "linked", "", t.TempDir(), link, nil); err != nil {
 		t.Fatal(err)
 	}
-	master, cmd, err := s.Attach(ctx, "linked", 100, 30)
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	master, wait, err := s.Attach(actx, "linked", 100, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { cancel(); wait() }()
 	defer master.Close()
 	var screen syncBuffer
 	go io.Copy(&screen, master)
@@ -250,11 +255,13 @@ func TestAttachPassesShiftEnter(t *testing.T) {
 	if _, err := s.Create(ctx, "keys", "", t.TempDir(), dump, nil); err != nil {
 		t.Fatal(err)
 	}
-	master, cmd, err := s.Attach(ctx, "keys", 100, 30)
+	actx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	master, wait, err := s.Attach(actx, "keys", 100, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { cancel(); wait() }()
 	defer master.Close()
 	var screen syncBuffer
 	go io.Copy(&screen, master)
@@ -406,5 +413,59 @@ func TestEnvVarAsksTmuxOnce(t *testing.T) {
 	defer mu.Unlock()
 	if asked != 4 {
 		t.Fatalf("asked tmux %d times for a gone session, want 2 more", asked-2)
+	}
+}
+
+// Before berthd execs a new build of itself (upgrade.go), Detach ends the
+// terminals' tmux clients and sees them waited for: the new build couldn't,
+// and each would stay a zombie. The session goes on.
+func TestDetachEndsAttachedClientsAndWaitsForThem(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+	if _, err := s.Create(ctx, "agent-1", "cal", t.TempDir(), "sleep 30", nil); err != nil {
+		t.Fatal(err)
+	}
+	// As the attach handler relays one: read until the client goes, then
+	// close the terminal and wait.
+	var waited sync.WaitGroup
+	for range 2 {
+		master, wait, err := s.Attach(ctx, "agent-1", 80, 24)
+		if err != nil {
+			t.Fatal(err)
+		}
+		waited.Add(1)
+		go func() {
+			defer waited.Done()
+			io.Copy(io.Discard, master)
+			master.Close()
+			wait()
+		}()
+	}
+	var pids []int
+	s.clientsMu.Lock()
+	for cmd := range s.clients {
+		pids = append(pids, cmd.Process.Pid)
+	}
+	s.clientsMu.Unlock()
+	if len(pids) != 2 {
+		t.Fatalf("%d clients tracked, want 2", len(pids))
+	}
+
+	began := time.Now()
+	s.Detach(10 * time.Second)
+	if took := time.Since(began); took > 5*time.Second {
+		t.Fatalf("Detach took %v: it waited out its grace", took)
+	}
+	for _, pid := range pids {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); runtime.GOOS == "linux" && err == nil {
+			t.Errorf("client %d is still there (a zombie) after Detach", pid)
+		}
+	}
+	waited.Wait()
+	if _, _, err := s.Attach(ctx, "agent-1", 80, 24); err == nil {
+		t.Fatal("attached after Detach")
+	}
+	if sess, err := s.Get(ctx, "agent-1"); err != nil || sess.Exited {
+		t.Fatalf("Detach ended the session: %+v, %v", sess, err)
 	}
 }

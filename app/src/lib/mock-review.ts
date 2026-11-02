@@ -57,6 +57,63 @@ const work: Record<string, Omit<ReviewItem, "session" | "agent" | "agent_state" 
     base_ahead: 1,
     committed: [{ path: "apps/web/components/search/ProductGrid.tsx", code: "M ", added: 12, removed: 30 }],
   },
+  // ?crowd=1's agents on build (mock-crowd.ts): work in two more projects,
+  // so the inbox has more than one project to group.
+  "build|/home/me/berth-perf-agent-slow": {
+    location: "berth",
+    worktree: "perf-agent-slow",
+    path: "/home/me/berth-perf-agent-slow",
+    branch: "me/perf-agent-slow",
+    head: "a11ce01",
+    base: "origin/main",
+    ahead: 0,
+    behind: 0,
+    files: [
+      { path: "internal/agent/startup.go", code: " M", added: 19, removed: 7 },
+      { path: "internal/agent/startup_test.go", code: " M", added: 33, removed: 0 },
+    ],
+    added: 52,
+    removed: 7,
+    commits: [],
+    base_ahead: 0,
+    committed: [],
+  },
+  "build|/home/me/berth-preview-tabs": {
+    location: "berth",
+    worktree: "preview-tabs",
+    path: "/home/me/berth-preview-tabs",
+    branch: "me/preview-tabs",
+    head: "b0a7d11",
+    base: "origin/main",
+    ahead: 0,
+    behind: 0,
+    files: [
+      { path: "app/src/components/preview/frames.tsx", code: " M", added: 64, removed: 21 },
+      { path: "app/src/components/preview/sizes.ts", code: "??", added: 18, removed: 0 },
+    ],
+    added: 82,
+    removed: 21,
+    commits: [],
+    base_ahead: 0,
+    committed: [],
+  },
+  "build|/home/me/infra-dns-cutover": {
+    location: "infra",
+    worktree: "dns-cutover",
+    path: "/home/me/infra-dns-cutover",
+    branch: "me/dns-cutover",
+    head: "d15c0de",
+    base: "origin/main",
+    upstream: "origin/me/dns-cutover",
+    ahead: 1,
+    behind: 0,
+    files: [{ path: "dns/records.tf", code: " M", added: 6, removed: 6 }],
+    added: 6,
+    removed: 6,
+    commits: [{ sha: "d15c0de4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", subject: "feat(dns): point acme.example at the new load balancer", author: "Claude", when: ago(40) }],
+    base_ahead: 1,
+    committed: [{ path: "lb/main.tf", code: "M ", added: 24, removed: 3 }],
+  },
 };
 
 export const reviewScreens: Record<string, string> = {
@@ -87,6 +144,19 @@ export const reviewScreens: Record<string, string> = {
 
 ❯ 1. Yes, cap it at 30s
   2. No, leave it
+`,
+  "perf-agent-slow-claude": `● The agent spent 2.1s of its 2.6s start reading every box's worktrees
+  before it answered. It now answers from the last list it saved and reads
+  the boxes in the background, so it is ready in about 400ms.
+
+  - startup.go: serves the saved list first, then refreshes it
+  - startup_test.go: covers a box that is offline at start
+
+✻ Cooked for 6m 3s · done 10:58 AM
+`,
+  "dns-cutover-claude": `● The DNS records point at the new load balancer, with the TTL dropped to
+  60s for the switch. \`terraform plan\` shows 6 records changing and nothing
+  destroyed.
 `,
 };
 
