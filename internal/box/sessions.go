@@ -85,6 +85,9 @@ type Session struct {
 	// the session list.
 	Scope string     `json:"scope,omitempty"`
 	Usage *ProcUsage `json:"usage,omitempty"`
+	// StartedBy is the session that started this one, when one did
+	// (@berth_started_by, so it lasts across restarts of the daemon).
+	StartedBy string `json:"started_by,omitempty"`
 
 	// commandFile is where the session's command is kept, when it is;
 	// panePID the process its pane runs.
@@ -243,7 +246,7 @@ func (s *Sessions) tmux(ctx context.Context, args ...string) ([]byte, error) {
 //
 // Sessions started since keep their command in a file (@berth_command_file)
 // and only its start in @berth_command, for older builds to show.
-const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}"
+const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}\t#{@berth_started_by}"
 
 // plainCommandMax is how much of a command the plain @berth_command keeps.
 const plainCommandMax = 1024
@@ -300,10 +303,10 @@ func parseSessions(out []byte) []Session {
 	sessions := []Session{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
-		for len(f) >= 7 && len(f) < 18 {
+		for len(f) >= 7 && len(f) < 19 {
 			f = append(f, "")
 		}
-		if len(f) != 18 {
+		if len(f) != 19 {
 			continue
 		}
 		command := f[4]
@@ -328,6 +331,8 @@ func parseSessions(out []byte) []Session {
 			Service:  f[10],
 			Scope:    f[12],
 			Driver:   f[14],
+
+			StartedBy: f[18],
 
 			commandFile: f[11],
 			panePID:     panePID,

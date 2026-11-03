@@ -424,6 +424,9 @@ func serve(b boxHome, args []string) error {
 	// projects that turn it on.
 	bx.ReviewButtons = &box.ReviewButtons{Path: filepath.Join(b.dir, "review-buttons.json")}
 	go bx.RunReviewButtons(ctx)
+	// Work records: pieces of running work, kept beyond their sessions.
+	bx.Work = &box.WorkStore{Path: filepath.Join(b.dir, "work.json"), Box: bx.Name}
+	go bx.RunWork(ctx)
 	bx.Mount(s)
 	bx.ResumeTeams()
 	// Hooks that ran while berthd was down, in order, before anything new.

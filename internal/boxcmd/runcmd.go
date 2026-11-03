@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -112,7 +113,7 @@ func runStart(ctx context.Context, c *box.Client, args []string, out io.Writer) 
 	if err != nil || *template == "" || len(pos) > 0 {
 		return usageErr("run start --template T [--param k=v]... [--follow] [--idem KEY] [--no-notify] [--json]")
 	}
-	s, err := reportBack(c, *noNotify || *follow).StartRun(ctx, box.RunRequest{Template: *template, Params: params}, *idem)
+	s, err := reportBack(c, *noNotify || *follow).StartRun(ctx, box.RunRequest{Template: *template, Params: params, FromSession: os.Getenv("BERTH_SESSION")}, *idem)
 	if err != nil {
 		return err
 	}

@@ -70,6 +70,19 @@ var usageSections = []struct {
 		{"%[1]s artifact show ID [--content [--version N]] [--json]", "One artifact and its versions, or its content"},
 		{"%[1]s artifact rm ID", "Forget an artifact"},
 	}},
+	{"Work records (a piece of work, kept beyond its sessions)", [][2]string{
+		{"%[1]s work list%[3]s [--all] [--status open|parked|waiting|closed] [--json]", "Open, parked and waiting work; --all adds closed"},
+		{"%[1]s work get %[2]sID [--json]", "One record with its sessions"},
+		{"%[1]s work create%[3]s [--title T] [--session NAME,NAME] [--issue ID] [--project P] [--json]", "Make a record by hand"},
+		{"%[1]s work update %[2]sID [--title T] [--status open|parked|waiting|closed] [--issue ID] [--project P] [--not-until DATE] [--waiting-on WHO] [--check-back DATE] [--suggest ID,ID] [--json]", "Change a record: --not-until parks it, --waiting-on makes it\nwaiting; given empty, a field is cleared"},
+		{"%[1]s work group %[2]sID [--with ID,ID] [--session NAME,NAME] [--json]", "Group other records or sessions into it; its own state stands"},
+		{"%[1]s work ungroup %[2]sID --session NAME,NAME [--json]", "Take sessions out, each into a record of its own"},
+		{"%[1]s work accept|reject %[2]sID [--json]", "Take up or turn down what's suggested with it"},
+		{"%[1]s work seen %[2]sID [--json]", "Say a person has just looked at it"},
+		{"%[1]s work pins%[3]s [--json]", "What's pinned"},
+		{"%[1]s work pin|unpin%[3]s repo|project|work TARGET [--json]", "Pin a repo, a project or a work record until it's removed; a\nrecord that closes loses its pin"},
+		{"%[1]s work settings%[3]s [--id-pattern RE|--default] [--json]", "The regular expression that finds a tracker id in a session"},
+	}},
 	{"Runs (durable, on the box)", [][2]string{
 		{"%[1]s runs%[3]s [--status active|done|S] [--template T] [--limit 20] [--json]", "List runs"},
 		{"%[1]s run templates%[3]s [--json]", "The templates and their parameters"},
@@ -189,8 +202,8 @@ var Commands = map[string]int{
 	"helpers": 1, "helper": 2,
 	"secret": 2,
 	"runs":   1, "run": 2, "flow": 2, "browser": 2, "shots": 2,
-	"artifact": 2,
-	"reviews":  1, "review-button": 1, "login": 2,
+	"artifact": 2, "work": 2,
+	"reviews": 1, "review-button": 1, "login": 2,
 }
 
 // Run executes args, which start with the command words, against c.
@@ -270,6 +283,8 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return loginUsersCmd(ctx, c, rest, out)
 	case "artifact add", "artifact list", "artifact ls", "artifact show", "artifact rm":
 		return artifactCmd(ctx, c, strings.TrimPrefix(cmd, "artifact "), rest, out)
+	case "work list", "work get", "work create", "work update", "work group", "work ungroup", "work accept", "work reject", "work seen", "work pin", "work unpin", "work pins", "work settings":
+		return workCmd(ctx, c, strings.TrimPrefix(cmd, "work "), rest, out)
 	case "run start", "run get", "run logs", "run cancel", "run approve", "run reject", "run templates":
 		return runCmd(ctx, c, strings.TrimPrefix(cmd, "run "), rest, out)
 	case "location scripts":
@@ -1038,6 +1053,8 @@ func sessionNew(ctx context.Context, c *box.Client, args []string, out io.Writer
 		return usageErr("session new LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--title T] [--open split|tab] [-- COMMAND...]")
 	}
 	req.Location, req.Command = pos[0], commandLine(command)
+	// Run from a session, the new one records it as what started it.
+	req.FromSession = os.Getenv("BERTH_SESSION")
 	sess, err := c.StartSession(ctx, req)
 	if err != nil {
 		return err

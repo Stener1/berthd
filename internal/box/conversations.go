@@ -45,6 +45,8 @@ type Conversation struct {
 	Title   string    `json:"title,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated,omitzero"`
+	// StartedBy is the session that started it, kept for when it starts again.
+	StartedBy string `json:"started_by,omitempty"`
 }
 
 const metaName = "meta.json"
@@ -343,6 +345,7 @@ func (b *Box) resumeConversation(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	name := defaultSessionName(firstNonEmpty(conv.Location, filepath.Base(conv.Dir)), firstNonEmpty(conv.Agent, "claude"))
+	r = r.WithContext(withStartedBy(r.Context(), conv.StartedBy))
 	sess, err := b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "")
 	if err != nil {
 		return err

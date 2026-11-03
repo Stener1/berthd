@@ -437,7 +437,7 @@ func (h *runHost) startAgent(ctx context.Context, x *runs.StepCtx) runs.Result {
 			set["turn.id"], set["turn.session"] = tr.ID, name
 		}
 	}
-	sess, err := b.createAgentSession(ctx, name, where, dir, command, agent)
+	sess, err := b.createAgentSession(withStartedBy(ctx, x.Vars[varStartedBy]), name, where, dir, command, agent)
 	if err != nil {
 		return fail(err)
 	}
@@ -469,7 +469,7 @@ func (h *runHost) startStructuredAgent(ctx context.Context, x *runs.StepCtx, st 
 	if err := b.beforeAs(ctx, origOf(x), "session.start", map[string]any{"location": st.where, "path": st.dir, "command": l.command, "agent": st.agent}); err != nil {
 		return fail(err)
 	}
-	sess, err := b.createAgentSessionWith(ctx, st.name, st.where, st.dir, l.command, st.agent, l.env, l.labels)
+	sess, err := b.createAgentSessionWith(withStartedBy(ctx, x.Vars[varStartedBy]), st.name, st.where, st.dir, l.command, st.agent, l.env, l.labels)
 	if err != nil {
 		return fail(err)
 	}
