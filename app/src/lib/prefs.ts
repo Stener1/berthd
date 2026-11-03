@@ -76,6 +76,10 @@ export interface Prefs {
   // Show the reply Claude is writing as it grows (lib/draft), read from its
   // screen. Off: replies appear once written (Settings › Appearance › Chat).
   chatDrafts: boolean;
+  // How the Agent Dashboard draws its agents (Settings › Agents › Agent
+  // Dashboard): live status cards, with what each does now, its task
+  // progress and its steps, or the classic cards with its screen's last lines.
+  dashboardCards: "status" | "classic";
   // The Files panel beside the worktree's tabs (⌘⇧E), for every worktree.
   filesPanel: boolean;
   // When an agent opens its browser in the worktree showing, its live view
@@ -126,6 +130,7 @@ const DEFAULTS: Prefs = {
   headerPicture: DEFAULT_HEADER_PICTURE,
   chatWidth: "default",
   chatDrafts: true,
+  dashboardCards: "classic",
   filesPanel: false,
   agentBrowserBeside: true,
   systemThemes: { light: "berth-light", dark: "berth-dark" },
