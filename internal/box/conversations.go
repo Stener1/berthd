@@ -48,6 +48,8 @@ type Conversation struct {
 	// Failed is set when its agent, started again, exited as it started
 	// (relaunch.go); the next start that comes up clears it.
 	Failed *LaunchFailure `json:"failed,omitempty"`
+	// StartedBy is the session that started it, kept for when it starts again.
+	StartedBy string `json:"started_by,omitempty"`
 }
 
 const metaName = "meta.json"
@@ -363,6 +365,7 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 	}
 	name := defaultSessionName(firstNonEmpty(conv.Location, filepath.Base(conv.Dir)), firstNonEmpty(conv.Agent, "claude"))
 	from := logEnd(dir)
+	r = r.WithContext(withStartedBy(r.Context(), conv.StartedBy))
 	sess, err := b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "", nil)
 	if err != nil {
 		return Session{}, err

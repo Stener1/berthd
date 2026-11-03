@@ -305,6 +305,7 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 	if _, err := tmuxPath(); err != nil {
 		return err
 	}
+	r = r.WithContext(withStartedBy(r.Context(), b.callerSession(r, req.FromSession)))
 	ctx := r.Context()
 	loc, err := b.Locations.Get(ctx, req.Location)
 	if err != nil {

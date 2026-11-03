@@ -38,6 +38,20 @@ again.
   shells were never marked ended at all. Now a shell shows `Done · exit 0`
   or `Failed · exit 3` within seconds of exiting, with how long it took,
   and the chip counts only what is still running.
+- **A box keeps a record of each piece of work.** A record has a title, its
+  sessions, a status, Not now and Waiting on, and it stays when its sessions
+  end. Sessions group by themselves on an issue id (ranges and lists too), a
+  shared worktree or the session that started them. Pin a repo, a project or a
+  record. The box also notes when a person last touched the work, ignoring
+  agents and restarts. See `berthd work`; there's no view in the app yet.
+- **A session shows which session started it,** as `started_by` in its JSON.
+- **Boxes are ready for the Shipyard phone app.** With phone access on, a
+  box now also lets a paired phone read an agent's recent conversation
+  (never tool output or files), follow which agents and runs change as it
+  happens, stop an agent, and ask to be notified through Shipyard's push
+  relay instead of ntfy. Notifications still never carry what an agent
+  wrote, a new code forgets every phone, and `before:phone.push` hooks can
+  refuse a phone. See [the phone API](/reference/phone-api).
 - **Quiet projects are grayed out.** On the rail and in the two-column
   sidebar, a project with no agent or shell open in it is grayed out, so
   the ones you're using stand out. Switching to one of those opens New

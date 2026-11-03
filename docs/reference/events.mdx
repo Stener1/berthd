@@ -48,11 +48,11 @@ and dashes.
 | `agent.finished` | the same: done with its turn; `status: "error"` when it ended on a failure |
 | `agent.exited` | the same: the agent itself quit |
 | `task.created` | `location`, `name`, `path`, `branch`, `session`, `agent`, `from_session` |
-| `session.started` | `name`, `location`, `path`, `command` |
+| `session.started` | `name`, `location`, `path`, `command`, and `started_by` when another session started it |
 | `session.stopped` | `name` |
 | `session.memory` | `name`, `location`, `memory`, `memory_high`, `near_limit`, `text`: a session came near its [memory limit](/concepts/sessions-and-agents#sessions-clean-up-after-themselves) (`near_limit: true`), or went well below it again |
 | `session.renamed` | `name`: its title changed (a rename, or its first prompt named it); never the title or the prompt |
-| `session.sent` | `name`, `from`, `idem_key?`, `turn?`: a prompt was typed in (never the prompt) |
+| `session.sent` | `name`, `from`, `idem_key?`, `turn?`, `answer?`: a prompt was typed in (never the prompt); `answer: true` when it answered a question, typed or through the question's form (never the answers) |
 | `session.queued` | `name`, `turn`: a prompt is held until the agent is idle (`when: "idle"`) |
 | `session.open` | `name`, `location`, `path`, `open`, `agent`: asks the app to show a new session |
 | `exec.finished` | `location`, `path`, `command`, `exit_code` |
@@ -71,6 +71,25 @@ have said a prompt started: notify comes at the end of each of Codex's
 messages, and its `Stop` hook ends the turn. When an agent's hooks cannot
 tell, Shipyard reads the terminal and sends these itself with
 `origin: "screen"` and `source: "screen"`. See [turns](/concepts/sessions-and-agents#turns).
+
+### Work records
+
+A box's [work records](/reference/berthd#work-records) and pins. None carries a
+title or a Waiting on, and only a pin names a project. Origin is the tool that
+asked, or `work` when the box's own rules did it.
+
+| Event | Data |
+| --- | --- |
+| `work.created` | `id`, `status`, `sessions`, and `rule: true` when a rule made it |
+| `work.joined` | `id`, `session`, `by` (`issue`, `worktree` or `parent`): a rule put a session in a record |
+| `work.updated` | `id`, `status`, `fields`: the names of what changed |
+| `work.closed` | `id`: its status became closed |
+| `work.grouped`, `work.accepted` | `id`, `with`, `sessions`: other records or sessions were grouped into it, by hand or by accepting a suggestion |
+| `work.ungrouped` | `id`, `sessions`, `records`: sessions taken out, and the records made for them |
+| `work.suggested`, `work.rejected` | `id`, `with`: records proposed to join it, or turned down |
+| `work.pinned`, `work.unpinned` | `kind`, `target`; `reason: "closed"` when a record lost its pin by closing |
+| `work.seen` | `id`, `session?`, `source` (`send`, `start`, `prompt`, `answer` or `visit`): a person's touch moved `last_seen` |
+| `work.settings` | `id_pattern`: whether the box has its own pattern |
 
 ### Locations and worktrees
 

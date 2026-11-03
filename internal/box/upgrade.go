@@ -231,6 +231,10 @@ func (b *Box) Capabilities() []string {
 	if b.Events.Journal != nil {
 		caps = append(caps, "journal")
 	}
+	if b.Work != nil {
+		// work: /v1/work, work records and pins (work.go).
+		caps = append(caps, "work")
+	}
 	if b.Sessions != nil {
 		// processes: GET /v1/processes and POST /v1/processes/{id}/stop,
 		// sessions' usage, and guard's session_memory_gb (boxprocs.go).
