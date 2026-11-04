@@ -597,7 +597,11 @@ func (s *WorkStore) Update(id string, p WorkPatch) (WorkRecord, []workEvent, err
 			evs = append(evs, workEvent{"work.suggested", map[string]any{"id": r.ID, "with": slices.Clone(r.SuggestedWith)}})
 		}
 	}
-	r.Manual, r.Updated = true, s.now()
+	// A proposal is nobody's decision about the record: its rules keep following it.
+	if p.SuggestedWith == nil || len(fields) > 1 {
+		r.Manual = true
+	}
+	r.Updated = s.now()
 	evs = append(evs, workEvent{"work.updated", map[string]any{"id": r.ID, "status": r.Status, "fields": fields}})
 	if r.Status == WorkClosed && was != WorkClosed {
 		evs = append(evs, workEvent{"work.closed", map[string]any{"id": r.ID}})

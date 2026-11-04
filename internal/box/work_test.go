@@ -184,6 +184,38 @@ func TestASessionNamingTwoRecordsJoinsOneAndSuggestsTheOther(t *testing.T) {
 	}
 }
 
+func TestAProposalLeavesARecordToItsRules(t *testing.T) {
+	s := newTestWork(t)
+	if _, err := s.Reconcile([]Session{agentSession("one", "shop/a", "first title")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reconcile([]Session{agentSession("one", "shop/a", "first title"), agentSession("two", "shop/b", "other")}); err != nil {
+		t.Fatal(err)
+	}
+	one, two := recordOf(t, s, "one"), recordOf(t, s, "two")
+	ids := []string{two.ID}
+	if _, _, err := s.Update(one.ID, WorkPatch{SuggestedWith: &ids}); err != nil {
+		t.Fatal(err)
+	}
+	if got := recordOf(t, s, "one"); got.Manual || !slices.Equal(got.SuggestedWith, []string{two.ID}) {
+		t.Fatalf("a proposal is nobody's decision about the record: %+v", got)
+	}
+	if _, err := s.Reconcile([]Session{agentSession("one", "shop/a", "second title"), agentSession("two", "shop/b", "other")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := recordOf(t, s, "one"); got.Title != "second title" {
+		t.Errorf("the title stopped following its session: %+v", got)
+	}
+	// Anything else in the same change is someone's decision.
+	title := "by hand"
+	if _, _, err := s.Update(one.ID, WorkPatch{Title: &title, SuggestedWith: &ids}); err != nil {
+		t.Fatal(err)
+	}
+	if got := recordOf(t, s, "one"); !got.Manual {
+		t.Errorf("a title by hand should stop the rules: %+v", got)
+	}
+}
+
 func TestAcceptingASuggestionGroupsAndKeepsTheTargetsState(t *testing.T) {
 	s := newTestWork(t)
 	a, _, _ := s.Create(WorkInput{Title: "a"})
