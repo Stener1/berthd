@@ -120,6 +120,12 @@ type SendRequest struct {
 	When    string `json:"when,omitempty"`
 	Force   bool   `json:"force,omitempty"`
 	IdemKey string `json:"idem_key,omitempty"`
+	// Key sends it on a thread's behalf, so a delivery record follows what
+	// becomes of it (workthreads.go); Source says what kind of caller it is.
+	Key    string `json:"key,omitempty"`
+	Source string `json:"source,omitempty"`
+	// from is who a delivery is from, when one is kept.
+	from string
 }
 
 // SendResult names the turn a send started or queued, the journal Seq of
@@ -132,6 +138,8 @@ type SendResult struct {
 	Turn      string    `json:"turn,omitempty"`
 	Seq       int64     `json:"seq,omitempty"`
 	At        time.Time `json:"at"`
+	// Delivery is the record a send with a key made.
+	Delivery string `json:"delivery,omitempty"`
 }
 
 // ErrAgentWaiting refuses to type into an agent that waits for someone.
@@ -149,6 +157,9 @@ func (b *Box) sendToSession(w http.ResponseWriter, r *http.Request) error {
 	name := r.PathValue("name")
 	if err := b.before(r, "session.send", map[string]any{"name": name}); err != nil {
 		return err
+	}
+	if req.Key != "" {
+		req.from = firstNonEmpty(b.callerSession(r, ""), gateOrigin(r))
 	}
 	res, err := b.sendPrompt(r.Context(), name, req, origin(r), gateOrigin(r))
 	if err != nil {
@@ -170,10 +181,24 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 	default:
 		return SendResult{}, badRequest("when must be now or idle")
 	}
+	if req.Key != "" {
+		// Before anything is typed: a prompt can't be taken back.
+		keys, err := b.checkClaims([]string{req.Key})
+		if err != nil {
+			return SendResult{}, err
+		}
+		req.Key = keys[0]
+	} else if req.Source != "" {
+		return SendResult{}, badRequest("a source goes with a key")
+	}
 	defer b.lockSend(name)()
 	if b.Turns != nil {
 		if tr, ok := b.Turns.ByIdem(name, req.IdemKey); ok {
-			return SendResult{Sent: tr.State != "queued", Queued: tr.State == "queued", Duplicate: true, Turn: tr.ID, Seq: tr.SentSeq, At: time.Now().UTC()}, nil
+			res := SendResult{Sent: tr.State != "queued", Queued: tr.State == "queued", Duplicate: true, Turn: tr.ID, Seq: tr.SentSeq, At: time.Now().UTC()}
+			if req.Key != "" {
+				res.Delivery = b.Work.deliveryForTurn(tr.ID, req.Key)
+			}
+			return res, nil
 		}
 	}
 	sess, err := b.Sessions.Get(ctx, name)
@@ -190,7 +215,7 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 			return SendResult{}, err
 		}
 		e := b.Events.Publish(events.Event{Type: "session.queued", Box: b.Name, Origin: origin, Data: map[string]any{"name": name, "turn": tr.ID}})
-		return SendResult{Queued: true, Turn: tr.ID, Seq: e.Seq, At: e.Time.UTC()}, nil
+		return SendResult{Queued: true, Turn: tr.ID, Seq: e.Seq, At: e.Time.UTC(), Delivery: b.noteDelivery(req, origin, name, tr.ID, DeliveryHeld)}, nil
 	}
 	if agent := agentFor(sess); agent != "" {
 		// A new agent reads nothing until it has drawn. At its startup
@@ -239,6 +264,7 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 	res := SendResult{Sent: true, Seq: e.Seq, At: e.Time.UTC()}
 	if waiting != "" {
 		res.Turn = waiting
+		res.Delivery = b.noteDelivery(req, origin, name, res.Turn, DeliveryTyped)
 		return res, nil
 	}
 	if enter && sess.Title == "" && commandName(req.Text) == "" {
@@ -256,6 +282,7 @@ func (b *Box) sendPrompt(ctx context.Context, name string, req SendRequest, orig
 			}
 		}
 	}
+	res.Delivery = b.noteDelivery(req, origin, name, res.Turn, DeliveryTyped)
 	return res, nil
 }
 

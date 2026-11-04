@@ -149,6 +149,9 @@ type Box struct {
 	// (archiveTurn).
 	archiveOnce sync.Once
 	archiveLine chan struct{}
+	// Work keeps the box's work records and pins (work.go); nil on a box
+	// without them.
+	Work *WorkStore
 }
 
 func (b *Box) own(path string) {
@@ -307,6 +310,7 @@ func (b *Box) Mount(s *wire.Server) {
 	b.mountNotify(route)
 	b.mountArtifacts(route)
 	b.mountHelpers(s, route)
+	b.mountWork(route)
 	b.mountPairing(s, route)
 }
 
@@ -845,6 +849,11 @@ type SessionRequest struct {
 	// Env is the session's own variables, over the box's and the
 	// project's (sessionenv.go). berthd's own can't be among them.
 	Env map[string]string `json:"env,omitempty"`
+	// FromSession is the session starting this one, from its BERTH_SESSION
+	// (callerSession): the new session's started_by.
+	FromSession string `json:"from_session,omitempty"`
+	// Claims are the thread keys it takes on as it starts (workthreads.go).
+	Claims []string `json:"claims,omitempty"`
 }
 
 func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
@@ -852,6 +861,7 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeLimit(r, &req, maxPromptBody); err != nil {
 		return err
 	}
+	r = r.WithContext(withStartedBy(r.Context(), b.callerSession(r, req.FromSession)))
 	if _, err := tmuxPath(); err != nil {
 		return err
 	}
@@ -861,6 +871,11 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 	if err := CheckSessionEnv(req.Env); err != nil {
 		return err
 	}
+	claims, err := b.checkClaims(req.Claims)
+	if err != nil {
+		return err
+	}
+	req.Claims = claims
 	if conv, ok := b.commandConversation(req.Command); ok && req.Agent == "" {
 		// A structured agent's own host command, read back from its session
 		// and sent to start it again (an older Shipyard's Start again): its
@@ -910,6 +925,7 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 				return err
 			}
 			sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+			b.claimNew(r, sess, claims)
 			b.announceOpen(r, sess, req.Open)
 			writeJSON(w, sess)
 			return nil
@@ -931,6 +947,7 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+	b.claimNew(r, sess, claims)
 	b.announceOpen(r, sess, req.Open)
 	writeJSON(w, sess)
 	return nil
@@ -959,6 +976,7 @@ func (b *Box) addHomeSession(w http.ResponseWriter, r *http.Request, req Session
 		return err
 	}
 	sess = b.titleNew(r.Context(), sess, req.Title, "")
+	b.claimNew(r, sess, req.Claims)
 	b.announceOpen(r, sess, req.Open)
 	writeJSON(w, sess)
 	return nil
@@ -987,6 +1005,9 @@ func (b *Box) startSession(r *http.Request, name, location, dir, command, preset
 	}
 	if a := agentFor(sess); a != "" {
 		data["agent"] = a
+	}
+	if sess.StartedBy != "" {
+		data["started_by"] = sess.StartedBy
 	}
 	b.publish(r, "session.started", data)
 	// A worktree the repository had before Team setup adopted it is set
@@ -1050,6 +1071,10 @@ func (b *Box) startStructuredSession(r *http.Request, name, location, dir, prese
 		return Session{}, err
 	}
 	data["agent"], data["driver"] = agentFor(sess), sess.Driver
+	if sess.StartedBy != "" {
+		data["started_by"] = sess.StartedBy
+		noteConversation(l.labels[labelConv], func(c *Conversation) { c.StartedBy = sess.StartedBy })
+	}
 	b.publish(r, "session.started", data)
 	noteStarted(l, location, dir, sess.Name, prompt)
 	b.setUpOnFirstOpen(origin(r), dir)
