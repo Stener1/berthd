@@ -298,15 +298,17 @@ export function CommandPalette() {
     }
 
     // Sessions are named by where they run, so two "main" branches in
-    // different repositories cannot be confused.
-    const sessionItem = ({ box, session, state }: (typeof sessions)[number]): Item => {
+    // different repositories cannot be confused. Under a heading that
+    // already says their state (Needs you), a row leaves out its agent's
+    // name (its icon says it) and its state, so the title has the room.
+    const sessionItem = ({ box, session, state }: (typeof sessions)[number], grouped = false): Item => {
       const where = worktreeOf(boxes[box]?.locations, session);
       const agent = agentOf(session);
       return {
         value: `session:${box}/${session.name}`,
         label: sessionName(session, { sessions: boxes[box]?.sessions, locations: boxes[box]?.locations, place: true }),
         // Its state in the same words as everywhere else, then where.
-        detail: [sessionAgent(session), state !== "idle" && sessionWord(state), where?.worktree.branch, box].filter(Boolean).join(" · "),
+        detail: [!grouped && sessionAgent(session), !grouped && state !== "idle" && sessionWord(state), where?.worktree.branch, box].filter(Boolean).join(" · "),
         search: [session.name, where?.worktree.title ? where.worktree.name : undefined].filter(Boolean).join(" "),
         icon: (
           <span className="flex w-8 shrink-0 items-center gap-1">
@@ -374,7 +376,7 @@ export function CommandPalette() {
     }));
 
     if (!q) {
-      const waiting = sessions.filter((s) => s.state === "waiting").map(sessionItem);
+      const waiting = sessions.filter((s) => s.state === "waiting").map((s) => sessionItem(s, true));
       const recent: Item[] = recentWorktrees(spaces, 5).map((w) => ({
         value: `recent:${w.ref.box}:${w.ref.path}`,
         label: placeLabel(w.ref),
@@ -397,7 +399,7 @@ export function CommandPalette() {
       { value: `new-worktree:${q}`, label: `New task from "${q}"`, icon: slot(<GitBranchPlusIcon />), run: go(() => st.openNewWorktree({ name: q })) },
     ];
     return [
-      { value: "Sessions", items: sessions.map(sessionItem) },
+      { value: "Sessions", items: sessions.map((s) => sessionItem(s)) },
       { value: "Worktrees", items: worktreeItems },
       { value: "Actions", items: actions },
       { value: "Plugins", items: pluginItems },
@@ -445,7 +447,8 @@ export function CommandPalette() {
                       <CommandItem key={item.value} value={item} className="gap-2" onClick={() => item.run()}>
                         {item.icon}
                         <span className="truncate">{item.label}</span>
-                        {item.detail && <span className="ml-auto min-w-0 shrink truncate text-muted-foreground text-meta">{item.detail}</span>}
+                        {/* The title has the room; the detail gives way first. */}
+                        {item.detail && <span className="ml-auto min-w-0 max-w-[40%] shrink-0 truncate text-muted-foreground text-meta">{item.detail}</span>}
                         {item.trailing}
                         {item.shortcut && <Kbd className={item.detail ? "" : "ml-auto"}>{item.shortcut}</Kbd>}
                       </CommandItem>
