@@ -1,6 +1,6 @@
 # Work records and session parents
 
-A box keeps a record of each piece of running work (`internal/box/work.go`, `work.json`): title, sessions, status, Not now, Waiting on, last_seen and suggested groups, with the box's pins beside them. A record defines its own state: it stays when its sessions end. There is no view in the app yet; the API (`/v1/work…`) and the CLI (`berthd work …`) are the surface. A new session records the session that started it as `started_by` (a tmux option, `@berth_started_by`).
+A box keeps a record of each piece of running work (`internal/box/work.go`, `work.json`): title, sessions, status, Not now, Waiting on, last_seen and suggested groups, with the box's pins beside them. A record defines its own state: it stays when its sessions end. [Needs me](needs-me.md) is its view in the app; the API (`/v1/work…`) and the CLI (`berthd work …`) are the rest of the surface. A new session records the session that started it as `started_by` (a tmux option, `@berth_started_by`).
 
 ## Sub-features
 
@@ -14,7 +14,7 @@ A box keeps a record of each piece of running work (`internal/box/work.go`, `wor
 
 ## How to get to it (user POV)
 
-Nothing in the app yet. From a box: `berthd work list`, `berthd work get ID`, `berthd sessions --json | jq '.[].started_by'`.
+**Needs me** in the app. From a box: `berthd work list`, `berthd work get ID`, `berthd sessions --json | jq '.[].started_by'`.
 
 ## Driving it
 

@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { IssueText } from "@/components/conversation/issue-text";
 import { Radio, RadioGroup } from "@/components/ui/radio-group";
 import { Spinner } from "@/components/ui/spinner";
 import { copyText } from "@/lib/clipboard";
 import { answersText, complete, type Question, type QuestionAnswer, shownAnswer } from "@/lib/questions";
 import type { TranscriptItem } from "@/lib/transcript";
 import { cn } from "@/lib/utils";
+import { isViewKey } from "@/lib/view-keys";
 
 // The questions an agent asks with a form of its own, drawn whole in the
 // chat: one step per question (radios for one pick, checkboxes for
@@ -30,6 +32,11 @@ export interface QuestionsActions {
   // again or copy, and the agent's own screen opens below to finish in.
   stuck?: string;
   submit(tool: string, answers: QuestionAnswer[]): Promise<void>;
+  // Number keys pick an option and Enter goes on, where the form is all there
+  // is to type at (Needs me); a chat's reply box keeps its keys.
+  keys?: boolean;
+  // Where to finish when the box can't, in a view with no screen under the form.
+  where?: string;
 }
 
 export const QuestionsContext = createContext<QuestionsActions | undefined>(undefined);
@@ -144,6 +151,7 @@ function Asked({ it }: { it: Item }) {
 // The questions, when only the agent's own screen can answer them: its
 // terminal opens under the conversation.
 function InTerminal({ it, who }: { it: Item; who: string }) {
+  const where = useContext(QuestionsContext)?.where;
   return (
     <Card className="cv-in border-warning/60">
       <div className="flex flex-col gap-3 p-4">
@@ -170,7 +178,7 @@ function InTerminal({ it, who }: { it: Item; who: string }) {
       </div>
       <div className="flex items-center gap-2 border-t px-4 py-3 text-muted-foreground text-body">
         <SquareTerminalIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0">Answer in {who}'s screen below.</span>
+        <span className="min-w-0">Answer in {where ?? `${who}'s screen below`}.</span>
       </div>
     </Card>
   );
@@ -228,6 +236,25 @@ function Form({ it, who, stuck, onSubmit }: { it: Item; who: string; stuck?: str
     else void submit();
   };
   const last = step === steps - 1;
+  const ctx = useContext(QuestionsContext);
+  useEffect(() => {
+    if (!ctx?.keys || busy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!isViewKey(e)) return;
+      if (e.key === "Enter") {
+        if ((e.target as HTMLElement | null)?.closest("button, a, [role=link]")) return;
+        e.preventDefault();
+        next();
+        return;
+      }
+      const o = review ? undefined : q.options[Number(e.key) - 1];
+      if (!o) return;
+      e.preventDefault();
+      set(step, (x) => (q.multi ? { ...x, picks: x.picks.includes(o.label) ? x.picks.filter((p) => p !== o.label) : [...x.picks, o.label] } : { ...x, picks: [o.label], otherOn: false }));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   return (
     <Card ref={card} data-testid="question-form" className="cv-in overflow-hidden border-warning/60" aria-busy={busy}>
@@ -280,7 +307,7 @@ function Form({ it, who, stuck, onSubmit }: { it: Item; who: string; stuck?: str
             <AlertTitle>Your answers didn't reach {who}</AlertTitle>
             <AlertDescription>
               <ErrorText text={failed} />
-              <span className="text-foreground">They're kept here: try again, or copy them and finish in {who}'s screen below.</span>
+              <span className="text-foreground">They're kept here: try again, or copy them and finish in {ctx?.where ?? `${who}'s screen below`}.</span>
             </AlertDescription>
             <AlertAction>
               <Button size="sm" variant="outline" onClick={() => void submit()}>
@@ -340,7 +367,7 @@ function Step({ q, d, disabled, onChange, onEnter }: { q: Question; d: Draft; di
     <fieldset className="flex flex-col gap-3" disabled={disabled}>
       <legend className="contents">
         <span data-selectable className="block text-heading">
-          {q.question}
+          <IssueText text={q.question} />
         </span>
       </legend>
       <span className="-mt-1.5 text-muted-foreground text-meta">{q.multi ? "Pick any that apply" : "Pick one"}</span>
@@ -386,8 +413,14 @@ function Step({ q, d, disabled, onChange, onEnter }: { q: Question; d: Draft; di
 function OptionText({ label, description }: { label: string; description?: string }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-row">{label}</span>
-      {description && <span className="text-desc text-muted-foreground">{description}</span>}
+      <span className="text-row">
+        <IssueText text={label} />
+      </span>
+      {description && (
+        <span className="text-desc text-muted-foreground">
+          <IssueText text={description} />
+        </span>
+      )}
     </span>
   );
 }

@@ -49,6 +49,7 @@ import { useWhatsNewAfterUpdate } from "@/lib/whats-new";
 import { cn } from "@/lib/utils";
 import { homeBox, useWorkspaces } from "@/lib/workspaces";
 import { useKitDeepLinks } from "@/views/kits/deep-link";
+import { startNeedsMeWatch } from "@/views/needs-me/needs-me-store";
 import { useTeamDeepLinks, useTeamWatch } from "@/views/team/team-entry";
 import { ReviewSheet } from "@/views/kits/review-sheet";
 import { useReviewDeepLinks } from "@/views/pr-review/deep-link";
@@ -69,6 +70,7 @@ const AutomationsView = lazyView(() => import("@/views/automations").then((m) =>
 const WorktreesView = lazyView(() => import("@/views/worktrees/worktrees-view").then((m) => m.WorktreesView));
 const TeamSetupView = lazyView(() => import("@/views/team/team-view").then((m) => m.TeamSetupView));
 const KitsView = lazyView(() => import("@/views/kits/kits-view").then((m) => m.KitsView));
+const NeedsMeView = lazyView(() => import("@/views/needs-me/needs-me-view").then((m) => m.NeedsMeView));
 const ReviewView = lazyView(() => import("@/views/review/review-view").then((m) => m.ReviewView));
 const ProjectView = lazyView(() => import("@/views/project/project-view").then((m) => m.ProjectView));
 const DashboardView = lazyView(() => import("@/views/dashboard").then((m) => m.DashboardView));
@@ -79,7 +81,7 @@ const SettingsView = lazyView(() => import("@/views/settings/settings-view").the
 // The live demo's guide and script (pnpm build:demo); not in the app.
 const DemoGuide = __BERTH_DEMO__ ? lazy(() => import("@/demo/guide")) : null;
 
-const viewTitles = { team: "Team setup", dashboard: "Agent Dashboard", review: "Review", worktrees: "Worktrees", automations: "Automations", kits: "Kits", project: "Project settings", settings: "Settings", plugin: "" } as const;
+const viewTitles = { "needs-me": "Needs me", team: "Team setup", dashboard: "Agent Dashboard", review: "Review", worktrees: "Worktrees", automations: "Automations", kits: "Kits", project: "Project settings", settings: "Settings", plugin: "" } as const;
 
 export default function App() {
   useApplyTheme();
@@ -104,6 +106,8 @@ export default function App() {
   // Which boxes' Shipyard skills aren't installed or are out of date, for
   // the sidebar's notice (lib/skills-notice.ts).
   useEffect(() => (connectedToAgent ? startSkillsNoticeWatch() : undefined), [connectedToAgent]);
+  // Work records, for Needs me and its count (views/needs-me).
+  useEffect(() => (connectedToAgent ? startNeedsMeWatch() : undefined), [connectedToAgent]);
   useKitDeepLinks();
   // Team setup: berth://team?org= links, and setups running on boxes.
   useTeamDeepLinks();
@@ -294,6 +298,7 @@ function MainView() {
         {view.kind === "automations" && <AutomationsView />}
         {view.kind === "review" && <ReviewView />}
         {view.kind === "kits" && <KitsView />}
+        {view.kind === "needs-me" && <NeedsMeView />}
         {view.kind === "worktrees" && <WorktreesView />}
         {view.kind === "project" && <ProjectView key={`${view.box}/${view.location}`} box={view.box} location={view.location} />}
         {view.kind === "settings" && <SettingsView />}

@@ -8,6 +8,7 @@ import {
   EyeOffIcon,
   GitBranchIcon,
   GripVerticalIcon,
+  HandIcon,
   InboxIcon,
   LayoutDashboardIcon,
   ListIcon,
@@ -41,6 +42,7 @@ import { PluginReactContext } from "@/plugins/context";
 import { pluginContexts } from "@/plugins/plugin-boundary";
 import { type Contribution, useRegistry } from "@/plugins/registry";
 import { Icon } from "@/plugins/ui";
+import { useNeedsMe } from "@/views/needs-me/needs-me-store";
 import { useReviewCount } from "@/views/review/review-store";
 
 // The app's places: Home, its own views and any plugin's screens. The person
@@ -75,6 +77,9 @@ export function useNavItems(): NavItem[] {
   const pluginBadges = usePluginBadges();
   const counts = useAgentCounts();
   const toReview = useReviewCount();
+  const needsMe = useNeedsMe();
+  const needCount = needsMe.length;
+  const needDecision = needsMe.some((i) => i.kind === "decision");
   return useMemo(() => {
     // A fresh object, so clicking the page you're on still says so
     // (Automations leaves its flow editor).
@@ -85,6 +90,7 @@ export function useNavItems(): NavItem[] {
       labs
         ? { id: "home", label: "New task", icon: <PenLineIcon />, go: goHome, active: view.kind === "workspace" && noWorktree, badge: waiting, keys: "⌘N" }
         : { id: "home", ...dashboard, badge: waiting },
+      { id: NEEDS_ME, label: "Needs me", icon: <HandIcon />, go: open({ kind: "needs-me" }), active: view.kind === "needs-me", badge: needCount ? { count: needCount, loud: needDecision, title: `${needCount} need${needCount === 1 ? "s" : ""} you` } : undefined },
       { id: "review", label: "Review", icon: <InboxIcon />, go: open({ kind: "review" }), active: view.kind === "review", badge: toReview ? { count: toReview, title: `${toReview} to review` } : undefined },
       { id: "worktrees", label: "Worktrees", icon: <GitBranchIcon />, go: open({ kind: "worktrees" }), active: view.kind === "worktrees" },
       { id: "automations", label: "Automations", icon: <ClockIcon />, go: open({ kind: "automations" }), active: view.kind === "automations" },
@@ -100,8 +106,10 @@ export function useNavItems(): NavItem[] {
       })),
     ];
     return items;
-  }, [view, noWorktree, labs, plugins, pluginBadges, counts.waiting, toReview]);
+  }, [view, noWorktree, labs, plugins, pluginBadges, counts.waiting, toReview, needCount, needDecision]);
 }
+
+const NEEDS_ME = "needs-me";
 
 const pluginNavId = (plugin: string, item: SidebarItem) => `plugin:${plugin}:${item.id}`;
 
@@ -192,8 +200,13 @@ class CountBoundary extends Component<{ plugin?: string; reset?: unknown; childr
 export function useArrangedNav() {
   const items = useNavItems();
   const layout = useNav((s) => s.layout);
-  const ids = items.map((i) => i.id);
+  // Anything new lands in More, but Needs me is where the day starts, so it shows
+  // pinned under Home until it's moved. It stays out of the ids other moves save,
+  // so nothing is written for it, or files it under More, until then.
+  const unplaced = ![...layout.pinned, ...layout.more, ...layout.hidden].includes(NEEDS_ME);
+  const ids = items.map((i) => i.id).filter((id) => !unplaced || id !== NEEDS_ME);
   const lists = arrange(layout, ids);
+  if (unplaced) lists.pinned.splice(Math.min(1, lists.pinned.length), 0, NEEDS_ME);
   const byId = new Map(items.map((i) => [i.id, i]));
   const pick = (l: NavList) => lists[l].map((id) => byId.get(id)!);
   return { pinned: pick("pinned"), more: pick("more"), hidden: pick("hidden"), ids };
