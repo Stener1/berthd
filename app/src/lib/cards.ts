@@ -51,7 +51,7 @@ type Validated = { ok: true; card: Card } | { ok: false; errors: string[] };
 
 export const TITLE_MAX = 200;
 const WHY_MAX = 500;
-const TEXT_MAX = 20_000;
+export const TEXT_MAX = 20_000;
 const LIST_MAX = 100;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

@@ -22,6 +22,7 @@ const records: Record<string, WorkRecord[]> = {};
 const pins: Record<string, WorkPin[]> = {};
 const transcripts: Record<string, TranscriptItem[]> = {};
 let nextId = 1;
+let refuseNext = false;
 
 function line(name: string, seenHoursAgo: number, startedBy?: string): WorkSessionLine {
   return { name, last_seen: iso(seenHoursAgo * HOUR), started_by: startedBy, created: iso(9 * DAY) };
@@ -199,6 +200,10 @@ export function mockWorkCall(box: string, method: string, path: string, body: un
   if (!m) return undefined;
   const r = list.find((x) => x.id === decodeURIComponent(m[1]));
   if (!r) return Promise.reject(new ApiError("no work record with that id", 404, "not_found"));
+  if (refuseNext && method !== "GET") {
+    refuseNext = false;
+    return Promise.reject(new ApiError("the box refused that", 409));
+  }
   const stamp = () => {
     r.updated = new Date().toISOString();
     notify("work.updated", { id: r.id, status: r.status });
@@ -286,6 +291,15 @@ export function installMockWorkControls(ctx: Ctx) {
       transcripts[`${box}/${name}`] = said(name, "This one can't wait: should the hotfix go out tonight?");
       ctx.emit({ type: "agent.waiting", box, data: { session: name } });
       ctx.emit({ type: "work.created", box, data: { id: `w_${name}` } });
+    },
+    // The box refuses the next change to a record.
+    refuse() {
+      refuseNext = true;
+    },
+    // A session reaches another wait, and the app hasn't heard yet.
+    moveOn(name: string, box = "devl") {
+      const s = ctx.sessions[box]?.find((x) => x.name === name);
+      if (s) s.state_since = new Date().toISOString();
     },
     // Everything that needs a person is dealt with; what's put off stays.
     clear() {

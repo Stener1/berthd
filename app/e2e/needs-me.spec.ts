@@ -11,6 +11,8 @@ type MockWork = {
     arrive(name: string, title: string): void;
     pass(id: string): void;
     clear(): void;
+    refuse(): void;
+    moveOn(session: string): void;
     record(id: string): { status: string; not_until?: string; waiting_on?: string; check_back?: string } | undefined;
     sent: Record<string, string>;
   };
@@ -103,6 +105,40 @@ test("a form is answered with the number keys, and the next card comes up", asyn
   await expect(left(page)).toHaveText("8 left, about 10 min");
   const sent = await (await work(page)).evaluate((w) => w.sent["devl/rollout-claude"]);
   expect(sent).toBe("Flag first");
+});
+
+test("the issue sheet has the keyboard: the card's shortcuts don't reach through it", async ({ app, page }) => {
+  await open(app);
+  await page.getByTestId("issue-chip").first().click();
+  await expect(page.getByTestId("issue-sheet")).toBeVisible();
+  // Close, and a number key that would pick an option.
+  await page.keyboard.press("d");
+  await page.keyboard.press("1");
+  await expect(page.getByTestId("issue-sheet")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("issue-sheet")).toBeHidden();
+  await expect(title(page)).toHaveText(ORDER[0]);
+  await expect(page.getByTestId("question-form").getByRole("radio", { name: /Flag first/ })).not.toBeChecked();
+  expect((await (await work(page)).evaluate((w) => w.record("w_rollout")))?.status).toBe("open");
+});
+
+test("a change the box refuses says so, and the card stays", async ({ app, page }) => {
+  await open(app);
+  await rows(page).filter({ hasText: "Retry the failed webhooks" }).click();
+  await (await work(page)).evaluate((w) => w.refuse());
+  await button(page, "Read").click();
+  await expect(page.getByText("Couldn't mark it seen")).toBeVisible();
+  await expect(title(page)).toHaveText("Retry the failed webhooks");
+});
+
+test("a permission that has moved on isn't answered", async ({ app, page }) => {
+  await open(app);
+  await rows(page).filter({ hasText: "Approve the database migration" }).click();
+  await expect(page.getByTestId("needs-me-choices").getByRole("button")).toHaveCount(3);
+  await (await work(page)).evaluate((w) => w.moveOn("migrate-claude"));
+  await page.getByTestId("needs-me-choices").getByRole("button").first().click();
+  await expect(page.getByText(/moved on/).first()).toBeVisible();
+  expect(await (await work(page)).evaluate((w) => w.sent["devl/migrate-claude"])).toBeUndefined();
 });
 
 test("a question with no form shows its last message and a reply box, and agent text stays text", async ({ app, page }) => {

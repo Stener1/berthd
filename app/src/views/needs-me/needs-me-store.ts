@@ -184,31 +184,54 @@ export const markSeen = (box: string, id: string) => act(box, "Couldn't mark it 
 
 // read is seen, nothing more to do. Something back by itself is settled too. A
 // question still waits, so it goes to the back of its pass rather than leaving.
-export async function read(item: QueueItem, id: string) {
-  if (item.returned) await bringBack(item.box, id);
-  await markSeen(item.box, id);
+export async function read(item: QueueItem, id: string): Promise<boolean> {
+  if (item.returned && !(await bringBack(item.box, id))) return false;
+  return markSeen(item.box, id);
+}
+
+// What's running now, by box/name, read at the moment of acting: a card can be
+// behind what the box has moved on to.
+async function sessionsNow(boxes: Iterable<string>) {
+  const lists = await Promise.all([...new Set(boxes)].map(async (b) => (await boxApi.sessions(client(), b)).map((s) => [`${b}/${s.name}`, s] as const)));
+  return new Map(lists.flat());
 }
 
 // close ends its sessions, whose transcripts stay so they can be resumed, and
-// keeps the record. Sessions at work are stopped only after asking.
-export async function closeWork(item: QueueItem, onClosed: () => void) {
-  const live = item.members.filter((m) => m.session && !m.session.exited);
-  const working = live.filter((m) => m.state === "running");
-  const finish = async () => {
-    const ok = await act(item.box, "Couldn't close it", async () => {
-      await Promise.all(live.map((m) => boxApi.stopSession(client(), m.box, m.name)));
-      if (item.record) await saveRecord(item.box, "PATCH", workPath(item.record.id), { status: "closed" });
+// keeps the record. It goes by what the box says now: a session at work is stopped
+// only after asking (approved, by name), and a new one under an old name is left.
+export async function closeWork(item: QueueItem, onClosed: () => void, approved: string[] = []) {
+  try {
+    const now = await sessionsNow(item.members.filter((m) => m.session).map((m) => m.box));
+    const live = item.members.filter((m) => {
+      const s = now.get(`${m.box}/${m.name}`);
+      return s && !s.exited && s.created === m.session?.created;
     });
-    if (ok) onClosed();
-  };
-  if (!working.length) return finish();
-  confirm({
-    title: "Close it while it's working?",
-    description: `${working.map((m) => m.title).join(", ")} ${working.length === 1 ? "is" : "are"} still working. Closing stops ${working.length === 1 ? "it" : "them"}. The transcript stays, so you can resume.`,
-    confirm: working.length === 1 ? "Stop and close" : `Stop ${working.length} and close`,
-    destructive: true,
-    run: finish,
-  });
+    const working = live.filter((m) => {
+      const s = now.get(`${m.box}/${m.name}`);
+      return s?.agent_state === "running" || (s?.agent_state === "finished" && s.unfinished);
+    });
+    if (working.some((m) => !approved.includes(m.name))) {
+      confirm({
+        title: "Close it while it's working?",
+        description: `${working.map((m) => m.title).join(", ")} ${working.length === 1 ? "is" : "are"} still working. Closing stops ${working.length === 1 ? "it" : "them"}. The transcript stays, so you can resume.`,
+        confirm: working.length === 1 ? "Stop and close" : `Stop ${working.length} and close`,
+        destructive: true,
+        run: () =>
+          closeWork(
+            item,
+            onClosed,
+            working.map((m) => m.name),
+          ),
+      });
+      return;
+    }
+    await Promise.all(live.map((m) => boxApi.stopSession(client(), m.box, m.name)));
+    if (item.record) await saveRecord(item.box, "PATCH", workPath(item.record.id), { status: "closed" });
+    lookSoon();
+    onClosed();
+  } catch (err) {
+    toastError(err, { title: "Couldn't close it", box: item.box });
+  }
 }
 
 const PIN_WARN = 5;
@@ -237,14 +260,19 @@ export async function answerForm(m: Member, tool: string, answers: QuestionAnswe
   noteAnswered(m);
 }
 
-// reply sends words to a session. At a wait it may type into the agent; after
-// a finished turn it's an ordinary prompt.
+// reply sends words to a session, never forced: it goes at once to an agent at its
+// prompt, and if the agent has reached a question of its own since, it waits rather
+// than being typed into it.
 export async function reply(m: Member, text: string) {
-  await boxApi.send(client(), m.box, m.name, text, true, m.state === "waiting" ? { when: "now", force: true } : { when: "idle" });
+  await boxApi.send(client(), m.box, m.name, text, true, { when: "idle" });
   noteAnswered(m);
 }
 
+// choose presses the key a permission offers. That has to be forced, so it checks
+// first that this is still the wait the card shows.
 export async function choose(m: Member, key: string) {
+  const s = (await sessionsNow([m.box])).get(`${m.box}/${m.name}`);
+  if (s?.agent_state !== "waiting" || s.state_since !== m.session?.state_since) throw new Error("It has moved on since this card was drawn. Look at it again.");
   await boxApi.send(client(), m.box, m.name, key, false, { when: "now", force: true });
   noteAnswered(m);
 }

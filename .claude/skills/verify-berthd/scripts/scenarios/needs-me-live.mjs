@@ -2,6 +2,8 @@
 // form (AskUserQuestion). Needs me brings it up, the number key and Enter answer
 // it, and the box fills in Claude's own form. Second view: the agent's own record
 // has the answer, and Claude says it back. See ../../features/needs-me.md.
+import { existsSync, rmSync } from "node:fs";
+
 export const live = true;
 export const params = { labs: "0", sidebar: "list" };
 
@@ -99,6 +101,16 @@ export async function run({ page, shot, step, expect, call }) {
   await expect(card).toHaveAttribute("data-kind", "result", { timeout: 30_000 });
   await expect(page.getByTestId("needs-me-text")).toContainText(PICKED);
   await shot("4-result");
+
+  step("Reply from the card: it reaches Claude, and its answer comes back as a result");
+  await page.getByRole("textbox", { name: "Reply" }).fill("Say the word harbourmaster, then stop.");
+  await page.getByRole("button", { name: "Reply", exact: true }).click();
+  await expect(row).toHaveCount(0, { timeout: 30_000 });
+  await expect(row).toHaveCount(1, { timeout: 180_000 });
+  await row.click();
+  await expect(page.getByTestId("needs-me-text")).toContainText(/harbourmaster/i, { timeout: 30_000 });
+
+  step("Read takes it off");
   await card.getByRole("button", { name: "Read", exact: true }).click();
   await expect(row).toHaveCount(0, { timeout: 30_000 });
   const read = await call(`${api}/work/${record.id}`);
@@ -150,5 +162,27 @@ export async function run({ page, shot, step, expect, call }) {
   if (closed?.status !== "closed") throw new Error(`Close should keep a closed record, got ${JSON.stringify(closed)}`);
   if ((await call(`${api}/work/pins`)).some((p) => p.target === record.id)) throw new Error("a closed record kept its pin");
   await shot("7-closed");
+
+  step("a real permission, if this account asks for one: Allow by its key, on the real prompt");
+  const marker = `/tmp/needs-me-live-${Date.now()}`;
+  await call(`${api}/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ location: "acme-shop", name: `${NAME}-perm`, title: "Needs me permission check", agent: "claude", prompt: `Use the Bash tool to run exactly: touch ${marker}. Then stop.` }),
+  });
+  const permRow = page.getByTestId("needs-me-row").filter({ hasText: "Needs me permission check" });
+  const choices = page.getByTestId("needs-me-choices");
+  await expect(permRow).toHaveCount(1, { timeout: 180_000 });
+  await permRow.click();
+  const asked = await choices.waitFor({ timeout: 30_000 }).then(() => true, () => false);
+  if (asked) {
+    await expect(choices.getByRole("button", { name: /^.?\s*Allow/ }).first()).toBeVisible();
+    await shot("8-real-permission");
+    await page.getByRole("heading", { name: "Needs me permission check" }).click();
+    await page.keyboard.press(await choices.getByRole("button", { name: /Allow/ }).first().locator("kbd").innerText());
+    await expect.poll(() => existsSync(marker), { timeout: 120_000, intervals: [2000] }).toBe(true);
+    rmSync(marker, { force: true });
+  } else {
+    step("no permission prompt on this account, so this one isn't exercised");
+  }
 
 }

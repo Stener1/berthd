@@ -216,8 +216,25 @@ test("a card's actions follow what it is", () => {
   assert.deepEqual(buildCard(deck).actions, ["close", "park", "still-needed"]);
   const form = queue([entry("a", "waiting")], [record("a", ["a"])])[0];
   assert.deepEqual(buildCard(form, { form: { tool: "t", questions: [] } }).actions, ["answer", "read", "not-now", "waiting-on", "close", "pin"]);
-  const task = queue([entry("a", "waiting", { agent_sub_state: "act" })], [record("a", ["a"])])[0];
+  const task = queue([entry("a", "waiting", { agent_sub_state: "act", soft_wait: true })], [record("a", ["a"])])[0];
   assert.deepEqual(buildCard(task, { said: "Add the key." }).actions, ["reply", "done", "read", "not-now", "waiting-on", "close", "pin"]);
-  const noRecord = queue([entry("a", "waiting")])[0];
+  const noRecord = queue([entry("a", "waiting", { soft_wait: true })])[0];
   assert.deepEqual(buildCard(noRecord, { said: "Which?" }).actions, ["reply", "close"]);
+});
+
+test("a wait on the agent's own screen offers no reply, because words would land in it", () => {
+  const item = queue([entry("a", "waiting", { agent_sub_state: "act" })], [record("a", ["a"])])[0];
+  const card = buildCard(item, { said: "Working on it." });
+  assert.ok(!card.actions.includes("reply"));
+  assert.ok(!card.actions.includes("done"));
+  assert.ok(card.blocks.some((b) => b.type === "text" && /open its session/.test(b.text)));
+});
+
+test("a very long last message still makes a card, ending where the message ends", () => {
+  const item = queue([entry("a", "finished")], [record("a", ["a"])])[0];
+  const said = `${"x".repeat(30_000)}the end`;
+  const card = buildCard(item, { said });
+  assert.equal(validateCard(card).ok, true);
+  const text = card.blocks[0];
+  assert.ok(text.type === "text" && text.text.startsWith("…") && text.text.endsWith("the end"));
 });

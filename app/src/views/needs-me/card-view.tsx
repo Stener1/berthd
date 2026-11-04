@@ -132,10 +132,16 @@ function Broken({ errors, item, onNext }: { errors: string[]; item: QueueItem; o
         <AlertTitle>This card can't be drawn</AlertTitle>
         <AlertDescription>{errors.join(". ")}</AlertDescription>
       </Alert>
-      <div>
+      <div className="flex gap-1.5">
         <Button size="sm" variant="outline" onClick={onNext}>
           Next
         </Button>
+        {item.focus?.session && (
+          <Button size="sm" variant="ghost" onClick={() => void focusSession(item.focus!.box, item.focus!.name)}>
+            <SquareTerminalIcon />
+            Open session
+          </Button>
+        )}
       </div>
     </article>
   );
@@ -161,11 +167,11 @@ function Drawn({ card, item, focus, reading, onPick, onNext, onBack }: { card: C
   const has = (v: Verb) => card.actions.includes(v);
   const record = item.record;
   const box = item.box;
-  // Does something to the record, and the queue moves on as soon as the store has it.
-  const onRecord = (f: (box: string, id: string) => unknown) => () => {
-    if (!record) return;
-    void f(box, record.id);
-    onNext();
+  // Does something to the record, and moves on once the box has it. One that fails
+  // says so, and the card stays.
+  const moveOn = (done: Promise<boolean>) => void done.then((ok) => ok && onNext());
+  const onRecord = (f: (box: string, id: string) => Promise<boolean>) => () => {
+    if (record) moveOn(f(box, record.id));
   };
   const run: Partial<Record<Verb, () => void>> = {
     read: onRecord((_, id) => read(item, id)),
@@ -181,8 +187,7 @@ function Drawn({ card, item, focus, reading, onPick, onNext, onBack }: { card: C
     reject: onRecord(reject),
     done: () => {
       if (!focus) return;
-      void reply(focus, "Done.").catch((err) => toastError(err, { title: "Couldn't tell it", box: focus.box }));
-      onNext();
+      void reply(focus, "Done.").then(onNext, (err) => toastError(err, { title: "Couldn't tell it", box: focus.box }));
     },
   };
   // A form has Enter and the number keys for itself.
@@ -282,8 +287,7 @@ function Drawn({ card, item, focus, reading, onPick, onNext, onBack }: { card: C
           onClose={() => setAsking(undefined)}
           onPick={(until) => {
             setAsking(undefined);
-            void notNow(box, record.id, until);
-            onNext();
+            moveOn(notNow(box, record.id, until));
           }}
         />
       )}
@@ -293,8 +297,7 @@ function Drawn({ card, item, focus, reading, onPick, onNext, onBack }: { card: C
           onClose={() => setAsking(undefined)}
           onSave={(who, at) => {
             setAsking(undefined);
-            void waitOn(box, record.id, who, at);
-            onNext();
+            moveOn(waitOn(box, record.id, who, at));
           }}
         />
       )}

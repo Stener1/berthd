@@ -1,7 +1,7 @@
 import type { Session } from "@/lib/api";
 
 import type { Question } from "./questions.ts";
-import { type Block, type Card, TITLE_MAX, type Verb } from "./cards.ts";
+import { type Block, type Card, TEXT_MAX, TITLE_MAX, type Verb } from "./cards.ts";
 import { agentLabel, agentOf, guessSessionName, sessionName, type SessionState } from "./derive.ts";
 
 // Needs me's rules, pure so the view and its tests share them: what enters the
@@ -347,6 +347,9 @@ export interface CardFacts {
 
 const EVERY: Verb[] = ["read", "not-now", "waiting-on", "close", "pin"];
 
+// What it said, as much as a card holds: the end, where a message concludes.
+const clipSaid = (said: string) => (said.length > TEXT_MAX ? `…${said.slice(-(TEXT_MAX - 1))}` : said);
+
 // buildCard draws a queue item in the card format: the only way anything gets
 // on screen in Needs me (lib/cards).
 export function buildCard(item: QueueItem, facts: CardFacts = {}): Card {
@@ -360,7 +363,7 @@ export function buildCard(item: QueueItem, facts: CardFacts = {}): Card {
     };
   }
   if (item.kind === "close-out") {
-    const blocks: Block[] = facts.said ? [{ type: "text", text: facts.said }] : [];
+    const blocks: Block[] = facts.said ? [{ type: "text", text: clipSaid(facts.said) }] : [];
     return { ...base, blocks, actions: ["close", "park", "still-needed"] };
   }
   const blocks: Block[] = [];
@@ -370,11 +373,15 @@ export function buildCard(item: QueueItem, facts: CardFacts = {}): Card {
     blocks.push({ type: "question", tool: facts.form.tool, questions: facts.form.questions });
     actions.push("answer");
   } else {
-    if (facts.said) blocks.push({ type: "text", text: facts.said });
+    if (facts.said) blocks.push({ type: "text", text: clipSaid(facts.said) });
+    const focus = item.focus;
     if (facts.choices?.length) {
       blocks.push({ type: "question", choices: facts.choices });
       actions.push("answer");
-    } else if (item.focus?.session && !item.focus.session.exited) {
+    } else if (focus?.state === "waiting" && !focus.noForm) {
+      // Words typed here would land in whatever it has on its screen.
+      blocks.push({ type: "text", text: "It's waiting on its own screen: open its session to answer." });
+    } else if (focus?.session && !focus.session.exited) {
       actions.push("reply");
       if (item.kind === "task") actions.push("done");
     }
