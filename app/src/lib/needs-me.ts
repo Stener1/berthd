@@ -132,6 +132,10 @@ export const whoOf = (m: Member) => {
   return agent ? agentLabel(agent) : "The agent";
 };
 
+// pinHolders is the boxes holding a pin. A repo or a project pin counts wherever it
+// is held, so taking it off means taking it off each of them.
+export const pinHolders = (work: Record<string, BoxWork | undefined>, kind: WorkPin["kind"], target: string) => Object.entries(work).flatMap(([box, w]) => (w?.pins.some((p) => p.kind === kind && p.target === target) ? [box] : []));
+
 // due says a parked or waiting record's date has passed. Parked with no date
 // stays parked: that's what parking means.
 export function due(r: Pick<WorkRecord, "status" | "not_until" | "check_back">, now: number): boolean {
@@ -141,10 +145,15 @@ export function due(r: Pick<WorkRecord, "status" | "not_until" | "check_back">, 
 
 function needOf(e: SessionEntry, line: WorkSessionLine | undefined, now: number, answered: Record<string, Answered> | undefined): Pick<Member, "need" | "noForm"> {
   const s = e.session;
-  if (!agentOf(s) || s.queued || s.parked) return {};
+  if (!agentOf(s) || s.parked) return {};
   const said = answered?.[`${e.box}/${s.name}`];
   if (said && said.since === s.state_since && now - said.at < ANSWER_HOLD_MS) return {};
-  if (e.state === "waiting") return { need: s.agent_sub_state === "act" ? "task" : "decision", noForm: !!s.soft_wait };
+  const need = s.agent_sub_state === "act" ? "task" : "decision";
+  // A question on its screen holds up anything queued behind it, so it's still yours.
+  if (e.state === "waiting" && !s.soft_wait) return { need, noForm: false };
+  // Anything else with a prompt queued is about to go on by itself.
+  if (s.queued) return {};
+  if (e.state === "waiting") return { need, noForm: true };
   if (e.state !== "finished" && e.state !== "exited") return {};
   // "Not seen since it ended" needs a record to say when it was seen.
   if (!line) return {};
@@ -207,7 +216,9 @@ export function buildQueue({ sessions, work, now, answered, offBoard }: QueueInp
       const members: Member[] = record.sessions.map((line) => {
         // A line names its box by the box's own name, which needn't be the name
         // this computer knows it by: here first, then wherever it says.
-        const e = live.get(`${box}/${line.name}`) ?? (line.box ? live.get(`${line.box}/${line.name}`) : undefined);
+        // A line that ended is history: a new session can reuse its name, and that
+        // one's work is someone else's.
+        const e = line.ended ? undefined : (live.get(`${box}/${line.name}`) ?? (line.box ? live.get(`${line.box}/${line.name}`) : undefined));
         if (!e) return { box: line.box ?? box, name: line.name, title: line.title || guessSessionName(line.name), startedBy: line.started_by };
         held.add(`${e.box}/${e.session.name}`);
         return {

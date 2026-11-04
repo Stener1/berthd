@@ -79,7 +79,7 @@ export function needsMeScene(sessions: Record<string, Session[]>) {
     agent("badge-claude", "Fix the cart badge", "shop/badge", { agent_state: "idle", state_since: iso(2 * HOUR) }),
     agent("badge-tests-claude", "Test the cart badge", "shop/badge-tests", { agent_state: "idle", state_since: iso(2 * HOUR) }),
     // These never enter: a prompt is queued for one, and turn check read the other as parked.
-    agent("queued-claude", "Wait for the queued prompt", "shop/queued", { queued: 1 }),
+    agent("queued-claude", "Wait for the queued prompt", "shop/queued", { agent_state: "finished", queued: 1 }),
     agent("parked-claude", "Check again in the morning", "shop/parked", { agent_state: "finished", parked: true }),
   ];
   sessions.devl = devl;

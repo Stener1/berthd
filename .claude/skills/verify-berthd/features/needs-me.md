@@ -5,7 +5,7 @@ A menu item with a count. One piece of work fills the screen; answer or close it
 ## Sub-features
 
 - `needs-me-order`: pinned decisions, other decisions, pinned tasks, other tasks, results, the close-out deck, then suggested groups. Within a pass, longest unseen first. A count anywhere is the list's length.
-- `needs-me-entry`: waiting agents, sessions that ended on a question or block (a title starting with ❓ or ⛔) with no form, and results not seen since they ended. Queued and parked sessions stay out. A session no record holds yet still enters while it waits.
+- `needs-me-entry`: waiting agents, sessions that ended on a question or block (a title starting with ❓ or ⛔) with no form, and results not seen since they ended. Parked sessions stay out, and so do queued ones, unless a question on the agent's own screen is holding up what's queued. A line that ended stays history when a new session reuses its name. A session no record holds yet still enters while it waits.
 - `needs-me-walk`: a card in front never moves. A new pinned question sorts in right behind it and becomes next. A card passed over waits behind the rest.
 - `needs-me-keys`: number keys pick, Enter submits a form or opens a session, `j`/`n` next, `k` back, `e` Read, `s` Not now, `w` Waiting on, `d` Close, `p` Pin, `r` the reply box.
 - `needs-me-actions`: Read, Not now (tomorrow or a date), Waiting on (who or what, and a check-back date), Close, Pin (this work, its repo or its project). Not now and Waiting on come back by themselves when due and sit under Later until then, with a label saying whom it waits for. Read on a question that still waits moves it to the back of its pass.

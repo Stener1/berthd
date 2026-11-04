@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { QUESTION_TOOLS } from "@/lib/chat-card";
 import { type Block, type Card, hostOf, validateCard, type Verb } from "@/lib/cards";
 import { errorMessage } from "@/lib/format";
-import { buildCard, type CardFacts, type Member, type QueueItem, repoOf, sessionTree, whoOf, whyOf, type WorkRecord } from "@/lib/needs-me";
+import { buildCard, type CardFacts, type Member, pinHolders, type QueueItem, repoOf, sessionTree, whoOf, whyOf, type WorkRecord } from "@/lib/needs-me";
 import { openUrl } from "@/lib/open-url";
 import type { Question, QuestionAnswer } from "@/lib/questions";
 import { permissionChoices } from "@/lib/screen";
@@ -117,12 +117,28 @@ export function NeedsCard({ item, onNext, onBack }: { item: QueueItem; onNext():
   const items = useRead(focus);
   const waiting = focus?.state === "waiting" && !focus.noForm;
   const form = waiting && items ? openForm(items) : undefined;
-  const asks = useAsk(focus?.box ?? "", focus?.name ?? "", !!waiting && !!items && !form, focus?.session?.state_since, focus?.session?.ask);
-  const facts: CardFacts = form ? { form: { tool: form.tool ?? "", questions: form.questions } } : { said: items && lastSaid(items), choices: asks?.choices.length ? (permissionChoices(asks.choices) ?? asks.choices) : undefined, asks: asksFor(focus) };
   const reading = !!focus?.session && item.kind !== "group" && !items;
-  const card = validateCard(buildCard(picked && focus?.need ? { ...item, focus, why: whyOf(focus) } : item, facts));
+  const facts: CardFacts = form ? { form: { tool: form.tool ?? "", questions: form.questions } } : { said: items && lastSaid(items), asks: asksFor(focus) };
+  const shown = picked && focus?.need ? { ...item, focus, why: whyOf(focus) } : item;
+  const rest = { item, shown, focus, reading, onPick: setPicked, onNext, onBack };
+  // Keyed by the wait: the answers one permission offers never carry over to the
+  // next, even for a moment, because a key pressed then would answer that one.
+  if (waiting && focus && items && !form) return <AtPermission key={`${focus.name}|${focus.session?.state_since}`} focus={focus} facts={facts} rest={rest} />;
+  return <Body {...rest} facts={facts} />;
+}
+
+type BodyProps = { item: QueueItem; shown: QueueItem; focus?: Member; reading: boolean; onPick(name: string): void; onNext(): void; onBack(): void };
+
+function AtPermission({ focus, facts, rest }: { focus: Member; facts: CardFacts; rest: BodyProps }) {
+  const asks = useAsk(focus.box, focus.name, true, focus.session?.state_since, focus.session?.ask);
+  const choices = asks?.choices.length ? (permissionChoices(asks.choices) ?? asks.choices) : undefined;
+  return <Body {...rest} facts={{ ...facts, choices }} />;
+}
+
+function Body({ item, shown, focus, reading, onPick, onNext, onBack, facts }: BodyProps & { facts: CardFacts }) {
+  const card = validateCard(buildCard(shown, facts));
   if (!card.ok) return <Broken errors={card.errors} item={item} onNext={onNext} />;
-  return <Drawn key={focus?.name ?? ""} card={card.card} item={item} focus={focus} reading={reading} onPick={setPicked} onNext={onNext} onBack={onBack} />;
+  return <Drawn key={focus?.name ?? ""} card={card.card} item={item} focus={focus} reading={reading} onPick={onPick} onNext={onNext} onBack={onBack} />;
 }
 
 function Broken({ errors, item, onNext }: { errors: string[]; item: QueueItem; onNext(): void }) {
@@ -312,10 +328,14 @@ const KeyHint = ({ k }: { k: string }) => (
 );
 
 function PinMenu({ item, record }: { item: QueueItem; record: WorkRecord }) {
-  const pins = useNeedsMeStore((s) => s.byBox[item.box]?.pins);
+  const byBox = useNeedsMeStore((s) => s.byBox);
   const repo = repoOf(item.members.find((m) => m.session)?.session?.location);
   const project = record.project;
-  const on = (kind: "repo" | "project", target: string) => !!pins?.some((p) => p.kind === kind && p.target === target);
+  // On any box it counts on all of them, so off means off everywhere.
+  const fleetPin = (kind: "repo" | "project", target: string, label: string) => {
+    const holders = pinHolders(byBox, kind, target);
+    return <MenuItem onClick={() => void (holders.length ? Promise.all(holders.map((b) => pin(b, kind, target, false))) : pin(item.box, kind, target, true))}>{holders.length ? `Unpin ${label}` : `Pin all of ${label}`}</MenuItem>;
+  };
   return (
     <Menu>
       <MenuTrigger render={<Button size="sm" variant="outline" />}>
@@ -327,8 +347,8 @@ function PinMenu({ item, record }: { item: QueueItem; record: WorkRecord }) {
       <MenuPopup align="start">
         <MenuItem onClick={() => void pin(item.box, "work", record.id, !record.pinned)}>{record.pinned ? "Unpin this work" : "Pin this work"}</MenuItem>
         {(repo || project) && <MenuSeparator />}
-        {repo && <MenuItem onClick={() => void pin(item.box, "repo", repo, !on("repo", repo))}>{on("repo", repo) ? `Unpin ${repo}` : `Pin all of ${repo}`}</MenuItem>}
-        {project && <MenuItem onClick={() => void pin(item.box, "project", project, !on("project", project))}>{on("project", project) ? `Unpin ${project}` : `Pin all of ${project}`}</MenuItem>}
+        {repo && fleetPin("repo", repo, repo)}
+        {project && fleetPin("project", project, project)}
       </MenuPopup>
     </Menu>
   );

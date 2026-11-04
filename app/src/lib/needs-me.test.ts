@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { validateCard } from "./cards.ts";
-import { type BoxWork, buildCard, buildQueue, due, laterList, leftLine, type QueueInput, sessionTree, type SessionEntry, walkOrder, type WorkRecord, type WorkSession } from "./needs-me.ts";
+import { type BoxWork, buildCard, buildQueue, due, laterList, leftLine, pinHolders, type QueueInput, sessionTree, type SessionEntry, walkOrder, type WorkRecord, type WorkSession } from "./needs-me.ts";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const ago = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
@@ -41,9 +41,35 @@ test("a waiting session with no sub-state is a decision, and act is a task", () 
 });
 
 test("queued and parked sessions stay out", () => {
-  assert.deepEqual(queue([entry("a", "waiting", { queued: 1 })], [record("a", ["a"])]), []);
+  assert.deepEqual(queue([entry("a", "finished", { queued: 1 })], [record("a", ["a"])]), []);
+  assert.deepEqual(queue([entry("a", "waiting", { soft_wait: true, queued: 1 })], [record("a", ["a"])]), []);
   assert.deepEqual(queue([entry("a", "ready", { parked: true })], [record("a", ["a"])]), []);
   assert.deepEqual(queue([entry("a", "waiting")], [record("a", ["a"], { status: "parked" })]), []);
+});
+
+test("a question on its screen stays yours with a prompt queued behind it", () => {
+  const q = queue([entry("a", "waiting", { queued: 1 })], [record("a", ["a"])]);
+  assert.equal(q[0].kind, "decision");
+  assert.equal(q[0].focus?.noForm, false);
+});
+
+test("a line that ended stays history when a new session reuses its name", () => {
+  const old = record("old", ["a"], { title: "Old work", last_seen: ago(24 * 5) });
+  old.sessions[0].ended = ago(24);
+  const fresh = record("new", ["a"], { title: "New work" });
+  const q = queue([entry("a", "waiting")], [old, fresh]);
+  assert.equal(q.find((i) => i.title === "New work")?.focus?.name, "a");
+  const deck = q.find((i) => i.title === "Old work");
+  assert.equal(deck?.kind, "close-out");
+  assert.equal(deck?.members[0].session, undefined);
+  assert.equal(deck?.focus, undefined);
+});
+
+test("a pin is taken off every box that holds it", () => {
+  const work = { devl: { records: [], pins: [{ kind: "repo" as const, target: "shop" }] }, gpu: { records: [], pins: [{ kind: "repo" as const, target: "shop" }, { kind: "project" as const, target: "shop" }] }, mini: { records: [], pins: [] }, off: undefined };
+  assert.deepEqual(pinHolders(work, "repo", "shop"), ["devl", "gpu"]);
+  assert.deepEqual(pinHolders(work, "project", "shop"), ["gpu"]);
+  assert.deepEqual(pinHolders(work, "work", "shop"), []);
 });
 
 test("a running agent, a shell and a service never enter", () => {
