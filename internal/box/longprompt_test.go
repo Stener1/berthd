@@ -271,6 +271,8 @@ func TestTmuxErrorsSayWhy(t *testing.T) {
 		t.Errorf("a missing tmux lost its error")
 	}
 
+	// NewSessions speaks to the tmux server it finds: never the developer's own.
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	dir := t.TempDir()
 	s, err := NewSessions(dir)
 	if err != nil {

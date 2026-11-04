@@ -24,6 +24,18 @@ again.
   record. The box also notes when a person last touched the work, ignoring
   agents and restarts. See `berthd work`, and [Needs me](/guides/needs-me) in the app.
 - **A session shows which session started it,** as `started_by` in its JSON.
+- **A box knows who owns a thread.** Start a session with `--claim KEY`, or use
+  `berthd work claim`, and `berthd work find --key KEY` answers with the newest
+  live session that claimed it, its subscribers and what each is doing. A key
+  is any string: an issue, a pull request, a service. A title naming an id only
+  subscribes that session, because titles can be guesses.
+- **A prompt sent for a thread leaves a record.** `session send --key KEY` keeps
+  a delivery that reads held, typed, cancelled, undone, handed back or lost. A
+  prompt still held when its session ends now reads lost and fires `work.lost`,
+  rather than disappearing without a word. Undo one with `berthd work undo`.
+- **New commands for what boxes already do:** `session queue` and
+  `session unqueue` for held prompts, `session resume` for an ended structured
+  session, and `conversation resume` for one whose session has gone.
 - **Boxes are ready for the Shipyard phone app.** With phone access on, a
   box now also lets a paired phone read an agent's recent conversation
   (never tool output or files), follow which agents and runs change as it

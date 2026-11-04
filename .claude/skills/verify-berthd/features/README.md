@@ -23,6 +23,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 | Chat and board: no question card or answers but the options the agent's screen shows; the mode menu while turn check waits | [chat-ask-card.md](chat-ask-card.md) | `chat-ask-card` (a real box, `--agent`); `app/e2e/ask-card.spec.ts` on a stand-in box |
 | The board's cards for agents in chat: what they ask with its answers, their reply's last lines, the prompt they started with; never the host's frames or "stdio" | [chat-board-cards.md](chat-board-cards.md) | `chat-board-cards`; `app/e2e/dashboard-chat-cards.spec.ts` asserts it |
 | Turn check's "working": an hourglass with why in the sidebar, the tab and the rail's card, not a live turn's spinner; a handoff reads as done | [turn-check-indicator.md](turn-check-indicator.md) | `turn-check-indicator`; `app/e2e/sidebar-turn-check.spec.ts` asserts it, `TestTurnCheckLive` asks the real provider |
+| Threads on a box: claimed and mentioned keys, the owner rule, subscribers; delivery records held, typed, cancelled, undone, handed back and lost; the queue and resume verbs | [threads.md](threads.md) | `scripts/threads-live.sh`, on a real box and real Claude Code |
 | Work records and session parents on a box: `started_by` across a restart; records by issue id, range, worktree and parent; pins, Not now and `last_seen`, the same from the API and the CLI | [work-records.md](work-records.md) | `../scripts/work-records-live.sh` (a real box and Claude Code); `go test ./internal/box` |
 
 ## Proof and skip reporting

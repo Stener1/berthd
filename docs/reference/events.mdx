@@ -80,7 +80,7 @@ asked, or `work` when the box's own rules did it.
 | Event | Data |
 | --- | --- |
 | `work.created` | `id`, `status`, `sessions`, and `rule: true` when a rule made it |
-| `work.joined` | `id`, `session`, `by` (`issue`, `worktree` or `parent`): a rule put a session in a record |
+| `work.joined` | `id`, `session`, `by` (`issue`, `worktree`, `parent` or `claim`): a rule put a session in a record |
 | `work.updated` | `id`, `status`, `fields`: the names of what changed |
 | `work.closed` | `id`: its status became closed |
 | `work.grouped`, `work.accepted` | `id`, `with`, `sessions`: other records or sessions were grouped into it, by hand or by accepting a suggestion |
@@ -89,6 +89,10 @@ asked, or `work` when the box's own rules did it.
 | `work.pinned`, `work.unpinned` | `kind`, `target`; `reason: "closed"` when a record lost its pin by closing |
 | `work.seen` | `id`, `session?`, `source` (`send`, `start`, `prompt`, `answer` or `visit`): a person's touch moved `last_seen` |
 | `work.settings` | `id_pattern`: whether the box has its own pattern |
+| `work.claimed`, `work.unclaimed`, `work.subscribed`, `work.unsubscribed` | `id`, `key`, `session`: a session took a [thread](/reference/berthd#threads) key on or let it go |
+| `work.delivered` | `id`, `key`, `session`, `turn`, `state`, `source`: a prompt was sent for a thread, `state` `held` or `typed`, and again as a held one is typed |
+| `work.cancelled`, `work.undone`, `work.handed_back` | The same: a held prompt was cancelled, a delivery undone, or handed back by the session it reached |
+| `work.lost` | The same: a held prompt was lost, as its session ended or it couldn't be typed. Start the work again |
 
 ### Locations and worktrees
 

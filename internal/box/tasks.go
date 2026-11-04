@@ -275,6 +275,9 @@ type TaskRequest struct {
 	Mode   string `json:"mode,omitempty"`
 	// FromSession names the session handing this work off, if any.
 	FromSession string `json:"from_session,omitempty"`
+	// Claims are the thread keys its session takes on as it starts
+	// (workthreads.go).
+	Claims []string `json:"claims,omitempty"`
 	// Open asks the app to show the new session: "split" or "tab".
 	Open string `json:"open,omitempty"`
 	// Title names the work; without one, the prompt's first line does.
@@ -297,6 +300,10 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 	// Without tmux there is nothing to run the agent in: say so before
 	// making a worktree that would only be removed again.
 	if _, err := tmuxPath(); err != nil {
+		return err
+	}
+	claims, err := b.checkClaims(req.Claims)
+	if err != nil {
 		return err
 	}
 	r = r.WithContext(withStartedBy(r.Context(), b.callerSession(r, req.FromSession)))
@@ -364,6 +371,7 @@ func (b *Box) addTask(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("could not start the task's session, so its worktree was removed: %w", err)
 	}
 	sess = b.titleNew(ctx, sess, req.Title, req.Prompt)
+	b.claimNew(r, sess, claims)
 	b.publish(r, "task.created", map[string]any{
 		"location": req.Location, "name": wt.Name, "path": wt.Path, "branch": wt.Branch,
 		"session": sess.Name, "agent": req.Agent, "from_session": req.FromSession,

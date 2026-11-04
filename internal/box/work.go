@@ -63,6 +63,15 @@ type WorkSession struct {
 	Created   time.Time `json:"created,omitzero"`
 	Ended     time.Time `json:"ended,omitzero"`
 	LastSeen  time.Time `json:"last_seen,omitzero"`
+	// Conversation is the structured conversation it ran, kept for when the
+	// session has gone.
+	Conversation string `json:"conversation,omitempty"`
+	// Claims are the thread keys it took on (workthreads.go). Subscribed are
+	// the ones it follows, by asking or by naming them; Unsubscribed the ones
+	// it said it won't, whatever its title names.
+	Claims       []WorkClaim `json:"claims,omitempty"`
+	Subscribed   []string    `json:"subscribed,omitempty"`
+	Unsubscribed []string    `json:"unsubscribed,omitempty"`
 }
 
 // WorkRecord is one piece of work.
@@ -90,6 +99,8 @@ type WorkRecord struct {
 	RejectedWith  []string `json:"rejected_with,omitempty"`
 	// Pinned is read from the box's pins, for whoever lists records.
 	Pinned bool `json:"pinned,omitempty"`
+	// Keys is read from its sessions: each thread key, claimed or mentioned.
+	Keys []WorkKey `json:"keys,omitempty"`
 	// Manual is set once anyone has changed it: rules stop retitling it.
 	Manual  bool      `json:"manual,omitempty"`
 	Created time.Time `json:"created"`
@@ -116,6 +127,10 @@ type workState struct {
 	Records  []*WorkRecord `json:"records"`
 	Pins     []WorkPin     `json:"pins,omitempty"`
 	Settings WorkSettings  `json:"settings,omitzero"`
+	// Deliveries are prompts sent on a thread's behalf (workthreads.go). An
+	// older binary rewriting this file drops them and the claims: callers then
+	// find no owner and start new, which is what they did before there were any.
+	Deliveries []*WorkDelivery `json:"deliveries,omitempty"`
 	// Cursor is the journal Seq read up to, for last_seen, and Touch what
 	// the reader held then: saved together, so a restart goes on from there.
 	Cursor int64       `json:"cursor,omitempty"`
@@ -332,6 +347,11 @@ func (s *WorkStore) view(r *WorkRecord) WorkRecord {
 	if out.Sessions == nil {
 		out.Sessions = []WorkSession{}
 	}
+	for i := range out.Sessions {
+		m := &out.Sessions[i]
+		m.Claims, m.Subscribed, m.Unsubscribed = slices.Clone(m.Claims), slices.Clone(m.Subscribed), slices.Clone(m.Unsubscribed)
+	}
+	out.Keys = keysOf(r)
 	out.IssueIDs = slices.Clone(r.IssueIDs)
 	out.SuggestedWith = slices.Clone(r.SuggestedWith)
 	out.RejectedWith = slices.Clone(r.RejectedWith)
@@ -952,9 +972,22 @@ func (s *WorkStore) facts(sess Session) sessionFacts {
 // refresh writes what it is now onto a session's line, and says if that moved.
 func (f sessionFacts) refresh(m *WorkSession) bool {
 	changed := m.Title != f.title || m.Worktree != f.worktree || !m.Created.Equal(f.sess.Created) || (m.StartedBy == "" && f.sess.StartedBy != "")
+	// A new session under an old name didn't claim what that one did.
+	if !m.sameRun(f.sess.Created) {
+		m.Claims, m.Subscribed, m.Unsubscribed, m.Conversation = nil, nil, nil, ""
+	}
 	m.Title, m.Worktree, m.Created = f.title, f.worktree, f.sess.Created
 	if m.StartedBy == "" {
 		m.StartedBy = f.sess.StartedBy
+	}
+	if c := conversationOf(f.sess); c != "" && m.Conversation != c {
+		m.Conversation, changed = c, true
+	}
+	// Naming a key follows it. It never claims it: a title can be a guess.
+	for _, id := range f.ids {
+		if !slices.Contains(m.Unsubscribed, id) && addMissing(&m.Subscribed, []string{id}) {
+			changed = true
+		}
 	}
 	return changed
 }
@@ -963,7 +996,7 @@ func (f sessionFacts) refresh(m *WorkSession) bool {
 func (s *WorkStore) matching(ids []string, except *WorkRecord) []*WorkRecord {
 	var out []*WorkRecord
 	for _, r := range s.st.Records {
-		if r != except && r.Status != WorkClosed && slices.ContainsFunc(ids, func(id string) bool { return slices.Contains(r.IssueIDs, id) }) {
+		if r != except && r.Status != WorkClosed && slices.ContainsFunc(ids, r.names) {
 			out = append(out, r)
 		}
 	}
@@ -1082,7 +1115,7 @@ func (s *WorkStore) Reconcile(all []Session) ([]workEvent, error) {
 			}
 			sess, ok := live[m.Name]
 			switch {
-			case !ok, r.Status == WorkClosed && !m.Created.IsZero() && !sess.Created.Equal(m.Created):
+			case !ok, r.Status == WorkClosed && !m.sameRun(sess.Created):
 				// Gone; or, in a closed record, a new session under an old
 				// name: that record's line has ended, and this is new work.
 				if m.Ended.IsZero() {
