@@ -1342,12 +1342,18 @@ func (t *Turns) putBack(it inboxItem) {
 	}
 }
 
+// What ended a held turn that was never typed as a turn of its own.
+const (
+	turnCancelled    = "cancelled"
+	turnSentAsAnswer = "sent as an answer"
+)
+
 // Cancel drops a held prompt: its turn ends lost, "cancelled".
 func (t *Turns) Cancel(name, turn string) error {
 	if _, err := t.takeQueued(name, turn); err != nil {
 		return err
 	}
-	t.endQueued(name, turn, "cancelled")
+	t.endQueued(name, turn, turnCancelled)
 	return nil
 }
 

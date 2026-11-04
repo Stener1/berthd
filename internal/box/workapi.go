@@ -12,15 +12,13 @@ import (
 func (b *Box) mountWork(route func(string, func(http.ResponseWriter, *http.Request) error)) {
 	work := func(pattern string, h func(*WorkStore, http.ResponseWriter, *http.Request) error) {
 		route(pattern, func(w http.ResponseWriter, r *http.Request) error {
-			if b.Work == nil {
-				return httpError{http.StatusNotImplemented, "this box keeps no work records"}
-			}
-			if err := b.Work.ready(); err != nil {
-				return httpError{http.StatusServiceUnavailable, err.Error()}
+			if err := b.workReady(); err != nil {
+				return err
 			}
 			return h(b.Work, w, r)
 		})
 	}
+	b.mountThreads(work)
 	work("GET /v1/work", b.listWork)
 	work("POST /v1/work", b.createWork)
 	work("GET /v1/work/settings", b.getWorkSettings)
@@ -45,6 +43,17 @@ func (b *Box) mountWork(route func(string, func(http.ResponseWriter, *http.Reque
 		rec, evs, err := s.Seen(r.PathValue("id"))
 		return b.replyWork(w, r, rec, evs, err)
 	})
+}
+
+// workReady says whether the box's work records can be used.
+func (b *Box) workReady() error {
+	if b.Work == nil {
+		return httpError{http.StatusNotImplemented, "this box keeps no work records"}
+	}
+	if err := b.Work.ready(); err != nil {
+		return httpError{http.StatusServiceUnavailable, err.Error()}
+	}
+	return nil
 }
 
 // replyWork ends a change: what it owes the journal, then its answer.

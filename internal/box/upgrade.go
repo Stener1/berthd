@@ -220,8 +220,9 @@ func (b *Box) Capabilities() []string {
 		caps = append(caps, "journal")
 	}
 	if b.Work != nil {
-		// work: /v1/work, work records and pins (work.go).
-		caps = append(caps, "work")
+		// work: /v1/work, work records and pins (work.go). threads: thread
+		// keys, session claims and delivery records (workthreads.go).
+		caps = append(caps, "work", "threads")
 	}
 	if b.Sessions != nil {
 		// processes: GET /v1/processes and POST /v1/processes/{id}/stop,

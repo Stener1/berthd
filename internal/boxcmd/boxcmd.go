@@ -53,11 +53,15 @@ var usageSections = []struct {
 	{"Agent sessions", [][2]string{
 		{"%[1]s sessions%[3]s [--json]", "List sessions"},
 		{"%[1]s agents%[3]s [--json]", "Agent CLIs this box can start"},
-		{"%[1]s task new %[2]sLOC/NAME [--agent ID] [--prompt TEXT] [--title T] [--open split|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]", "A worktree with an agent (or COMMAND) running in it; run from\nan agent, it hears back when the first turn ends"},
-		{"%[1]s session new %[2]sLOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--title T] [--open split|tab] [-- COMMAND...]", "Start an agent or COMMAND (default: a shell) there"},
+		{"%[1]s task new %[2]sLOC/NAME [--agent ID] [--prompt TEXT] [--title T] [--claim K]... [--open split|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]", "A worktree with an agent (or COMMAND) running in it; run from\nan agent, it hears back when the first turn ends"},
+		{"%[1]s session new %[2]sLOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--title T] [--claim K]... [--open split|tab] [-- COMMAND...]", "Start an agent or COMMAND (default: a shell) there; --claim\nmakes it a claimant of that thread key"},
 		{"%[1]s session rename %[2]sNAME [TITLE]", "Name a session's work (no TITLE clears it; a prompt names an untitled one)"},
 		{"%[1]s session screen %[2]sNAME [--history N]", "Print what the session shows"},
-		{"%[1]s session send %[2]sNAME TEXT [--when now|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--no-notify]%[4]s", "Type a prompt into a session (or hold it until the agent is idle), and wait for its turn"},
+		{"%[1]s session send %[2]sNAME TEXT [--when now|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--no-notify] [--key K [--source S]]%[4]s", "Type a prompt into a session (or hold it until the agent is idle), and wait for its turn;\n--key keeps a delivery record of it for that thread"},
+		{"%[1]s session queue %[2]sNAME [--json]", "The prompts held for a session until its agent is idle"},
+		{"%[1]s session unqueue %[2]sNAME TURN [--json]", "Cancel a held prompt: it's never typed"},
+		{"%[1]s session resume %[2]sNAME [--json]", "Start a structured session's ended agent again, in that session"},
+		{"%[1]s conversation resume %[2]sID [--open split|tab] [--json]", "Start a structured conversation again: in its session if that's\nstill there, else in a new one, which takes on what it claimed"},
 		{"%[1]s session wait %[2]sNAME [--turn ID] [--for finished,waiting] [--timeout 30m]", "Wait for a turn, or its agent's current one, to end"},
 		{"%[1]s session turns %[2]sNAME [--limit 10] [--json]", "List a session's turns"},
 		{"%[1]s exec %[2]sLOC[/WORKTREE] [--timeout 10m] [--detach [--no-notify]] -- COMMAND...", "Run a command there and print its output (--detach: as a run)"},
@@ -82,6 +86,12 @@ var usageSections = []struct {
 		{"%[1]s work pins%[3]s [--json]", "What's pinned"},
 		{"%[1]s work pin|unpin%[3]s repo|project|work TARGET [--json]", "Pin a repo, a project or a work record until it's removed; a\nrecord that closes loses its pin"},
 		{"%[1]s work settings%[3]s [--id-pattern RE|--default] [--json]", "The regular expression that finds a tracker id in a session"},
+		{"%[1]s work find%[3]s --key K [--json]", "A thread: its record, its owner (the newest live session that\nclaimed it), its subscribers, and what each is doing"},
+		{"%[1]s work claim|unclaim|subscribe|unsubscribe%[3]s --key K [--key K] [--session NAME] [--json]", "Put a session on a thread key or take it off (default: this\nsession). Only a claim can make it the owner"},
+		{"%[1]s work deliveries%[3]s [--key K] [--session NAME] [--state held|typed|cancelled|undone|handed_back|lost] [--json]", "Prompts sent on a thread's behalf (session send --key)"},
+		{"%[1]s work delivery %[2]sID [--json]", "One delivery"},
+		{"%[1]s work undo %[2]sID [--json]", "Undo a delivery: one still held is taken out and never typed;\none already typed can't be, and retracted says which it was"},
+		{"%[1]s work hand-back %[2]sID [--why TEXT] [--json]", "Say a delivery that reached this session isn't its work"},
 	}},
 	{"Runs (durable, on the box)", [][2]string{
 		{"%[1]s runs%[3]s [--status active|done|S] [--template T] [--limit 20] [--json]", "List runs"},
@@ -202,7 +212,7 @@ var Commands = map[string]int{
 	"helpers": 1, "helper": 2,
 	"secret": 2,
 	"runs":   1, "run": 2, "flow": 2, "browser": 2, "shots": 2,
-	"artifact": 2, "work": 2,
+	"artifact": 2, "work": 2, "conversation": 2,
 	"reviews": 1, "review-button": 1, "login": 2,
 }
 
@@ -285,6 +295,10 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		return artifactCmd(ctx, c, strings.TrimPrefix(cmd, "artifact "), rest, out)
 	case "work list", "work get", "work create", "work update", "work group", "work ungroup", "work accept", "work reject", "work seen", "work pin", "work unpin", "work pins", "work settings":
 		return workCmd(ctx, c, strings.TrimPrefix(cmd, "work "), rest, out)
+	case "work find", "work claim", "work unclaim", "work subscribe", "work unsubscribe", "work deliveries", "work delivery", "work undo", "work hand-back":
+		return threadCmd(ctx, c, strings.TrimPrefix(cmd, "work "), rest, out)
+	case "session queue", "session unqueue", "session resume", "conversation resume":
+		return resumeCmd(ctx, c, cmd, rest, out)
 	case "run start", "run get", "run logs", "run cancel", "run approve", "run reject", "run templates":
 		return runCmd(ctx, c, strings.TrimPrefix(cmd, "run "), rest, out)
 	case "location scripts":
@@ -447,16 +461,21 @@ func Run(ctx context.Context, c *box.Client, args []string, out io.Writer) error
 		idem := fs.String("idem", "", "a key that makes a retried send return the turn it already made")
 		queue := fs.Bool("queue", false, "if the box cannot be reached, queue the prompt to send when it is back")
 		noNotify := fs.Bool("no-notify", false, "don't tell this agent (BERTH_SESSION) when the turn ends")
+		key := fs.String("key", "", "the thread key it's sent for: keeps a delivery record of it")
+		source := fs.String("source", "", "with --key, what kind of caller this is")
 		pos, err := parse(fs, rest)
 		if err != nil || len(pos) != 2 {
-			return usageErr("session send NAME TEXT [--when now|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--queue] [--no-notify]")
+			return usageErr("session send NAME TEXT [--when now|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--queue] [--no-notify] [--key K [--source S]]")
 		}
 		if *queue && Queue == nil {
 			return errors.New("--queue is for the laptop: berth session send BOX/NAME TEXT --queue")
 		}
+		if *queue && *key != "" {
+			return errors.New("--queue keeps no delivery record: use --key or --queue, not both")
+		}
 		enter := !*noEnter
 		// One who waits here sees the end itself.
-		res, err := reportBack(c, *noNotify || *wait).Send(ctx, pos[0], box.SendRequest{Text: pos[1], Enter: &enter, When: *when, Force: *force, IdemKey: *idem})
+		res, err := reportBack(c, *noNotify || *wait).Send(ctx, pos[0], box.SendRequest{Text: pos[1], Enter: &enter, When: *when, Force: *force, IdemKey: *idem, Key: *key, Source: *source})
 		if err != nil {
 			if !*queue {
 				return err
@@ -1048,9 +1067,10 @@ func sessionNew(ctx context.Context, c *box.Client, args []string, out io.Writer
 	fs.StringVar(&req.Prompt, "prompt", "", "the agent's first prompt")
 	fs.StringVar(&req.Open, "open", "", "show it in the Shipyard app: split (beside the current terminal) or tab")
 	fs.StringVar(&req.Title, "title", "", "name the work (default: the prompt's first line)")
+	fs.Func("claim", "a thread key it takes on as it starts; give it again for more", appendTo(&req.Claims))
 	pos, err := parse(fs, args)
 	if err != nil || len(pos) != 1 {
-		return usageErr("session new LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--title T] [--open split|tab] [-- COMMAND...]")
+		return usageErr("session new LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--title T] [--claim K]... [--open split|tab] [-- COMMAND...]")
 	}
 	req.Location, req.Command = pos[0], commandLine(command)
 	// Run from a session, the new one records it as what started it.
@@ -1269,9 +1289,10 @@ func taskNew(ctx context.Context, c *box.Client, args []string, out io.Writer) e
 	fs.StringVar(&req.Branch, "branch", "", "branch to create (default: the worktree name)")
 	fs.StringVar(&req.Base, "base", "", "ref to branch from")
 	fs.StringVar(&req.Title, "title", "", "name the work (default: the prompt's first line)")
+	fs.Func("claim", "a thread key its session takes on as it starts; give it again for more", appendTo(&req.Claims))
 	noNotify := fs.Bool("no-notify", false, "don't tell this agent (BERTH_SESSION) when the new agent's first turn ends")
 	pos, err := parse(fs, args)
-	usage := "task new LOC/NAME [--agent ID] [--prompt TEXT] [--title T] [--open split|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]"
+	usage := "task new LOC/NAME [--agent ID] [--prompt TEXT] [--title T] [--claim K]... [--open split|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]"
 	if err != nil || len(pos) != 1 {
 		return usageErr(usage)
 	}

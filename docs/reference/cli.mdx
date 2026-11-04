@@ -147,10 +147,12 @@ Who may be reviewed is read from GitHub with this laptop's `gh`, as you. See
 | --- | --- |
 | `berth sessions BOX [--json]` | List sessions |
 | `berth agents BOX [--json]` | Agent CLIs this box can start |
-| `berth task new BOX/LOC/NAME [--agent ID] [--prompt TEXT] [--open split\|tab] [--branch B] [--base REF] [-- COMMAND...]` | A worktree with an agent (or a command) running in it |
-| `berth session new BOX/LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--open split\|tab] [-- COMMAND...]` | Start an agent or a command (default: a shell) there |
+| `berth task new BOX/LOC/NAME [--agent ID] [--prompt TEXT] [--claim K]... [--open split\|tab] [--branch B] [--base REF] [-- COMMAND...]` | A worktree with an agent (or a command) running in it |
+| `berth session new BOX/LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--claim K]... [--open split\|tab] [-- COMMAND...]` | Start an agent or a command (default: a shell) there |
 | `berth session screen BOX/NAME [--history N]` | Print what the session shows |
-| `berth session send BOX/NAME TEXT [--when now\|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--queue]` | Type a prompt into a session (or hold it until the agent is idle), and wait for its turn |
+| `berth session send BOX/NAME TEXT [--when now\|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--queue] [--key K [--source S]]` | Type a prompt into a session (or hold it until the agent is idle), and wait for its turn |
+| `berth session queue BOX/NAME [--json]`, `berth session unqueue BOX/NAME TURN [--json]` | The prompts held for a session, and cancelling one |
+| `berth session resume BOX/NAME [--json]`, `berth conversation resume BOX/ID [--open split\|tab] [--json]` | Start a structured session or conversation again. See [threads](/reference/berthd#threads) |
 | `berth session wait BOX/NAME [--turn ID] [--for finished,waiting] [--timeout 30m]` | Wait for a turn (from `session send`), or its agent's current one, to end |
 | `berth session turns BOX/NAME [--limit 10] [--json]` | List a session's turns: who prompted, how it ended, how long it took |
 | `berth exec BOX/LOC[/WORKTREE] [--timeout 10m] [--detach] -- COMMAND...` | Run a command there and print its output; `--detach` runs it as a run and prints its ID |

@@ -354,6 +354,7 @@ func (b *Box) resumeConversation(w http.ResponseWriter, r *http.Request) error {
 		b.nameAfter(r.Context(), sess.Name, conv.Title)
 		sess.Title = conv.Title
 	}
+	b.carryClaims(r, filepath.Base(dir), sess)
 	b.announceOpen(r, sess, req.Open)
 	writeJSON(w, sess)
 	return nil

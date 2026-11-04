@@ -709,6 +709,8 @@ type SessionRequest struct {
 	// FromSession is the session starting this one, from its BERTH_SESSION
 	// (callerSession): the new session's started_by.
 	FromSession string `json:"from_session,omitempty"`
+	// Claims are the thread keys it takes on as it starts (workthreads.go).
+	Claims []string `json:"claims,omitempty"`
 }
 
 func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
@@ -723,6 +725,11 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 	if req.Open != "" && req.Open != "split" && req.Open != "tab" {
 		return badRequest("open must be split or tab")
 	}
+	claims, err := b.checkClaims(req.Claims)
+	if err != nil {
+		return err
+	}
+	req.Claims = claims
 	if req.Home {
 		return b.addHomeSession(w, r, req)
 	}
@@ -759,6 +766,7 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 				return err
 			}
 			sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+			b.claimNew(r, sess, claims)
 			b.announceOpen(r, sess, req.Open)
 			writeJSON(w, sess)
 			return nil
@@ -780,6 +788,7 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	sess = b.titleNew(r.Context(), sess, req.Title, req.Prompt)
+	b.claimNew(r, sess, claims)
 	b.announceOpen(r, sess, req.Open)
 	writeJSON(w, sess)
 	return nil
@@ -808,6 +817,7 @@ func (b *Box) addHomeSession(w http.ResponseWriter, r *http.Request, req Session
 		return err
 	}
 	sess = b.titleNew(r.Context(), sess, req.Title, "")
+	b.claimNew(r, sess, req.Claims)
 	b.announceOpen(r, sess, req.Open)
 	writeJSON(w, sess)
 	return nil

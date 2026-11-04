@@ -419,6 +419,7 @@ func (b *Box) RunWork(ctx context.Context) {
 			continue
 		}
 		keep(tracker.due(now))
+		b.syncDeliveries()
 		// Soon after what's known to change a session, and every so often for
 		// what isn't announced: a session that just ended by itself.
 		if (stale && now.Sub(reconciled) >= 2*time.Second) || now.Sub(reconciled) >= 10*time.Second {
