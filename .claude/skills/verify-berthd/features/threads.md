@@ -30,7 +30,7 @@ export VERIFY_BOX_DIR=/tmp/vb-threads
 .claude/skills/verify-berthd/scripts/dev-box.sh down
 ```
 
-It runs once per dev box, because its sessions have fixed names and it kills `ask` at the end. It takes 5 to 15 minutes, and spends several short Claude prompts and two long `sleep` tool calls that keep the agent busy. Unit tests: `go test ./internal/box -run 'Title|Joining|FollowDiss|Grouping|TheOwner|AClaim|Subscrib|Unclaim|Carry|OlderFile|AFileThis|ClaimsAndDel|ADelivery|UndoAnd|DeliveriesFilter|ThreadKeys'`.
+It runs once per dev box, because its sessions have fixed names and it kills `ask` at the end. It took about a minute at load ~30, and spends several short Claude prompts. Its `sleep` prompts only keep the agent's turn open: the last run's turn lasted seconds, not the length of the sleep, which is enough to hold a prompt. Unit tests: `go test ./internal/box -run 'Title|Joining|FollowDiss|Grouping|TheOwner|AClaim|Subscrib|Unclaim|Carry|OlderFile|AFileThis|ClaimsAndDel|ADelivery|UndoAnd|DeliveriesFilter|ThreadKeys'`.
 
 ## Known limits
 
