@@ -143,7 +143,7 @@ export function AgentsSection() {
         </section>
       )}
 
-      <OffBoard />
+      <Dashboard />
 
       {boxes.length > online.length && <p className="text-muted-foreground text-meta">Offline boxes are listed once they reconnect.</p>}
     </SettingsPage>
@@ -204,12 +204,14 @@ function SkillsReminder({ box }: { box: string }) {
   );
 }
 
-// OffBoard is the projects whose agents stay off the Agent Dashboard and
-// its counts: work followed somewhere else, such as a plugin's own board.
-// The choice is the project's, on every box, and kept on the laptop agent
-// with its name and section.
-function OffBoard() {
+// Dashboard is how the Agent Dashboard draws its agents, and the projects
+// whose agents stay off it and its counts: work followed somewhere else,
+// such as a plugin's own board. Keeping a project off is the project's
+// choice, on every box, and kept on the laptop agent with its name and
+// section; the cards are this laptop's.
+function Dashboard() {
   const { projects } = useProjects();
+  const cards = usePrefs((p) => p.dashboardCards);
   const [error, setError] = useState<string>();
   const off = projects.filter((p) => p.dashboardHidden);
   const on = projects.filter((p) => !p.dashboardHidden);
@@ -217,9 +219,14 @@ function OffBoard() {
     setError(undefined);
     projectActions.setDashboardHidden(p, hidden).catch((err) => setError(plainError(err)));
   };
-  if (!projects.length) return null;
   return (
-    <SettingsGroup title="Agent Dashboard" description="Projects kept off the dashboard and its counts. Their agents still show everywhere else.">
+    <SettingsGroup title="Agent Dashboard" description="How its cards look, and projects kept off the dashboard and its counts. Their agents still show everywhere else.">
+      <SettingsRow
+        label="Live status cards"
+        description="Each card shows what its agent is doing now and for how long, its task progress and the steps it took, with Approve and Deny in place when it asks. Off: the classic card with the last lines of its screen."
+      >
+        <Switch checked={cards === "status"} onCheckedChange={(on) => setPrefs({ dashboardCards: on ? "status" : "classic" })} aria-label="Live status cards" />
+      </SettingsRow>
       {off.map((p) => (
         <SettingsRow key={p.id} label={p.name} description={p.members.length > 1 ? `Kept off, on ${p.members.map((m) => m.box.name).join(", ")}` : "Kept off"}>
           <Button size="sm" variant="outline" onClick={() => set(p, false)}>
@@ -227,19 +234,21 @@ function OffBoard() {
           </Button>
         </SettingsRow>
       ))}
-      <SettingsRow label="Keep a project off" description={error ?? (off.length ? undefined : "Every project shows on the dashboard.")}>
-        <SimpleSelect
-          size="sm"
-          className="w-48"
-          placeholder="Choose a project…"
-          value=""
-          options={on.map((p) => ({ value: p.id, label: p.name }))}
-          onChange={(id) => {
-            const p = on.find((x) => x.id === id);
-            if (p) set(p, true);
-          }}
-        />
-      </SettingsRow>
+      {projects.length > 0 && (
+        <SettingsRow label="Keep a project off" description={error ?? (off.length ? undefined : "Every project shows on the dashboard.")}>
+          <SimpleSelect
+            size="sm"
+            className="w-48"
+            placeholder="Choose a project…"
+            value=""
+            options={on.map((p) => ({ value: p.id, label: p.name }))}
+            onChange={(id) => {
+              const p = on.find((x) => x.id === id);
+              if (p) set(p, true);
+            }}
+          />
+        </SettingsRow>
+      )}
     </SettingsGroup>
   );
 }
