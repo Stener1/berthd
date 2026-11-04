@@ -120,22 +120,22 @@ export function NeedsCard({ item, onNext, onBack }: { item: QueueItem; onNext():
   const reading = !!focus?.session && item.kind !== "group" && !items;
   const facts: CardFacts = form ? { form: { tool: form.tool ?? "", questions: form.questions } } : { said: items && lastSaid(items), asks: asksFor(focus) };
   const shown = picked && focus?.need ? { ...item, focus, why: whyOf(focus) } : item;
-  const rest = { item, shown, focus, reading, onPick: setPicked, onNext, onBack };
   // Keyed by the wait: the answers one permission offers never carry over to the
-  // next, even for a moment, because a key pressed then would answer that one.
-  if (waiting && focus && items && !form) return <AtPermission key={`${focus.name}|${focus.session?.state_since}`} focus={focus} facts={facts} rest={rest} />;
-  return <Body {...rest} facts={facts} />;
+  // next, even for a moment, because a key pressed then would answer that one. The
+  // read arriving doesn't change the key, so it can't close a menu opened on the card.
+  return <WithChoices key={waiting ? `${focus?.name}|${focus?.session?.state_since}` : (focus?.name ?? "")} asking={!!waiting && !!items && !form} facts={facts} item={item} shown={shown} focus={focus} reading={reading} onPick={setPicked} onNext={onNext} onBack={onBack} />;
 }
 
-type BodyProps = { item: QueueItem; shown: QueueItem; focus?: Member; reading: boolean; onPick(name: string): void; onNext(): void; onBack(): void };
+type BodyProps = { item: QueueItem; shown: QueueItem; focus?: Member; reading: boolean; facts: CardFacts; onPick(name: string): void; onNext(): void; onBack(): void };
 
-function AtPermission({ focus, facts, rest }: { focus: Member; facts: CardFacts; rest: BodyProps }) {
-  const asks = useAsk(focus.box, focus.name, true, focus.session?.state_since, focus.session?.ask);
-  const choices = asks?.choices.length ? (permissionChoices(asks.choices) ?? asks.choices) : undefined;
+function WithChoices({ asking, facts, ...rest }: BodyProps & { asking: boolean }) {
+  const { focus } = rest;
+  const asks = useAsk(focus?.box ?? "", focus?.name ?? "", asking, focus?.session?.state_since, focus?.session?.ask);
+  const choices = asking && asks?.choices.length ? (permissionChoices(asks.choices) ?? asks.choices) : undefined;
   return <Body {...rest} facts={{ ...facts, choices }} />;
 }
 
-function Body({ item, shown, focus, reading, onPick, onNext, onBack, facts }: BodyProps & { facts: CardFacts }) {
+function Body({ item, shown, focus, reading, onPick, onNext, onBack, facts }: BodyProps) {
   const card = validateCard(buildCard(shown, facts));
   if (!card.ok) return <Broken errors={card.errors} item={item} onNext={onNext} />;
   return <Drawn key={focus?.name ?? ""} card={card.card} item={item} focus={focus} reading={reading} onPick={onPick} onNext={onNext} onBack={onBack} />;
