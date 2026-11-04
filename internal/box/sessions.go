@@ -144,6 +144,13 @@ type Sessions struct {
 	// program starts: berthd installs berth's hooks and skills in an agent
 	// account folder it picks (Box.PrepareAccounts).
 	Prepare func(env []string)
+
+	// clients are the tmux clients Attach started and nobody has waited
+	// for yet; Detach ends them all.
+	clientsMu sync.Mutex
+	clients   map[*exec.Cmd]context.CancelFunc
+	detached  bool
+	attached  sync.WaitGroup
 }
 
 // EnvVar is the value key had in session sess's environment when it
@@ -532,8 +539,9 @@ func (s *Sessions) Kill(ctx context.Context, name string) error {
 }
 
 // Attach runs a tmux client for the session under a new pseudo-terminal. The
-// caller relays the returned master to the laptop; closing it detaches.
-func (s *Sessions) Attach(ctx context.Context, name string, cols, rows int) (*os.File, *exec.Cmd, error) {
+// caller relays the returned master to the laptop; closing it detaches. The
+// caller must call wait once the client is done with, as it would Wait.
+func (s *Sessions) Attach(ctx context.Context, name string, cols, rows int) (master *os.File, wait func() error, err error) {
 	if _, err := s.Get(ctx, name); err != nil {
 		return nil, nil, err
 	}
@@ -541,13 +549,66 @@ func (s *Sessions) Attach(ctx context.Context, name string, cols, rows int) (*os
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, bin, "-u", "-L", tmuxSocket, "-f", s.Config, "attach-session", "-t", "="+name)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
-	master, err := terminal.Start(cmd, cols, rows)
+	s.clientsMu.Lock()
+	if s.detached {
+		s.clientsMu.Unlock()
+		cancel()
+		return nil, nil, errors.New("the box is restarting: attach again in a moment")
+	}
+	// Counted before it starts, so Detach never misses one that is
+	// starting.
+	s.attached.Add(1)
+	s.clientsMu.Unlock()
+	master, err = terminal.Start(cmd, cols, rows)
 	if err != nil {
+		cancel()
+		s.attached.Done()
 		return nil, nil, err
 	}
-	return master, cmd, nil
+	s.clientsMu.Lock()
+	if s.clients == nil {
+		s.clients = map[*exec.Cmd]context.CancelFunc{}
+	}
+	s.clients[cmd] = cancel
+	if s.detached {
+		cancel()
+	}
+	s.clientsMu.Unlock()
+	return master, func() error {
+		err := cmd.Wait()
+		s.clientsMu.Lock()
+		delete(s.clients, cmd)
+		s.clientsMu.Unlock()
+		cancel()
+		s.attached.Done()
+		return err
+	}, nil
+}
+
+// Detach ends every attached tmux client, and refuses new ones, before
+// berthd execs a new build of itself: a client still running then would be
+// a child the new build never waits for, a zombie once it ends. It waits
+// up to grace for their callers to have waited for them. The sessions keep
+// running.
+func (s *Sessions) Detach(grace time.Duration) {
+	s.clientsMu.Lock()
+	s.detached = true
+	for _, cancel := range s.clients {
+		cancel()
+	}
+	s.clientsMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		s.attached.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(grace):
+	}
 }
 
 // Screen returns what the session shows, plus up to history earlier lines,

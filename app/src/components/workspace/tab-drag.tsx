@@ -289,7 +289,7 @@ export function DragGhost() {
   if (!s.source || s.target?.kind === "pane") return null;
   return createPortal(
     <div
-      className={cn("pointer-events-none fixed z-[1000] flex h-7 max-w-60 items-center gap-1.5 rounded-md border bg-popover px-2.5 text-popover-foreground text-meta shadow-lg/10", !s.target && "opacity-75")}
+      className={cn("pointer-events-none fixed z-drag flex h-7 max-w-60 items-center gap-1.5 rounded-md border bg-popover px-2.5 text-popover-foreground text-meta shadow-lg/10", !s.target && "opacity-75")}
       // Near the window's right edge it hangs to the pointer's left instead.
       style={s.x > window.innerWidth - 260 ? { right: window.innerWidth - s.x + 12, top: s.y + 14 } : { left: s.x + 12, top: s.y + 14 }}
     >

@@ -4,7 +4,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { askIn, choicesIn, questionFormIn, screenAt } from "./screen.ts";
+import { askIn, choicesIn, meaningfulTail, questionFormIn, screenAt } from "./screen.ts";
+
+test("meaningfulTail keeps one empty line between paragraphs when asked", () => {
+  const screen = "  one\n  wrapped\n\n\n  two\n────\n❯ \n";
+  assert.deepEqual(meaningfulTail(screen, 10), ["one", "wrapped", "two"]);
+  assert.deepEqual(meaningfulTail(screen, 10, { blanks: true }), ["one", "wrapped", "", "two"]);
+});
 
 // The box's own screens (internal/box/testdata/screens), which its tests
 // read too.
