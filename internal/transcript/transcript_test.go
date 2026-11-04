@@ -495,3 +495,35 @@ func TestAssignClaudeLooksInEachSessionsAccount(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// A prompt and an edit carry when they were written, as a call does, so a
+// turn and its steps can be timed (the dashboard's cards).
+func TestPromptsAndEditsCarryTheirTimes(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	prompt := user("Fix it")
+	prompt["timestamp"] = "2026-10-04T12:00:00Z"
+	edit := assistant(tool("e1", "Edit", m{"file_path": "/w/shop/a.ts", "old_string": "a", "new_string": "b"}))
+	edit["timestamp"] = "2026-10-04T12:00:07Z"
+	write(t, p, prompt, edit)
+	res, err := NewReader().Read("claude", p, "/w/shop", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(s int) int64 { return time.Date(2026, 10, 4, 12, 0, s, 0, time.UTC).UnixMilli() }
+	var u, e *Item
+	for i := range res.Items {
+		switch res.Items[i].Kind {
+		case "user":
+			u = &res.Items[i]
+		case "edit":
+			e = &res.Items[i]
+		}
+	}
+	if u == nil || u.At != at(0) {
+		t.Fatalf("prompt = %+v, want at %d", u, at(0))
+	}
+	if e == nil || e.At != at(7) {
+		t.Fatalf("edit = %+v, want at %d", e, at(7))
+	}
+}
