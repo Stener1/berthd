@@ -29,6 +29,7 @@ import {
   SettingsIcon,
   SlidersHorizontalIcon,
   SquareTerminalIcon,
+  HandIcon,
   PackageIcon,
   PackagePlusIcon,
   UserRoundIcon,
@@ -241,6 +242,7 @@ export function CommandPalette() {
         if (!k || (k.labs && !usePrefs.getState().labs)) return [];
         return [{ value: `shortcut ${id} ${k.label} ${describe(k)}`, label: k.label, icon: slot(<KeyboardIcon />), shortcut: keysOf(k, keyLabels), run: go(() => void runShortcut(id, "menu")) }];
       }),
+      { value: "needs me queue questions waiting", label: "Needs me", icon: slot(<HandIcon />), run: go(() => st.setView({ kind: "needs-me" })) },
       { value: "worktrees", label: "Worktrees", icon: slot(<GitBranchIcon />), run: go(() => st.setView({ kind: "worktrees" })) },
       { value: "automations", label: "Automations", icon: slot(<WorkflowIcon />), run: go(() => st.setView({ kind: "automations" })) },
       { value: "kits", label: "Kits", icon: slot(<PackageIcon />), run: go(() => st.setView({ kind: "kits" })) },
