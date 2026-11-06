@@ -404,6 +404,16 @@ export const scenes: Scene[] = [
     },
   },
   {
+    // Needs me (views/needs-me): a card with a form, the list beside it and
+    // what's put off.
+    id: "needs-me",
+    async run(app, theme) {
+      await app.open({ theme, params: { scene: "needs-me", still: "1" } });
+      await app.page.getByTestId("nav-needs-me").click();
+      await expect(app.page.getByTestId("question-form")).toBeVisible();
+    },
+  },
+  {
     // The sidebar's notice that boxes' skills aren't installed or are out
     // of date (components/sidebar/skills-notice.tsx), unfolded, with an
     // install a hook on the box refused.
