@@ -13,6 +13,8 @@ With **Settings → Agents → Agent Dashboard → Live status cards** on (`pref
 - `approval`: instead of the rail's last row, Go / No-go's block (`card-now`, `data-status=waiting`): "Claude Code wants to run a command" (`askOf` in `lib/agent-run.ts`) and the exact command or path in a mono block (up to 3 lines), with **Deny** `N` and **Approve** `Y` in the footer; Y and N answer while the card has focus.
 - `controls`: working: **Pause** (Esc through `interrupt`, on boxes with `controls`) and **Stop** (asks first). Needs you: **Reply…** and **Stop**, plus the agent's numbered options as chips for a question that isn't a plain approval; a form of questions (AskUserQuestion) gets **Answer ↗** instead, which opens the agent where the form is. An approval swaps them for **Deny** `N` and **Approve** `Y` (the app's `Button` and `Kbd`), matched from its options by `permissionChoices`. The footer keeps its height. Ready: **Prompt…** and **Stop**. Done: only **Open run ↗**, flush right.
 
+- `plugins`: `AgentStatusCard` in `@berth/plugin/ui` (`app/src/plugins/ui.tsx`, declared in `packages/plugin-sdk/src/ui.ts`, exported by name in `app/public/shims/berth-plugin-ui.js`) is this card on a plugin's own board, with the plugin's `title`, `mark`, `children` (lines under the meta), `actions` (buttons after the card's) and `onOpen`, and `highlighted`. It finds the session by box and name, draws nothing for one the box doesn't list, and loads the card's code on first use. It shows the live card whatever the Settings switch says: the plugin chose it.
+
 ## How to get to it (user POV)
 
 - Turn the switch on in Settings › Agents, then ⌘J opens the Agent Dashboard. In the mock: `Tune the judge prompt` (working, 6 tasks), `Fix checkout webhook retries` (an approval), `Plan the checkout release` (questions), `Export orders as CSV from the admin` (done, timed).
@@ -22,7 +24,12 @@ With **Settings → Agents → Agent Dashboard → Live status cards** on (`pref
 - `node .claude/skills/verify-berthd/scripts/drive.mjs dashboard-status-cards --port $PORT` turns the switch on through Settings, then checks each state above, that the approval's footer is as tall as a working card's, that Approve answers (toast "Approved"), and that Open run opens the agent.
 - `app/e2e/dashboard-cards.spec.ts` asserts the same.
 
+- `node .claude/skills/verify-berthd/scripts/drive.mjs plugin-status-card --port $PORT` loads a test plugin whose Board draws one with every extra, plus one for a session that doesn't exist, and checks both, the plugin's button and its Open. `app/e2e/plugin-status-card.spec.ts` asserts the same.
+
 ## Gotchas
+
+- A new export of `@berth/plugin/ui` must also be listed in `app/public/shims/berth-plugin-ui.js`, or a plugin importing it fails to load ("does not provide an export named …").
+- A plugin's screen is under the sidebar's More; the driver needs `params = { sidebar: "list" }` to see it, and `menuitem` names match by substring ("Board" is in "Agent Dashboard"), so match exactly.
 
 - The mock's turns are `seedTranscript` (`lib/mock-conversation.ts`); the card seeds the same conversation its chat would, so opening the chat from the card shows the same steps.
 - The judge agent's 6 tasks are in `mockSignals` (`lib/chat-controls.ts`).
