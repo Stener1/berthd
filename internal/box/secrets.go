@@ -670,7 +670,7 @@ func (b *Box) createAgentSessionWith(ctx context.Context, name, location, dir, c
 				env = append(env, k+"="+own[k])
 			}
 		}
-		return b.Sessions.create(ctx, name, location, dir, command, agent, append(env, extraEnv...), wrap, labels)
+		return b.Sessions.create(ctx, name, location, dir, command, agent, append(env, extraEnv...), wrap, withStartedByLabel(ctx, labels))
 	})
 }
 
