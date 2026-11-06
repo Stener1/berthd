@@ -1,4 +1,4 @@
-import { SearchIcon } from "lucide-react";
+import { ListFilterIcon, SearchIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Scene } from "@/components/art/scenes";
@@ -8,9 +8,12 @@ import { SimpleSelect } from "@/components/simple-select";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Menu, MenuCheckboxItem, MenuPopup, MenuTrigger } from "@/components/ui/menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tip } from "@/components/tip";
 import { queueRemoval } from "@/lib/remove-worktree";
 import { load, save } from "@/lib/storage";
+import { cn } from "@/lib/utils";
 import { ViewHeader } from "@/views/view-header";
 import { BulkBar } from "@/views/worktrees/bulk-bar";
 import { ArchiveDialog } from "@/views/worktrees/archive-dialog";
@@ -22,6 +25,12 @@ import { BoxError } from "@/components/upgrade-box";
 
 type Flag = "behind" | "changes" | "paused";
 type Sort = "recent" | "behind" | "changes" | "name";
+
+const FLAGS: { value: Flag; label: string }[] = [
+  { value: "behind", label: "Behind base" },
+  { value: "changes", label: "Has changes" },
+  { value: "paused", label: "Paused" },
+];
 
 const SORTS: { value: Sort; label: string }[] = [
   { value: "recent", label: "Last commit" },
@@ -176,40 +185,43 @@ export function WorktreesView() {
         description={loaded ? [`${rows.length} on ${boxes.length} box${boxes.length === 1 ? "" : "es"}`, behind && `${behind} behind their base`, paused && `${paused} paused`].filter(Boolean).join(" · ") : undefined}
       />
 
-      {/* One row of filters, search first; it stays one row down to 1100px. */}
-      <div className="@container/toolbar flex shrink-0 items-center gap-2 border-b px-page py-2">
-        <div className="relative w-56 min-w-36 shrink">
+      {/* One row of filters, search first. Below 60rem the show-only chips
+          fold into one menu, and the fields grow from their least width, so
+          a row too narrow even then wraps instead of running off the edge. */}
+      <div className="@container/toolbar flex shrink-0 flex-wrap items-center gap-2 border-b px-page py-2">
+        <div className="relative w-20 max-w-56 grow-4">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input size="sm" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="[&_input]:pl-8" aria-label="Search worktrees" />
         </div>
         <BoxFilter boxes={boxes} hidden={hiddenBoxes} onChange={hideBoxes} />
-        <div className="w-40 min-w-28 shrink">
+        <div className="w-28 max-w-40 grow">
           <SimpleSelect aria-label="Project" size="sm" className="min-w-0" value={project} onChange={setProject} options={[{ value: "", label: "All projects" }, ...projects.map((p) => ({ value: p, label: p }))]} />
         </div>
-        <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Show only">
-          <FilterChip pressed={flags.includes("behind")} onPressedChange={() => flip("behind")}>
-            {/* One flex item, or the chip's gap doubles the space before "base". */}
-            <span>
-              Behind<span className="@max-[56rem]/toolbar:hidden"> base</span>
-            </span>
-          </FilterChip>
-          <FilterChip pressed={flags.includes("changes")} onPressedChange={() => flip("changes")}>
-            <span className="@max-[56rem]/toolbar:hidden">Has changes</span>
-            <span className="@min-[56rem]/toolbar:hidden">Changed</span>
-          </FilterChip>
-          <FilterChip pressed={flags.includes("paused")} onPressedChange={() => flip("paused")}>
-            Paused
-          </FilterChip>
+        <div className="flex shrink-0 items-center gap-1 @max-[60rem]/toolbar:hidden" role="group" aria-label="Show only">
+          {FLAGS.map((f) => (
+            <FilterChip key={f.value} pressed={flags.includes(f.value)} onPressedChange={() => flip(f.value)}>
+              {f.label}
+            </FilterChip>
+          ))}
         </div>
+        <ShowOnly flags={flags} onFlip={flip} className="@min-[60rem]/toolbar:hidden" />
         {filtered && (
-          <Button size="xs" variant="ghost" className="shrink-0" onClick={clearFilters}>
-            Clear filters
-          </Button>
+          <>
+            <Button size="xs" variant="ghost" className="shrink-0 @max-[60rem]/toolbar:hidden" onClick={clearFilters}>
+              Clear filters
+            </Button>
+            <Tip label="Clear filters">
+              <Button size="icon-xs" variant="ghost" aria-label="Clear filters" className="text-muted-foreground hover:text-foreground @min-[60rem]/toolbar:hidden" onClick={clearFilters}>
+                <XIcon />
+              </Button>
+            </Tip>
+          </>
         )}
-        <div className="ml-auto w-44 min-w-32 shrink">
+        <div className="ml-auto w-32 max-w-44 grow">
           <SimpleSelect
             size="sm"
             className="min-w-0"
+            aria-label="Sort by"
             value={sort}
             onChange={(v) => {
               setSort(v as Sort);
@@ -313,5 +325,34 @@ export function WorktreesView() {
         }}
       />
     </div>
+  );
+}
+
+// ShowOnly is the show-only chips folded into one menu, for a toolbar too
+// narrow to hold them: a chip itself, with how many are on.
+function ShowOnly({ flags, onFlip, className }: { flags: Flag[]; onFlip(f: Flag): void; className?: string }) {
+  const on = flags.length > 0;
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label={on ? `Show only: ${flags.length} on` : "Show only"}
+        className={cn(
+          "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent/60 data-popup-open:text-foreground [&_svg]:size-3 [&_svg]:shrink-0",
+          on && "border-foreground/25 bg-accent text-foreground",
+          className,
+        )}
+      >
+        <ListFilterIcon />
+        Show
+        {on && <span className="tabular-nums">{flags.length}</span>}
+      </MenuTrigger>
+      <MenuPopup align="start" className="min-w-40">
+        {FLAGS.map((f) => (
+          <MenuCheckboxItem key={f.value} checked={flags.includes(f.value)} onCheckedChange={() => onFlip(f.value)} closeOnClick={false}>
+            {f.label}
+          </MenuCheckboxItem>
+        ))}
+      </MenuPopup>
+    </Menu>
   );
 }
