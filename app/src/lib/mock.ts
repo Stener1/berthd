@@ -100,6 +100,12 @@ const mockBuilds: Record<string, string> = { devl: SHIPPED_BUILD, gpu: "304337b9
 
 // ?mock=1&fresh=1 is a new account: no boxes yet, so onboarding shows.
 const fresh = new URLSearchParams(location.search).has("fresh");
+// ?mock=1&slowremove=MS: a box takes that long to remove a worktree with no
+// archive script, as one with a big node_modules does, and answers once it
+// is gone.
+const slowRemove = Number(new URLSearchParams(location.search).get("slowremove")) || 0;
+// ?mock=1&slowstop=MS: a box takes that long to answer a session's stop.
+const slowStop = Number(new URLSearchParams(location.search).get("slowstop")) || undefined;
 if (fresh) {
   status.boxes = [];
   status.forwards = [];
@@ -370,7 +376,7 @@ if (!fresh && !__BERTH_DEMO__ && !new URLSearchParams(location.search).has("stil
   emit({ type: s.agent_state === "waiting" ? "agent.waiting" : "agent.started", box: "devl", origin: s.agent, data: { path: s.dir } });
 }, 25_000);
 
-const delay = <T,>(v: T) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), 120));
+const delay = <T,>(v: T, ms = 120) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
 // mockOrchestration answers send, wait and exec: a prompted agent works for
 // a moment and finishes, and a worktree's check fails once, then passes, so
@@ -885,6 +891,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
       }, 1500);
       return delay({ removing: wt, archive: l.scripts.archive });
     }
+    if (slowRemove) return delay({ removed: wt }, slowRemove).finally(gone);
     setTimeout(gone, 50);
     return delay({ removed: wt });
   }
@@ -939,7 +946,7 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
     const name = decodeURIComponent(path.slice("sessions/".length));
     sessions[box] = sessions[box].filter((s) => s.name !== name);
     setTimeout(() => emit({ type: "session.stopped", box, data: { name } }), 50);
-    return delay({ removed: name });
+    return delay({ removed: name }, slowStop);
   }
   if (key === "POST locations") {
     const r = body as { name: string; path: string };
