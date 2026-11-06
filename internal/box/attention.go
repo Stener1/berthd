@@ -58,7 +58,11 @@ type AttentionItem struct {
 	Session string `json:"session,omitempty"`
 	// By is the origin of the last change ("app", "phone", an agent's tool,
 	// "berth" for the box itself).
-	By      string    `json:"by,omitempty"`
+	By string `json:"by,omitempty"`
+	// Telling is set from when a person settles a session's own ask until
+	// the box holds its answer for the agent (tellAskers): who settled it,
+	// as the box's gates name them.
+	Telling string    `json:"telling,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 	Settled time.Time `json:"settled,omitzero"`
@@ -330,6 +334,13 @@ func (s *AttentionStore) Post(p AttentionPost, by string) (AttentionItem, error)
 // Update changes the item at key, or makes a mark there when there is
 // none.
 func (s *AttentionStore) Update(key string, u AttentionUpdate, by string) (AttentionItem, error) {
+	return s.update(key, u, by, by)
+}
+
+// update is Update, where from is who made the change as the box's gates
+// see them (gateOrigin): settling a session's own ask notes it in Telling,
+// for its agent to be told.
+func (s *AttentionStore) update(key string, u AttentionUpdate, by, from string) (AttentionItem, error) {
 	if err := checkAttentionKey(key); err != nil {
 		return AttentionItem{}, err
 	}
@@ -399,12 +410,57 @@ func (s *AttentionStore) Update(key string, u AttentionUpdate, by string) (Atten
 	if u.SnoozedUntil != nil {
 		next.SnoozedUntil = until
 	}
+	switch {
+	case status == AttentionOpen:
+		next.Telling = ""
+	case was != nil && was.Status == AttentionOpen && next.isSessionAsk():
+		next.Telling = from
+	}
 	next.Revision++
 	next.By, next.Updated = by, now
 	if err := s.commit(&next, was); err != nil {
 		return AttentionItem{}, err
 	}
 	return cloneAttention(next), nil
+}
+
+// telling is the settled asks whose agents are still to be told.
+func (s *AttentionStore) telling() []AttentionItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.load() != nil {
+		return nil
+	}
+	var out []AttentionItem
+	for _, it := range s.items {
+		if it.Telling != "" {
+			out = append(out, cloneAttention(*it))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Settled.Before(out[j].Settled) })
+	return out
+}
+
+// told notes that the agent of the ask at key, settled at settled, has
+// been told. It goes by when the ask settled, not its revision: a snooze
+// while the agent is told changes the one but not the other. It is the
+// box's own bookkeeping: no new revision.
+func (s *AttentionStore) told(key string, settled time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.load() != nil {
+		return
+	}
+	if was := s.items[key]; was != nil && was.Settled.Equal(settled) && was.Telling != "" {
+		c := cloneAttention(*was)
+		c.Telling = ""
+		s.commit(&c, was)
+	}
+}
+
+// isSessionAsk says it is a session's own ask (an agent's), not a mark.
+func (it AttentionItem) isSessionAsk() bool {
+	return it.Kind != attentionMark && it.Session != "" && it.Key == SessionKey(it.Session)
 }
 
 // makeRoom keeps the store to maxAttentionItems before a new key: the
