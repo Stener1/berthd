@@ -3,6 +3,7 @@ import { Scene } from "@/components/art/scenes";
 import { TaskComposer } from "@/components/conversation/task-composer";
 import { cn } from "@/lib/utils";
 import { usePrefs } from "@/lib/prefs";
+import { useStore } from "@/lib/store";
 import { HomeGrid } from "@/views/home/widgets/grid";
 import { TeamSuggestCards } from "@/views/home/team-suggest-card";
 import { setSwitchboardOpen } from "@/lib/switchboard";
@@ -15,17 +16,29 @@ import { platformKeys } from "@/lib/platform";
 // boxes, whatever they put there. Labs puts the header picture (the
 // harbour unless chosen otherwise) across the top, dissolving into the
 // page, with the composer at the seam.
-const BAND = "clamp(220px, 50vh, 500px)";
+//
+// Home is where someone with many projects triages, so once there is a
+// project the picture is a band, short enough that Needs you and Working
+// now show without scrolling in a 720px window. Before the first project
+// there is nothing to triage: the picture gets the room and the grid waits.
+const BAND = "clamp(150px, 25vh, 280px)";
+const HERO = "clamp(220px, 50vh, 500px)";
 
 export function HomeView() {
   const labs = usePrefs((p) => p.labs);
   const picture = useHeaderPicture();
   const band = labs ? picture : undefined;
+  // Known once every online box has said what it has.
+  const noProjects = useStore((s) => !!s.status && s.status.boxes.every((b) => b.state !== "online" || s.boxes[b.name]?.locations !== undefined) && !Object.values(s.boxes).some((b) => b.locations?.length));
+  const height = noProjects ? HERO : BAND;
   return (
     <div className="absolute inset-0 overflow-y-auto bg-background">
       <div className="relative min-h-full">
-        {band && <HeaderBand picture={band} position={0.42} fade={0.45} className="absolute inset-x-0 top-0" style={{ height: BAND }} />}
-        <div className="relative mx-auto flex w-full max-w-[640px] flex-col items-center px-6 pb-10" style={{ paddingTop: band ? `calc(${BAND} - 84px)` : "clamp(48px, 16vh, 160px)" }}>
+        {band && <HeaderBand picture={band} position={0.42} fade={0.45} className="absolute inset-x-0 top-0" style={{ height }} />}
+        <div
+          className={cn("relative mx-auto flex w-full max-w-[640px] flex-col items-center px-6", noProjects ? "pb-10" : "pb-6")}
+          style={{ paddingTop: band ? `calc(${height} - 84px)` : noProjects ? "clamp(48px, 16vh, 160px)" : "clamp(24px, 6vh, 64px)" }}
+        >
           {!labs && (
             <div aria-hidden className="mb-2">
               <Scene name="dawn" width={136} />
@@ -33,14 +46,19 @@ export function HomeView() {
           )}
           <h1 className={cn("mb-4 text-balance text-center font-heading text-page-title", band && "[text-shadow:0_0_6px_var(--background),0_0_16px_var(--background)]")}>What should your agents work on?</h1>
           <TaskComposer autoFocus />
-          <button type="button" onClick={() => setSwitchboardOpen(true)} className="mt-3 inline-flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-1.5 text-meta text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground">
-            <Layers3Icon className="size-3.5" /> Open Switchboard <span className="ml-2 font-mono">{platformKeys("⌘⇧K")}</span>
-          </button>
+          {/* Before a project there is nothing to switch to: Add a project is the one way on. */}
+          {!noProjects && (
+            <button type="button" onClick={() => setSwitchboardOpen(true)} className="mt-3 inline-flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-1.5 text-meta text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground">
+              <Layers3Icon className="size-3.5" /> Open Switchboard <span className="ml-2 font-mono">{platformKeys("⌘⇧K")}</span>
+            </button>
+          )}
           <TeamSuggestCards />
         </div>
-        <div className="relative mx-auto w-full max-w-[1180px] px-6 pb-12">
-          <HomeGrid />
-        </div>
+        {!noProjects && (
+          <div className="relative mx-auto w-full max-w-[1180px] px-6 pb-12">
+            <HomeGrid />
+          </div>
+        )}
       </div>
     </div>
   );
