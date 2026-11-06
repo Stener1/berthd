@@ -59,7 +59,12 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 	if req.Tool == "" {
 		return badRequest("say which question to answer (tool)")
 	}
-	sess, err := b.Sessions.Get(r.Context(), r.PathValue("name"))
+	name := r.PathValue("name")
+	// An answer is typed into the agent as a prompt is: the same gate.
+	if err := b.before(r, "session.send", map[string]any{"name": name, "answer": true}); err != nil {
+		return err
+	}
+	sess, err := b.Sessions.Get(r.Context(), name)
 	if err != nil {
 		return err
 	}
@@ -76,8 +81,13 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	log.Printf("answer %s: answered %d questions", sess.Name, len(shown))
-	// As an answer typed at a question is: who, never what.
-	b.publish(r, "session.sent", map[string]any{"name": sess.Name, "from": gateOrigin(r), "answer": true, "turn": turn})
+	// As an answer typed at a question is announced: who, never what. The
+	// turn that asked goes on.
+	data := map[string]any{"name": sess.Name, "from": gateOrigin(r), "answer": true}
+	if turn != "" {
+		data["turn"] = turn
+	}
+	b.publish(r, "session.sent", data)
 	writeJSON(w, AnswerResult{Answered: shown})
 	return nil
 }
