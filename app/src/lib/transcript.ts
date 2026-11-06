@@ -9,13 +9,15 @@ import type { Question } from "@/lib/questions";
 export type TranscriptItem =
   // pending: sent from here, and the agent hasn't read it yet. midTurn:
   // typed while the agent worked, which it read at its next step.
-  | { kind: "user"; id: string; text: string; pending?: boolean; midTurn?: boolean }
+  // at (ms): when its line was written, on newer boxes, as a prompt's and
+  // an edit's are.
+  | { kind: "user"; id: string; text: string; pending?: boolean; midTurn?: boolean; at?: number }
   // live: words read from the agent's screen that its record doesn't
   // have yet (a draft, lib/draft-text), replaced by the record's own once
   // it catches up. clipped: the draft's start is above the agent's screen.
   | { kind: "text"; id: string; text: string; live?: boolean; clipped?: boolean }
   | { kind: "tools"; id: string; verb: string; items?: ToolCall[]; done?: boolean }
-  | { kind: "edit"; id: string; file: string; added: number; removed: number; tool?: string }
+  | { kind: "edit"; id: string; file: string; added: number; removed: number; tool?: string; at?: number }
   // A question for the person. choices are the agent's own numbered options
   // when it shows some; without them it is yes or no (Allow or Deny for a
   // command). decided is what was answered.
