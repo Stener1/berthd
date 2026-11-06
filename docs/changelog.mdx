@@ -38,6 +38,39 @@ again.
   shells were never marked ended at all. Now a shell shows `Done · exit 0`
   or `Failed · exit 3` within seconds of exiting, with how long it took,
   and the chip counts only what is still running.
+- **Needs me: everything that needs you, one piece at a time.** A new menu item
+  brings up one piece of work at a time, in order: pinned decisions, decisions,
+  pinned tasks, tasks, results to read, then work nobody has looked at for 3
+  days. Answer or close it and the next comes up, by keyboard if you like. Not
+  now and Waiting on come back by themselves. Sessions on the same work show as
+  a tree, and you answer a worker's question directly. See
+  [Needs me](/guides/needs-me).
+- **A box keeps a record of each piece of work.** A record has a title, its
+  sessions, a status, Not now and Waiting on, and it stays when its sessions
+  end. Sessions group by themselves on an issue id (ranges and lists too), a
+  shared worktree or the session that started them. Pin a repo, a project or a
+  record. The box also notes when a person last touched the work, ignoring
+  agents and restarts. See `berthd work`, and [Needs me](/guides/needs-me) in the app.
+- **A session shows which session started it,** as `started_by` in its JSON.
+- **A box knows who owns a thread.** Start a session with `--claim KEY`, or use
+  `berthd work claim`, and `berthd work find --key KEY` answers with the newest
+  live session that claimed it, its subscribers and what each is doing. A key
+  is any string: an issue, a pull request, a service. A title naming an id only
+  subscribes that session, because titles can be guesses.
+- **A prompt sent for a thread leaves a record.** `session send --key KEY` keeps
+  a delivery that reads held, typed, cancelled, undone, handed back or lost. A
+  prompt still held when its session ends now reads lost and fires `work.lost`,
+  rather than disappearing without a word. Undo one with `berthd work undo`.
+- **New commands for what boxes already do:** `session queue` and
+  `session unqueue` for held prompts, `session resume` for an ended structured
+  session, and `conversation resume` for one whose session has gone.
+- **Boxes are ready for the Shipyard phone app.** With phone access on, a
+  box now also lets a paired phone read an agent's recent conversation
+  (never tool output or files), follow which agents and runs change as it
+  happens, stop an agent, and ask to be notified through Shipyard's push
+  relay instead of ntfy. Notifications still never carry what an agent
+  wrote, a new code forgets every phone, and `before:phone.push` hooks can
+  refuse a phone. See [the phone API](/reference/phone-api).
 - **Quiet projects are grayed out.** On the rail and in the two-column
   sidebar, a project with no agent or shell open in it is grayed out, so
   the ones you're using stand out. Switching to one of those opens New
