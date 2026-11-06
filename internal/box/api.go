@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cosscom/shipyard/internal/box/runs"
@@ -155,6 +156,9 @@ type Box struct {
 	// Work keeps the box's work records and pins (work.go); nil on a box
 	// without them.
 	Work *WorkStore
+	// tellMu and tellAgain keep tellAskers to one at a time.
+	tellMu    sync.Mutex
+	tellAgain atomic.Bool
 }
 
 func (b *Box) own(path string) {
@@ -368,11 +372,23 @@ func decode(r *http.Request, v any) error { return decodeLimit(r, v, 64<<10) }
 // a command line, so tmux's and the kernel's limits don't apply to it.
 const maxPromptBody = 2 << 20
 
-func decodeLimit(r *http.Request, v any, limit int64) error {
+func decodeLimit(r *http.Request, v any, limit int64) error { return decodeBody(r, v, limit, false) }
+
+// decodeStrict is decodeLimit refusing a field v doesn't name.
+func decodeStrict(r *http.Request, v any, limit int64) error { return decodeBody(r, v, limit, true) }
+
+func decodeBody(r *http.Request, v any, limit int64, strict bool) error {
 	body := &countingReader{r: io.LimitReader(r.Body, limit)}
-	if err := json.NewDecoder(body).Decode(v); err != nil {
+	dec := json.NewDecoder(body)
+	if strict {
+		dec.DisallowUnknownFields()
+	}
+	if err := dec.Decode(v); err != nil {
 		if body.n >= limit {
 			return httpError{http.StatusRequestEntityTooLarge, fmt.Sprintf("the request is larger than this box takes (%d KB)", limit>>10)}
+		}
+		if f, ok := unknownField(err); ok {
+			return badRequest("%s isn't something this takes", f)
 		}
 		return badRequest("invalid request body")
 	}
