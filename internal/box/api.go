@@ -95,6 +95,9 @@ type Box struct {
 	// Secrets resolves secret references in worktree environments; nil
 	// uses a shared one.
 	Secrets *Secrets
+	// SecretRequests keeps agents' asks for a secret (secretrequests.go);
+	// nil on a box without them.
+	SecretRequests *SecretRequests
 	// Socket is the box's local API socket, which programs berthd starts can
 	// report back through.
 	Socket string
@@ -217,6 +220,7 @@ func (b *Box) Mount(s *wire.Server) {
 	route("PUT /v1/env", b.putBoxEnv)
 	route("POST /v1/secrets/test", b.testSecret)
 	route("POST /v1/secrets/report", b.reportSecrets)
+	b.mountSecrets(route)
 	route("GET /v1/locations/{name}/config", b.getConfig)
 	route("PUT /v1/locations/{name}/config", b.putConfig)
 	route("POST /v1/locations/{name}/config/trust", b.trustRepoConfig)
@@ -311,11 +315,14 @@ func badRequest(format string, args ...any) error {
 func statusFor(err error) int {
 	var he httpError
 	var rc reviewCode
+	var af agentFailed
 	switch {
 	case errors.As(err, &he):
 		return he.status
 	case errors.As(err, &rc):
 		return rc.status
+	case errors.As(err, &af):
+		return http.StatusConflict
 	case errors.Is(err, ErrUnknownLocation), errors.Is(err, ErrUnknownWorktree), errors.Is(err, ErrUnknownSession), errors.Is(err, ErrUnknownShare), errors.Is(err, ErrUnknownUnit), errors.Is(err, ErrUnknownArtifact):
 		return http.StatusNotFound
 	case errors.Is(err, ErrSessionExists), errors.Is(err, ErrSessionExited):
@@ -844,6 +851,19 @@ func (b *Box) addSession(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := CheckSessionEnv(req.Env); err != nil {
 		return err
+	}
+	if conv, ok := b.commandConversation(req.Command); ok && req.Agent == "" {
+		// A structured agent's own host command, read back from its session
+		// and sent to start it again (an older Shipyard's Start again): its
+		// conversation carries on as berthd launches it, with --resume. The
+		// command itself came back without its last word.
+		sess, err := b.carryOnConversation(r, conv)
+		if err != nil {
+			return err
+		}
+		b.announceOpen(r, sess, req.Open)
+		writeJSON(w, sess)
+		return nil
 	}
 	if req.Home {
 		return b.addHomeSession(w, r, req)
