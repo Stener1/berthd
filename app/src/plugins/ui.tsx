@@ -31,14 +31,18 @@ import { Tip } from "@/components/tip";
 import { AgentPicker } from "@/components/new-worktree/agent-picker";
 import { AgentIcon } from "@/components/agent-glyph";
 import { loadDiffs } from "@/components/diff/load";
+import { sessionState } from "@/lib/derive";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { HelperBox, useHelperState } from "@/plugins/helper-box";
 import { WidgetEmpty, WidgetRow, WidgetSkeleton } from "@/views/home/widgets/parts";
+import type { CardExtras } from "@/views/dashboard/status-card";
 import { PluginPage, ViewHeader } from "@/views/view-header";
 
 const NamedIcon = lazy(() => import("@/plugins/dynamic-icon"));
 const ChartView = lazy(() => import("@/components/art/views/chart-view"));
 const SqlEditorView = lazy(() => import("@/components/files/sql-editor"));
+const StatusCardView = lazy(() => import("@/views/dashboard/status-card").then((m) => ({ default: m.StatusCard })));
 
 // Icon draws any lucide icon by name, for plugins and their sidebar items.
 // Like lucide's DynamicIcon it draws nothing until the icon has loaded.
@@ -74,6 +78,24 @@ export function SqlEditor({ className, ...props }: SqlEditorProps) {
         <SqlEditorView {...props} className="min-h-0 flex-1" />
       </Suspense>
     </div>
+  );
+}
+
+// AgentStatusCard is an agent as the Agent Dashboard's live status card,
+// for a plugin's own board: the same card, reading the same record, with
+// the plugin's extras (views/dashboard/status-card.tsx). It finds the
+// session on its box by name, draws nothing for one the box no longer
+// lists, and starts afresh when the agent's state changes, as the board's
+// cards do. The card's code loads the first time one is drawn.
+export function AgentStatusCard({ box, session, ...extras }: { box: string; session: string } & CardExtras) {
+  const s = useStore((st) => st.boxes[box]?.sessions?.find((x) => x.name === session));
+  const stats = useStore((st) => st.boxes[box]?.stats);
+  if (!s) return null;
+  const state = sessionState(s, stats);
+  return (
+    <Suspense fallback={<Skeleton className="h-28 w-full rounded-2xl" />}>
+      <StatusCardView key={state} entry={{ box, session: s, state }} {...extras} />
+    </Suspense>
   );
 }
 
@@ -158,6 +180,7 @@ export const pluginUi = {
   Tip,
   AgentPicker,
   AgentIcon,
+  AgentStatusCard,
   Icon,
   Chart,
   SqlEditor,
