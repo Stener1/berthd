@@ -126,6 +126,9 @@ type Box struct {
 	// Artifacts keeps what agents made for the person to look at
 	// (artifacts.go); nil on a box without them.
 	Artifacts *ArtifactStore
+	// Attention keeps what needs a person, for every app paired with the
+	// box (attention.go); nil on a box without it.
+	Attention *AttentionStore
 	// Reviews keeps the box's review settings (prreview.go); nil uses the
 	// defaults.
 	Reviews *ReviewStore
@@ -309,6 +312,7 @@ func (b *Box) Mount(s *wire.Server) {
 	b.mountBrowser(route)
 	b.mountNotify(route)
 	b.mountArtifacts(route)
+	b.mountAttention(route)
 	b.mountHelpers(s, route)
 	b.mountWork(route)
 	b.mountPairing(s, route)
