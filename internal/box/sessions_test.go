@@ -119,6 +119,29 @@ func TestSessionsLifecycle(t *testing.T) {
 	}
 }
 
+// A name someone else takes between create's check and tmux making it
+// (tmux says "duplicate session") is theirs: create says it exists and
+// leaves that session running.
+func TestADuplicateSessionIsLeftToWhoeverMadeIt(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(t.TempDir(), "calls")
+	// has-session finds nothing, then new-session finds it made.
+	fakeTmux(t, `echo "$*" >> `+shellQuote(calls)+`
+case "$*" in *new-session*) echo "duplicate session: bot-claude-1rul" >&2; exit 1;; *) exit 1;; esac`)
+	_, err = s.Create(context.Background(), "bot-claude-1rul", "bot", t.TempDir(), "claude", nil)
+	if !errors.Is(err, ErrSessionExists) {
+		t.Fatalf("err = %v", err)
+	}
+	log, _ := os.ReadFile(calls)
+	if !strings.Contains(string(log), "new-session") || strings.Contains(string(log), "kill-session") {
+		t.Fatalf("tmux was asked:\n%s", log)
+	}
+}
+
 // A task's command carries its prompt, line breaks and all: the session
 // must still list, or the task fails ("no session with that name") and
 // removes the worktree it just made.

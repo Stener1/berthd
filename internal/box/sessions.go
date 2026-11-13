@@ -136,6 +136,10 @@ type Sessions struct {
 	procs   func() ([]procStat, error)
 	signal  func(pid int, sig syscall.Signal)
 	cleanup sync.WaitGroup
+	// creating makes one create at a time, so two of one name can't both
+	// pass its check that the name is free and write over each other's
+	// command file.
+	creating sync.Mutex
 
 	sweepMu   sync.Mutex
 	lastSweep time.Time
@@ -375,6 +379,11 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 	if _, err := tmuxPath(); err != nil {
 		return Session{}, err
 	}
+	if s.Prepare != nil {
+		s.Prepare(env)
+	}
+	s.creating.Lock()
+	defer s.creating.Unlock()
 	if _, err := s.tmux(ctx, "has-session", "-t", "="+name); err == nil {
 		return Session{}, ErrSessionExists
 	}
@@ -390,9 +399,6 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 		// install under nvm is on an interactive shell's PATH, which a
 		// login shell alone (-l) never reads.
 		argv = []string{shell, "-lc", withPATH(shell, launchPATH(command, agent), sourceCommand(shell, file))}
-	}
-	if s.Prepare != nil {
-		s.Prepare(env)
 	}
 	args := []string{"new-session", "-d", "-s", name, "-c", dir, "-x", "200", "-y", "50"}
 	env = append(withAgentBrowserIdle(append([]string(nil), env...)), "BERTH_SESSION="+name)
@@ -446,6 +452,11 @@ func (s *Sessions) create(ctx context.Context, name, location, dir, command, age
 		}
 	}
 	if out, err := s.tmux(ctx, args...); err != nil {
+		if strings.Contains(string(out), "duplicate session") {
+			// Someone else made it since the check (another tmux client):
+			// the session, and the command file of its name, are theirs.
+			return Session{}, ErrSessionExists
+		}
 		s.tmux(ctx, "kill-session", "-t", "="+name)
 		s.removeCommand(name)
 		return Session{}, tmuxError("new-session", out, err)

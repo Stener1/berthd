@@ -336,6 +336,86 @@ func TestTwoSessionsInOneFolderDontBlockEachOthersResume(t *testing.T) {
 	})
 }
 
+// Two conversations in one location carried on in new sessions in the same
+// second (a hub waking its bots after a restart) both come up, each in a
+// session of its own, and neither kills the other's. A session already
+// holding the name one would take keeps running too.
+func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
+	fakeClaudeOnPath(t)
+	t.Setenv("FAKE_CLAUDE_UNIQUE", "1")
+	repo, convs := gitRepo(t), conversationsDir(t)
+	c, bx, states := structuredBoxFor(t, convs, repo)
+	start := func(name string) {
+		t.Helper()
+		if status := call(t, c, "POST", "/v1/sessions", "", map[string]any{"name": name, "location": "acme", "agent": "claude", "driver": "claude", "prompt": "hello " + name}, nil); status != 200 {
+			t.Fatalf("start %s: %d", name, status)
+		}
+		until(t, name+"'s first turn", finishedIn(states, name))
+	}
+	start("one")
+	start("two")
+	ids := map[string]string{}
+	for _, name := range []string{"one", "two"} {
+		ids[name] = filepath.Base(mustSession(t, bx, name).conv)
+		if status := call(t, c, "DELETE", "/v1/sessions/"+name, "", nil, nil); status != 200 {
+			t.Fatalf("delete %s: %d", name, status)
+		}
+	}
+	until(t, "both conversations ended", func() bool {
+		var cs []Conversation
+		call(t, c, "GET", "/v1/conversations", "", nil, &cs)
+		return len(cs) == 2 && !cs[0].Live && !cs[1].Live
+	})
+
+	// One second for all of it, as on a busy box.
+	now := time.Now()
+	old := sessionNameClock
+	sessionNameClock = func() time.Time { return now }
+	t.Cleanup(func() { sessionNameClock = old })
+	// Someone else's session already has the name "one" would take first.
+	squat := resumedSessionName(defaultSessionName("acme", "claude"), filepath.Join(convs, ids["one"]), 0)
+	if _, err := bx.Sessions.Create(t.Context(), squat, "acme", repo, "sleep 60", nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { bx.Sessions.Kill(t.Context(), squat) })
+
+	type resumed struct {
+		status int
+		sess   Session
+	}
+	results := map[string]chan resumed{"one": make(chan resumed, 1), "two": make(chan resumed, 1)}
+	for name, ch := range results {
+		go func() {
+			var s Session
+			status := call(t, c, "POST", "/v1/conversations/"+ids[name]+"/resume", "", nil, &s)
+			ch <- resumed{status, s}
+		}()
+	}
+	got := map[string]Session{}
+	for name, ch := range results {
+		r := <-ch
+		if r.status != 200 || r.sess.Name == "" || r.sess.Exited {
+			t.Fatalf("resume %s: %d %+v", name, r.status, r.sess)
+		}
+		t.Cleanup(func() { call(t, c, "DELETE", "/v1/sessions/"+r.sess.Name, "", nil, nil) })
+		got[name] = r.sess
+	}
+	if got["one"].Name == got["two"].Name || got["one"].Name == squat {
+		t.Fatalf("names: one %q, two %q, taken %q", got["one"].Name, got["two"].Name, squat)
+	}
+	for name, s := range got {
+		live, err := bx.Sessions.Get(t.Context(), s.Name)
+		if err != nil || live.Exited || filepath.Base(live.conv) != ids[name] {
+			t.Fatalf("%s's session %q: %+v, %v", name, s.Name, live, err)
+		}
+		call(t, c, "POST", "/v1/sessions/"+s.Name+"/send", "", map[string]any{"text": "back " + name, "when": "now"}, nil)
+		until(t, name+"'s reply", saidIn(t, c, s.Name, "echo: back "+name))
+	}
+	if s, err := bx.Sessions.Get(t.Context(), squat); err != nil || s.Exited {
+		t.Fatalf("the session that had the name first: %+v, %v", s, err)
+	}
+}
+
 func mustSession(t *testing.T, bx *Box, name string) Session {
 	t.Helper()
 	s, err := bx.Sessions.Get(t.Context(), name)

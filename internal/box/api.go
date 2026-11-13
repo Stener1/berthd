@@ -1247,6 +1247,9 @@ var validEventType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9-]{0
 
 var unsafeSessionChars = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
+// sessionNameClock is the time defaultSessionName reads; tests hold it still.
+var sessionNameClock = time.Now
+
 // defaultSessionName names a session after where it runs and what it runs,
 // e.g. "shop-checkout-claude".
 func defaultSessionName(location, command string) string {
@@ -1258,7 +1261,7 @@ func defaultSessionName(location, command string) string {
 	if len(name) > 48 {
 		name = name[:48]
 	}
-	return name + "-" + strconv.FormatInt(time.Now().Unix()%100000, 36)
+	return name + "-" + strconv.FormatInt(sessionNameClock().Unix()%100000, 36)
 }
 
 func splitFirst(command string) string {
