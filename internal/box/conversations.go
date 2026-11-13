@@ -2,7 +2,10 @@ package box
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -369,9 +372,21 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 	if err != nil {
 		return Session{}, err
 	}
-	name := defaultSessionName(firstNonEmpty(conv.Location, filepath.Base(conv.Dir)), firstNonEmpty(conv.Agent, "claude"))
+	base := defaultSessionName(firstNonEmpty(conv.Location, filepath.Base(conv.Dir)), firstNonEmpty(conv.Agent, "claude"))
 	from := logEnd(dir)
-	sess, err := b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "")
+	var sess Session
+	for attempt := 0; ; attempt++ {
+		name := resumedSessionName(base, dir, attempt)
+		sess, err = b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "")
+		if !errors.Is(err, ErrSessionExists) || attempt == resumeNameAttempts-1 {
+			break
+		}
+		// Carried on at the same moment by another request: the session it
+		// runs in is that one.
+		if s, gerr := b.Sessions.Get(r.Context(), name); gerr == nil && s.conv == dir {
+			return b.enrich(r.Context(), []Session{s})[0], nil
+		}
+	}
 	if err != nil {
 		return Session{}, err
 	}
@@ -389,6 +404,33 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 		sess.Title = conv.Title
 	}
 	return sess, nil
+}
+
+// resumeNameAttempts bounds the names a conversation carried on in a new
+// session tries before it gives up.
+const resumeNameAttempts = 5
+
+// resumedSessionName is the name a conversation carried on in a new session
+// tries on its attempt'th go. defaultSessionName alone is only unique to the
+// second, so two conversations in one location carried on at once would
+// share it: the first try adds the conversation's own random part, and any
+// later one a fresh random suffix, for a name another session already has.
+func resumedSessionName(base, dir string, attempt int) string {
+	suffix := ""
+	if attempt == 0 {
+		if _, random, ok := strings.Cut(filepath.Base(dir), "-"); ok {
+			suffix = unsafeSessionChars.ReplaceAllString(random, "")
+		}
+	}
+	if suffix == "" {
+		var b [3]byte
+		rand.Read(b[:])
+		suffix = hex.EncodeToString(b[:])
+	}
+	if len(suffix) > 6 {
+		suffix = suffix[:6]
+	}
+	return base + "-" + suffix
 }
 
 // noteStarted keeps what a new structured conversation is.
