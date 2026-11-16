@@ -376,7 +376,7 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 	from := logEnd(dir)
 	var sess Session
 	for attempt := 0; ; attempt++ {
-		name := resumedSessionName(base, dir, attempt)
+		name := resumedSessionName(conv.Session, base, dir, attempt)
 		sess, err = b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "")
 		if !errors.Is(err, ErrSessionExists) || attempt == resumeNameAttempts-1 {
 			break
@@ -411,11 +411,20 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 const resumeNameAttempts = 5
 
 // resumedSessionName is the name a conversation carried on in a new session
-// tries on its attempt'th go. defaultSessionName alone is only unique to the
-// second, so two conversations in one location carried on at once would
-// share it: the first try adds the conversation's own random part, and any
-// later one a fresh random suffix, for a name another session already has.
-func resumedSessionName(base, dir string, attempt int) string {
+// tries on its attempt'th go. The first is the name it last ran in (last),
+// so whoever started it under a name of their own finds it under that name
+// again, and so do its processes ($BERTH_SESSION). After that, a name from
+// base: defaultSessionName alone is only unique to the second, so two
+// conversations in one location carried on at once would share it, and the
+// next try adds the conversation's own random part, and any later one a
+// fresh random suffix, for a name another session already has.
+func resumedSessionName(last, base, dir string, attempt int) string {
+	if last != "" && last == unsafeSessionChars.ReplaceAllString(last, "") {
+		if attempt == 0 {
+			return last
+		}
+		attempt--
+	}
 	suffix := ""
 	if attempt == 0 {
 		if _, random, ok := strings.Cut(filepath.Base(dir), "-"); ok {

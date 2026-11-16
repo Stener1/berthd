@@ -338,8 +338,9 @@ func TestTwoSessionsInOneFolderDontBlockEachOthersResume(t *testing.T) {
 
 // Two conversations in one location carried on in new sessions in the same
 // second (a hub waking its bots after a restart) both come up, each in a
-// session of its own, and neither kills the other's. A session already
-// holding the name one would take keeps running too.
+// session of its own, and neither kills the other's. Each comes back under
+// the name it last ran in, so whoever named it finds it again; one whose name
+// another session holds now takes a new one, and that session keeps running.
 func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 	fakeClaudeOnPath(t)
 	t.Setenv("FAKE_CLAUDE_UNIQUE", "1")
@@ -372,8 +373,11 @@ func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 	old := sessionNameClock
 	sessionNameClock = func() time.Time { return now }
 	t.Cleanup(func() { sessionNameClock = old })
-	// Someone else's session already has the name "one" would take first.
-	squat := resumedSessionName(defaultSessionName("acme", "claude"), filepath.Join(convs, ids["one"]), 0)
+	// Someone else's session has the name "one" ran in, and would take first.
+	squat := resumedSessionName("one", defaultSessionName("acme", "claude"), filepath.Join(convs, ids["one"]), 0)
+	if squat != "one" {
+		t.Fatalf("the first name tried is %q, not the one it ran in", squat)
+	}
 	if _, err := bx.Sessions.Create(t.Context(), squat, "acme", repo, "sleep 60", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +404,7 @@ func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 		t.Cleanup(func() { call(t, c, "DELETE", "/v1/sessions/"+r.sess.Name, "", nil, nil) })
 		got[name] = r.sess
 	}
-	if got["one"].Name == got["two"].Name || got["one"].Name == squat {
+	if got["two"].Name != "two" || got["one"].Name == got["two"].Name || got["one"].Name == squat {
 		t.Fatalf("names: one %q, two %q, taken %q", got["one"].Name, got["two"].Name, squat)
 	}
 	for name, s := range got {
