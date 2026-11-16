@@ -540,3 +540,34 @@ func TestSettlingWithoutProcKeepsWhatMayStillRun(t *testing.T) {
 		t.Fatal("a gone folder stayed")
 	}
 }
+
+// A conversation carried on in a new session takes the name it last ran in
+// only when a session can have it: a name session creation takes, and no
+// cleanup of the session killed under it still running, which would take
+// what the new one starts (its agent-browser sessions go by that name).
+func TestAResumedConversationTakesItsLastNameOnlyWhenItIsFree(t *testing.T) {
+	s := &Sessions{}
+	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 0); got != "pg-worker-1a2b3c4d" {
+		t.Fatalf("a free name: %q", got)
+	}
+	for _, bad := range []string{"", "-lead", "_lead", strings.Repeat("a", 64), "has space"} {
+		if got := reusableName(t.Context(), s, bad, 0); got != "" {
+			t.Fatalf("%q is no session name, but got %q", bad, got)
+		}
+		if got := resumedSessionName(reusableName(t.Context(), s, bad, 0), "acme-claude-9w1", "/c/abc-123456789", 0); got != "acme-claude-9w1-123456" {
+			t.Fatalf("%q: the first try is %q, not the conversation's own", bad, got)
+		}
+	}
+	s.markEnding("pg-worker-1a2b3c4d", 1)
+	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 100*time.Millisecond); got != "" {
+		t.Fatalf("a name whose cleanup runs past the wait: %q", got)
+	}
+	// One whose cleanup ends during the wait is taken.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		s.markEnding("pg-worker-1a2b3c4d", -1)
+	}()
+	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 5*time.Second); got != "pg-worker-1a2b3c4d" || len(s.ending) != 0 {
+		t.Fatalf("after its cleanup: %q, %v", got, s.ending)
+	}
+}
