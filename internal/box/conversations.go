@@ -372,12 +372,11 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 	if err != nil {
 		return Session{}, err
 	}
-	last := reusableName(r.Context(), b.Sessions, conv.Session, endingWait)
 	base := defaultSessionName(firstNonEmpty(conv.Location, filepath.Base(conv.Dir)), firstNonEmpty(conv.Agent, "claude"))
 	from := logEnd(dir)
 	var sess Session
 	for attempt := 0; ; attempt++ {
-		name := resumedSessionName(last, base, dir, attempt)
+		name := resumedSessionName(base, dir, attempt)
 		sess, err = b.startStructuredSession(r, name, conv.Location, conv.Dir, firstNonEmpty(conv.Agent, "claude"), l, "")
 		if !errors.Is(err, ErrSessionExists) || attempt == resumeNameAttempts-1 {
 			break
@@ -407,46 +406,16 @@ func (b *Box) carryOnConversation(r *http.Request, dir string) (Session, error) 
 	return sess, nil
 }
 
-// endingWait bounds how long a conversation carried on waits for the
-// cleanup of the session it last ran in, to take its name again.
-var endingWait = 10 * time.Second
-
-// reusableName is the name a conversation last ran in, when a new session
-// can take it: a valid name whose old session's cleanup is over, waited for
-// at most wait. "" when not.
-func reusableName(ctx context.Context, s *Sessions, last string, wait time.Duration) string {
-	if !sessionName.MatchString(last) {
-		return ""
-	}
-	deadline := time.Now().Add(wait)
-	for s.Ending(last) {
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return ""
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return last
-}
-
 // resumeNameAttempts bounds the names a conversation carried on in a new
 // session tries before it gives up.
 const resumeNameAttempts = 5
 
 // resumedSessionName is the name a conversation carried on in a new session
-// tries on its attempt'th go. The first is the name it last ran in (last),
-// so whoever started it under a name of their own finds it under that name
-// again, and so do its processes ($BERTH_SESSION). After that, a name from
-// base: defaultSessionName alone is only unique to the second, so two
-// conversations in one location carried on at once would share it, and the
-// next try adds the conversation's own random part, and any later one a
-// fresh random suffix, for a name another session already has.
-func resumedSessionName(last, base, dir string, attempt int) string {
-	if last != "" {
-		if attempt == 0 {
-			return last
-		}
-		attempt--
-	}
+// tries on its attempt'th go. defaultSessionName alone is only unique to the
+// second, so two conversations in one location carried on at once would
+// share it: the first try adds the conversation's own random part, and any
+// later one a fresh random suffix, for a name another session already has.
+func resumedSessionName(base, dir string, attempt int) string {
 	suffix := ""
 	if attempt == 0 {
 		if _, random, ok := strings.Cut(filepath.Base(dir), "-"); ok {

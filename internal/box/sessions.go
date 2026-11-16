@@ -136,9 +136,6 @@ type Sessions struct {
 	procs   func() ([]procStat, error)
 	signal  func(pid int, sig syscall.Signal)
 	cleanup sync.WaitGroup
-	// ending counts, by name, the sessions killed whose cleanup still runs.
-	endingMu sync.Mutex
-	ending   map[string]int
 	// creating makes one create at a time, so two of one name can't both
 	// pass its check that the name is free and write over each other's
 	// command file.
@@ -546,36 +543,14 @@ func (s *Sessions) Kill(ctx context.Context, name string) error {
 	}
 	s.removeCommand(name)
 	s.cleanup.Add(1)
-	s.markEnding(name, 1)
 	go func() {
 		defer s.cleanup.Done()
-		defer s.markEnding(name, -1)
 		s.endSession(sess, found, at)
 	}()
 	if s.Ended != nil {
 		s.Ended()
 	}
 	return nil
-}
-
-func (s *Sessions) markEnding(name string, delta int) {
-	s.endingMu.Lock()
-	defer s.endingMu.Unlock()
-	if s.ending == nil {
-		s.ending = map[string]int{}
-	}
-	if s.ending[name] += delta; s.ending[name] <= 0 {
-		delete(s.ending, name)
-	}
-}
-
-// Ending says a session of this name was killed and what it started is
-// still being cleaned up, by its name: a new session under that name would
-// lose what it starts to that cleanup.
-func (s *Sessions) Ending(name string) bool {
-	s.endingMu.Lock()
-	defer s.endingMu.Unlock()
-	return s.ending[name] > 0
 }
 
 // Attach runs a tmux client for the session under a new pseudo-terminal. The
