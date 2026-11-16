@@ -338,9 +338,8 @@ func TestTwoSessionsInOneFolderDontBlockEachOthersResume(t *testing.T) {
 
 // Two conversations in one location carried on in new sessions in the same
 // second (a hub waking its bots after a restart) both come up, each in a
-// session of its own, and neither kills the other's. Each comes back under
-// the name it last ran in, so whoever named it finds it again; one whose name
-// another session holds now takes a new one, and that session keeps running.
+// session of its own, and neither kills the other's. A session already
+// holding the name one would take keeps running too.
 func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 	fakeClaudeOnPath(t)
 	t.Setenv("FAKE_CLAUDE_UNIQUE", "1")
@@ -373,11 +372,8 @@ func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 	old := sessionNameClock
 	sessionNameClock = func() time.Time { return now }
 	t.Cleanup(func() { sessionNameClock = old })
-	// Someone else's session has the name "one" ran in, and would take first.
-	squat := resumedSessionName("one", defaultSessionName("acme", "claude"), filepath.Join(convs, ids["one"]), 0)
-	if squat != "one" {
-		t.Fatalf("the first name tried is %q, not the one it ran in", squat)
-	}
+	// Someone else's session already has the name "one" would take first.
+	squat := resumedSessionName(defaultSessionName("acme", "claude"), filepath.Join(convs, ids["one"]), 0)
 	if _, err := bx.Sessions.Create(t.Context(), squat, "acme", repo, "sleep 60", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +400,7 @@ func TestTwoConversationsResumedInTheSameSecondBothComeUp(t *testing.T) {
 		t.Cleanup(func() { call(t, c, "DELETE", "/v1/sessions/"+r.sess.Name, "", nil, nil) })
 		got[name] = r.sess
 	}
-	if got["two"].Name != "two" || got["one"].Name == got["two"].Name || got["one"].Name == squat {
+	if got["one"].Name == got["two"].Name || got["one"].Name == squat {
 		t.Fatalf("names: one %q, two %q, taken %q", got["one"].Name, got["two"].Name, squat)
 	}
 	for name, s := range got {
@@ -538,36 +534,5 @@ func TestSettlingWithoutProcKeepsWhatMayStillRun(t *testing.T) {
 	}
 	if _, ok := tr.dirs[gone]; ok {
 		t.Fatal("a gone folder stayed")
-	}
-}
-
-// A conversation carried on in a new session takes the name it last ran in
-// only when a session can have it: a name session creation takes, and no
-// cleanup of the session killed under it still running, which would take
-// what the new one starts (its agent-browser sessions go by that name).
-func TestAResumedConversationTakesItsLastNameOnlyWhenItIsFree(t *testing.T) {
-	s := &Sessions{}
-	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 0); got != "pg-worker-1a2b3c4d" {
-		t.Fatalf("a free name: %q", got)
-	}
-	for _, bad := range []string{"", "-lead", "_lead", strings.Repeat("a", 64), "has space"} {
-		if got := reusableName(t.Context(), s, bad, 0); got != "" {
-			t.Fatalf("%q is no session name, but got %q", bad, got)
-		}
-		if got := resumedSessionName(reusableName(t.Context(), s, bad, 0), "acme-claude-9w1", "/c/abc-123456789", 0); got != "acme-claude-9w1-123456" {
-			t.Fatalf("%q: the first try is %q, not the conversation's own", bad, got)
-		}
-	}
-	s.markEnding("pg-worker-1a2b3c4d", 1)
-	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 100*time.Millisecond); got != "" {
-		t.Fatalf("a name whose cleanup runs past the wait: %q", got)
-	}
-	// One whose cleanup ends during the wait is taken.
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		s.markEnding("pg-worker-1a2b3c4d", -1)
-	}()
-	if got := reusableName(t.Context(), s, "pg-worker-1a2b3c4d", 5*time.Second); got != "pg-worker-1a2b3c4d" || len(s.ending) != 0 {
-		t.Fatalf("after its cleanup: %q, %v", got, s.ending)
 	}
 }
