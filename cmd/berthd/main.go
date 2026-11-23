@@ -63,9 +63,10 @@ const usage = `berthd — the berth daemon for a development box
   berthd doctor [--json]                  Check this box's setup and how to fix it
   berthd version                          Print this build's version
   berthd session attach NAME              Attach to a session in this terminal
-  berthd secret exec [--socket PATH] -- PROGRAM [ARGS...]
+  berthd secret exec [--socket PATH] [--env VAR=REF]... [--file VAR=REF]... -- PROGRAM [ARGS...]
                                           Resolve secret references, then run PROGRAM (sessions and
-                                          services use it)
+                                          services use it; --env/--file: a saved secret, box://NAME,
+                                          for one command, as a variable or a temporary file)
   berthd secret signin [--check]          Sign op in to 1Password here, for berthd's op:// reads
                                           (--check: only say whether it can read now)
   berthd mcp                              A stdio MCP server of berth's tools for agents on this box
@@ -396,6 +397,11 @@ func serve(b boxHome, args []string) error {
 	// Plugins' helpers run as berthd's own children: started before it
 	// serves anything, so the first service finds them up, and stopped
 	// with it. A new build taking over starts them again itself.
+	// What agents it didn't start last said, by folder, is from before it
+	// stopped (a reboot, often): nothing still running there is exited.
+	if n := bx.SettleAgentStates(); n > 0 {
+		logger.Printf("settled %d agent states left from before berthd started", n)
+	}
 	bx.Helpers = &box.Helpers{Dir: filepath.Join(b.dir, "helpers"), Box: hostname, Logf: logger.Printf}
 	// Terminals' tmux clients end and are waited for before the exec: the
 	// new build couldn't wait for them (the sessions keep running).
@@ -453,6 +459,9 @@ func serve(b boxHome, args []string) error {
 	// Agents hear back about work they started, after the ledger has it.
 	bx.Reports = &box.Notifier{Path: filepath.Join(b.dir, "notify.json")}
 	go bx.Reports.Run(ctx, bx)
+	// Agents' asks for a secret, answered in the app (secretrequests.go).
+	bx.SecretRequests = &box.SecretRequests{Path: filepath.Join(b.dir, "secret-requests.json")}
+	go bx.RunSecretSweeps(ctx)
 	go bx.RunRepoHooks(ctx, logger)
 	// Runs that were going when berthd stopped carry on from their journals.
 	bx.Runs.Resume(ctx)
