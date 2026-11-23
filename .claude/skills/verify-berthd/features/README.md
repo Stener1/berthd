@@ -12,6 +12,7 @@ The maintained list of what a person can do in the app, and how to prove each on
 
 | Feature | File | Scenario |
 | --- | --- | --- |
+| The iPhone app (`ios/`): pairing, agent board, session, runs and gates, boxes | [ios-app.md](ios-app.md) | `scripts/ios-drive.sh` (simulator, live boxes) |
 | Sidebar places: Pinned, More, Hidden, counts on rows (Home's waiting, Review's, a plugin's) | [sidebar-nav.md](sidebar-nav.md) | `plugin-nav-badges` |
 | Back and forward: the window strip's arrows, ⌘[ and ⌘], the mouse's buttons; archiving or removing the worktree in front goes back, not Home; the dashboard keeps its scroll | [navigation-history.md](navigation-history.md) | `navigation-history`; `app/e2e/back-forward.spec.ts` asserts it |
 | Shortcuts in the keyboard's layout (⌘Å and ⌘¨ for Back and Forward on Norwegian) in tooltips, the Keyboard shortcuts sheet, Settings and ⌘K; the sheet's descriptions fit their lines | [navigation-history.md](navigation-history.md) (`history-layout`) | `keyboard-layout`, `keyboard-layout-us`; `app/e2e/back-forward.spec.ts` asserts it |

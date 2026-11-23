@@ -1,0 +1,60 @@
+name: Shipyard
+options:
+  bundleIdPrefix: dev.shipyard
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  Shipyard:
+    type: application
+    platform: iOS
+    sources:
+      - Shipyard
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_CFBundleDisplayName: Shipyard
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_NSCameraUsageDescription: Shipyard scans the pairing code that Shipyard shows in Settings > Phone.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Shipyard talks to your boxes on your tailnet.
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: Shipyard/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: Shipyard
+            CFBundleURLSchemes: [shipyard]
+        # Plain HTTP to boxes on the tailnet (WireGuard encrypts it). iOS has no
+        # exception for an address range: NSAllowsLocalNetworking only covers
+        # private ranges, and a tailnet 100.x address is not one (verified on
+        # the simulator: -1022), and an exception domain needs the exact host.
+        # So ATS is off, and the app only ever opens the box addresses you paired.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+  ShipyardTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ShipyardTests
+    dependencies:
+      - target: Shipyard
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Shipyard:
+    build:
+      targets:
+        Shipyard: all
+    test:
+      targets:
+        - ShipyardTests

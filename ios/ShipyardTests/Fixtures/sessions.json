@@ -1,0 +1,8 @@
+[
+  {"name":"acme-checkout-fix-claude-1a","location":"acme/checkout-fix","dir":"/home/dev/work/acme-checkout-fix","command":"claude","created":"2026-10-24T09:12:03.482194Z","attached":0,"exited":false,"agent":"claude","agent_state":"waiting","state_since":"2026-10-24T09:41:10.120Z","preset":"claude","turn":"t7","state_seq":418,"fidelity":"hooks","title":"Fix the checkout total rounding","worktree_title":"Checkout rounding fix","ask":{"tool":"Bash","input":"pnpm test","why":"run the tests"}},
+  {"name":"acme-qa-deck-codex-1b","location":"acme/qa-deck","dir":"/home/dev/work/acme-qa-deck","created":"2026-10-24T09:30:00Z","attached":1,"exited":false,"agent":"codex","agent_state":"running","state_since":"2026-10-24T09:44:00Z","title":"QA deck for the spring launch"},
+  {"name":"acme-hello-claude-1c","location":"acme/hello","dir":"/home/dev/work/acme-hello","created":"2026-10-24T08:00:00Z","attached":0,"exited":false,"agent":"claude","agent_state":"finished","state_since":"2026-10-24T08:20:00Z"},
+  {"name":"acme-pr-claude-2a","location":"acme/pr","dir":"/home/dev/work/acme-pr","created":"2026-10-24T09:00:00Z","attached":0,"exited":false,"agent":"claude","agent_state":"idle","state_since":"2026-10-24T09:00:00Z","worktree_title":"Review PR"},
+  {"name":"acme-old-claude-3a","location":"acme/old","dir":"/home/dev/work/acme-old","created":"2026-10-23T09:00:00Z","attached":0,"exited":true,"agent":"claude","agent_state":"finished","state_since":"2026-10-23T10:00:00Z"},
+  {"name":"shell-1","location":"acme/checkout-fix","dir":"/home/dev/work/acme-checkout-fix","created":"2026-10-24T09:10:00Z","attached":0,"exited":false}
+]
