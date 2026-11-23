@@ -3,9 +3,9 @@ import { meaningfulTail } from "@/lib/screen";
 // lastMessage is what the agent said last: Claude Code starts each message
 // with ●, so it is the text from the last ● to the input box. Other agents
 // get the last few meaningful lines. Continuation lines lose the indent the
-// terminal gave them.
+// terminal gave them; an empty line between paragraphs stays.
 export function lastMessage(screen: string): string[] {
-  const lines = meaningfulTail(screen, 60);
+  const lines = meaningfulTail(screen, 60, { blanks: true });
   let start = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (/^\s*●\s/.test(lines[i])) {
@@ -14,6 +14,7 @@ export function lastMessage(screen: string): string[] {
     }
   }
   const msg = (start >= 0 ? lines.slice(start) : lines.slice(-8)).filter((l) => !/^\s*[✻✽✳✶*]\s+\S+ for \d.*·/.test(l)); // "✻ Brewed for 1s · done 7:14 PM"
+  while (msg.at(-1)?.trim() === "") msg.pop();
   if (!msg.length) return [];
   const first = msg[0].replace(/^\s*●\s*/, "");
   const rest = msg.slice(1);

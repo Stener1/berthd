@@ -416,7 +416,7 @@ export function ZenBar() {
 // ?traffic=1, so screenshots show what has to leave them room.
 export function FakeTrafficLights() {
   return (
-    <div aria-hidden className="pointer-events-none fixed top-[13px] left-[13px] z-[100] flex gap-2">
+    <div aria-hidden className="pointer-events-none fixed top-[13px] left-[13px] z-overlay flex gap-2">
       {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
         <span key={c} className="size-3 rounded-full ring-1 ring-black/10" style={{ background: c }} />
       ))}

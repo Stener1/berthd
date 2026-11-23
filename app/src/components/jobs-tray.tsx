@@ -28,7 +28,8 @@ export function JobsTray() {
       root.style.setProperty("--berth-jobs-h", "0px");
       return;
     }
-    const sync = () => root.style.setProperty("--berth-jobs-h", `${el.offsetHeight + GAP}px`);
+    // Hidden (Settings), it takes no room.
+    const sync = () => root.style.setProperty("--berth-jobs-h", `${el.offsetHeight ? el.offsetHeight + GAP : 0}px`);
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(el);

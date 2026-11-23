@@ -12,14 +12,23 @@ const CHROME = [
   /^\s*[●◐◑]\s*(low|medium|high|max)\s*·/i,
 ];
 
-export function meaningfulTail(screen: string, count: number): string[] {
-  const lines = screen
-    .split("\n")
-    .map((l) => l.replace(/\s+$/, ""))
-    .filter((l) => l.trim() && !RULE.test(l) && !CHROME.some((re) => re.test(l.trim())));
+// With blanks, the empty lines between paragraphs stay (one for a run of
+// them, none at either end), so a reader can tell paragraphs apart.
+export function meaningfulTail(screen: string, count: number, { blanks = false }: { blanks?: boolean } = {}): string[] {
+  const lines: string[] = [];
+  for (const raw of screen.split("\n")) {
+    const l = raw.replace(/\s+$/, "");
+    if (!l.trim()) {
+      if (blanks && lines.length && lines.at(-1) !== "") lines.push("");
+      continue;
+    }
+    if (!RULE.test(l) && !CHROME.some((re) => re.test(l.trim()))) lines.push(l);
+  }
+  while (lines.at(-1) === "") lines.pop();
   const tail = lines.slice(-count);
+  while (tail[0] === "") tail.shift();
   // Drop the indentation the lines share, so narrow cards show words.
-  const indent = Math.min(...tail.map((l) => l.length - l.trimStart().length));
+  const indent = Math.min(...tail.filter(Boolean).map((l) => l.length - l.trimStart().length));
   return tail.map((l) => l.slice(indent));
 }
 

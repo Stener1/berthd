@@ -25,10 +25,13 @@ export interface Group {
 }
 
 // One grid for the header and every row, so the columns line up. Below
-// 1024px of table the port moves into the worktree's tooltip and agents
-// narrow, so the last commit keeps room to be read.
+// 1024px of table the port moves into the worktree's tooltip and the
+// counts narrow; below 768px "vs base" joins it there. Either way the last
+// commit keeps room to be read and nothing runs off the right edge.
 export const COLS =
-  "grid-cols-[2rem_minmax(180px,1.2fr)_6rem_6rem_minmax(240px,2fr)_5.5rem_4rem_1.5rem] @max-5xl:grid-cols-[2rem_minmax(160px,1.2fr)_5.5rem_5.5rem_minmax(200px,2fr)_4.5rem_1.5rem]";
+  "grid-cols-[2rem_minmax(180px,1.2fr)_6rem_6rem_minmax(240px,2fr)_5.5rem_4rem_1.5rem] @max-5xl:grid-cols-[2rem_minmax(140px,1fr)_5rem_4.5rem_minmax(180px,2fr)_4.5rem_1.5rem] @max-3xl:grid-cols-[2rem_minmax(130px,1fr)_4.5rem_minmax(160px,2fr)_4.5rem_1.5rem]";
+// Cells that leave below 768px of table, with their header.
+const WIDE = "@max-3xl:hidden";
 
 
 // WorktreeTable lists worktrees by project, one line each. Checkboxes
@@ -87,7 +90,7 @@ export function WorktreeTable({
         </Tip>
         <span>Worktree</span>
         <Tip className="max-w-sm" label="Commits ahead of its base, and behind it">
-          <span className="w-fit">vs base</span>
+          <span className={cn("w-fit", WIDE)}>vs base</span>
         </Tip>
         <Tip className="max-w-sm" label="Uncommitted: modified and untracked files">
           <span className="w-fit">Changes</span>
@@ -220,8 +223,12 @@ function WorktreeRow({
       <Tip className="max-w-sm" label={<NameTip row={r} />}>
         <div className="flex min-w-0 items-center gap-1.5">
           {r.main && <HouseIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Main checkout" />}
-          <span className="max-w-full shrink-0 truncate text-row">{name}</span>
-          {r.branch && r.branch !== name && <span className="min-w-0 truncate font-mono text-meta text-muted-foreground">{r.branch}</span>}
+          {/* The branch gives way first, then the name: the badges after
+              them keep their room and never spill into the next column. */}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="max-w-full shrink-0 truncate text-row">{name}</span>
+            {r.branch && r.branch !== name && <span className="min-w-0 truncate font-mono text-meta text-muted-foreground">{r.branch}</span>}
+          </span>
           {r.paused && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-warning/12 px-1.5 py-px text-tag text-warning-foreground">
               <PauseIcon className="size-2.5" />
@@ -238,7 +245,7 @@ function WorktreeRow({
       </Tip>
 
       <Tip className="max-w-sm" label={r.ahead || r.behind ? `${r.ahead} commit${s(r.ahead)} ahead of ${base}, ${r.behind} behind` : `Even with ${base}`}>
-        <div className="flex w-fit items-center gap-2 font-mono text-meta tabular-nums">
+        <div className={cn("flex w-fit items-center gap-2 font-mono text-meta tabular-nums", WIDE)}>
           <span className={cn("inline-flex items-center gap-0.5", r.ahead ? "text-foreground" : "text-muted-foreground")}>
             <ArrowUpIcon className="size-3" />
             {r.ahead}
@@ -346,6 +353,8 @@ function NameTip({ row: r }: { row: Row }) {
           </>
         )}
       </span>
+      {/* Said here too for a narrow table, which has no "vs base" column. */}
+      <span className="text-muted-foreground">{r.ahead || r.behind ? `${r.ahead} ahead of ${r.base ?? "its base"}, ${r.behind} behind` : `Even with ${r.base ?? "its base"}`}</span>
       {r.port !== undefined && (
         <span className="text-muted-foreground">
           Port {r.port} on {r.box}

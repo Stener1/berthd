@@ -94,14 +94,14 @@ export function TreeDockFrame({ showing, children }: { showing: boolean; childre
       <div className="absolute inset-y-0 left-0" style={{ right: on && !float ? DOCK_W : 0 }}>
         {children}
       </div>
-      {float && <div aria-hidden data-testid="tree-scrim" className="absolute inset-0 z-[41] bg-black/25 dark:bg-black/45" onClick={() => setTreeOpen(false)} />}
+      {float && <div aria-hidden data-testid="tree-scrim" className="absolute inset-0 z-scrim bg-black/25 dark:bg-black/45" onClick={() => setTreeOpen(false)} />}
       {on && (
         <aside
           ref={aside}
           aria-label="Files in this worktree"
           data-testid="files-panel"
           data-float={float || undefined}
-          className={cn("absolute inset-y-0 right-0 flex flex-col border-l bg-sidebar", float && "z-[42] shadow-[-18px_0_40px_-10px_rgb(0_0_0/0.45)]")}
+          className={cn("absolute inset-y-0 right-0 flex flex-col border-l bg-sidebar", float && "z-drawer shadow-[-18px_0_40px_-10px_rgb(0_0_0/0.45)]")}
           style={{ width: float ? FLOAT_W : DOCK_W }}
         >
           <TreePanel

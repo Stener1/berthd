@@ -39,7 +39,7 @@ import { Menu, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator
 import { Sheet, SheetPopup, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Session } from "@/lib/api";
-import { sessionAgent, sessionName, sessionPlace, sessionState } from "@/lib/derive";
+import { sessionAgent, sessionName, sessionPlace, sessionState, worktreeOf } from "@/lib/derive";
 import {
   type Category,
   categoryInfo,
@@ -66,7 +66,7 @@ import {
 } from "@/lib/notifications";
 import { type BoxData, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { titleAt } from "@/lib/worktree-names";
+import { placeLabel } from "@/lib/worktree-names";
 
 // useMinute re-renders once a minute, so relative times and snoozes move.
 export function useMinute(): number {
@@ -195,21 +195,30 @@ function short(iso: string, now: number): string {
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-// contextOf says where a note happened the way the sidebar does: "shop /
-// checkout-fix · devl", or "shop · devl" for a main checkout.
+// contextOf says where a note happened the way Home's widgets do, project
+// first (placeLabel): "shop / checkout-fix · devl", or "shop · devl" for a
+// main checkout. The box only when there is more than one.
 function contextOf(n: Note, boxes: Record<string, BoxData>): string {
-  // A worktree given a display name since is called by it.
-  const wt = (n.box && n.path && !placeIsMain(n) && titleAt(n.box, n.path, boxes)) || n.worktree;
-  let where = n.project ? (wt && wt !== n.project ? `${n.project} / ${wt}` : n.project) : wt;
+  let where: string | undefined;
+  if (n.box && n.path && n.project) where = placeLabel({ box: n.box, location: n.project, worktree: n.worktree ?? n.project, path: n.path, main: placeIsMain(n) }, boxes);
+  else where = n.project ? (n.worktree && n.worktree !== n.project ? `${n.project} / ${n.worktree}` : n.project) : n.worktree;
   if (!where && n.box && n.session) {
     const data = boxes[n.box];
     const s = data?.sessions?.find((x) => x.name === n.session);
     if (s) where = sessionPlace(s, data?.locations);
   }
-  return [where, n.box].filter(Boolean).join(" · ");
+  return [where, where ? boxOf(n.box, boxes) : n.box].filter(Boolean).join(" · ");
 }
 
+// boxOf names the box only when there is more than one, as Home does.
+const boxOf = (box: string | undefined, boxes: Record<string, BoxData>) => (Object.keys(boxes).length > 1 ? box : undefined);
+
 const placeIsMain = (n: Note) => !n.worktree && !!n.project;
+
+// Under the Needs you heading a title doesn't say it again: "Fix checkout
+// needs you" reads "Fix checkout". The note keeps its words (the system
+// notification and the screen reader's label say them).
+const underNeeds = (title: string) => title.replace(/\s+needs you$/i, "");
 
 // An item is one row: a note, or resolved repeats of one folded together.
 interface Item {
@@ -275,7 +284,10 @@ function liveWaiting(boxes: Record<string, BoxData>, notes: Note[]): Live[] {
       if (s.exited || sessionState(s, data.stats) !== "waiting") continue;
       const covered = notes.some((n) => n.category === "waiting" && !n.resolved && n.box === box && (n.session ? n.session === s.name : n.path === s.dir));
       if (covered) continue;
-      out.push({ key: `${box}|${s.name}`, box, session: s, name: sessionName(s, { sessions: data.sessions }), place: [sessionAgent(s), sessionPlace(s, data.locations), box].filter(Boolean).join(" · ") });
+      // Where first, as everywhere: "shop / checkout-fix · devl · Claude Code".
+      const wt = worktreeOf(data.locations, s);
+      const where = wt ? placeLabel({ box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main }, boxes) : sessionPlace(s, data.locations);
+      out.push({ key: `${box}|${s.name}`, box, session: s, name: sessionName(s, { sessions: data.sessions }), place: [where, boxOf(box, boxes), sessionAgent(s)].filter(Boolean).join(" · ") });
     }
   }
   return out;
@@ -317,9 +329,9 @@ export function NotificationCenter() {
   const anyEarlier = notes.some((n) => !needsYou(n, now));
   // The panel is as tall as its rows, up to the window. A box without a set
   // height can't pass one down, so the list's viewport is capped itself:
-  // the window less the inset (2rem), the status bar the sheet stays
-  // above (26px), the header and the banners.
-  const chrome = 32 + STATUS_BAR + 49 + (quiet ? 29 : 0) + (error ? 33 : 0);
+  // the window less the inset (2rem), the top band it sits under, the
+  // status bar it stays above (26px), the header and the banners.
+  const chrome = 32 - 8 + STATUS_BAR + 49 + (quiet ? 29 : 0) + (error ? 33 : 0);
   const current = FILTERS.find((f) => f.id === filter) ?? FILTERS[0];
   const tabStop = items.some((i) => i.note.id === active) || live.some((l) => l.key === active) ? active : (items[0]?.note.id ?? live[0]?.key);
 
@@ -396,7 +408,10 @@ export function NotificationCenter() {
     <Sheet open={open} onOpenChange={setNotificationsOpen}>
       <SheetPopup
         variant="inset"
-        className="outline-none sm:h-auto sm:max-h-[calc(100%-26px)] sm:max-w-[420px] sm:self-start"
+        // Below the window's top band (h-bar), 8px clear of it, so the
+        // band's buttons never show along its edge; the viewport's inset
+        // (1rem) is already above it.
+        className="outline-none sm:mt-[calc(var(--spacing-bar)-0.5rem)] sm:h-auto sm:max-h-[calc(100%-26px-var(--spacing-bar)+0.5rem)] sm:max-w-[420px] sm:self-start"
         showCloseButton={false}
         initialFocus={panel}
         data-notification-center=""
@@ -503,7 +518,7 @@ export function NotificationCenter() {
         ) : (
           <ScrollArea
             className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:max-h-(--list-max)"
-            style={{ "--list-max": `calc(100dvh - ${chrome}px)` } as React.CSSProperties}
+            style={{ "--list-max": `calc(100dvh - ${chrome}px - var(--spacing-bar))` } as React.CSSProperties}
             scrollFade
           >
             <div ref={list} className="px-1.5 pt-1.5 pb-2">
@@ -654,7 +669,7 @@ function Row({
       ) : (
         <div className="min-w-0 flex-1">
           <div className="flex h-5 items-center gap-1.5">
-            <span className={cn("min-w-0 truncate text-desc", n.read ? "text-foreground/80" : "font-medium text-foreground")}>{n.title}</span>
+            <span className={cn("min-w-0 truncate text-desc", n.read ? "text-foreground/80" : "font-medium text-foreground")}>{needs ? underNeeds(n.title) : n.title}</span>
             {item.count > 1 && <span className="shrink-0 text-tag text-muted-foreground tabular-nums">×{item.count}</span>}
             <span className="flex-1" />
             {time}
@@ -714,7 +729,7 @@ function LiveRow({ live, now, tabStop, onFocus }: { live: Live; now: number; tab
       </Tip>
       <div className="min-w-0 flex-1">
         <div className="flex h-5 items-center gap-1.5">
-          <span className="min-w-0 truncate font-medium text-desc text-foreground">{live.name} needs you</span>
+          <span className="min-w-0 truncate font-medium text-desc text-foreground">{live.name}</span>
           <span className="flex-1" />
           {since && <span className="shrink-0 text-tag text-muted-foreground tabular-nums">{short(since, now)}</span>}
         </div>
