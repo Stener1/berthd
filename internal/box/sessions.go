@@ -280,7 +280,10 @@ func (s *Sessions) tmux(ctx context.Context, args ...string) ([]byte, error) {
 //
 // Sessions started since keep their command in a file (@berth_command_file)
 // and only its start in @berth_command, for older builds to show.
-const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}\t#{@berth_account}"
+//
+// Channel build only: @berth_started_by holds column 19 for the needs-me
+// branch, so a merge with it conflicts here instead of both reading f[18].
+const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}\t#{@berth_location}\t#{?@berth_command64,,#{@berth_command}}\t#{pane_dead}\t#{pane_start_path}\t#{@berth_command64}\t#{@berth_agent}\t#{@berth_title}\t#{@berth_service}\t#{@berth_command_file}\t#{@berth_scope}\t#{pane_pid}\t#{@berth_driver}\t#{@berth_conv}\t#{@berth_sock}\t#{@berth_bypass}\t#{@berth_started_by}\t#{@berth_account}"
 
 // plainCommandMax is how much of a command the plain @berth_command keeps.
 const plainCommandMax = 1024
@@ -337,10 +340,10 @@ func parseSessions(out []byte) []Session {
 	sessions := []Session{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "\t")
-		for len(f) >= 7 && len(f) < 19 {
+		for len(f) >= 7 && len(f) < 20 {
 			f = append(f, "")
 		}
-		if len(f) != 19 {
+		if len(f) != 20 {
 			continue
 		}
 		command := f[4]
@@ -371,7 +374,7 @@ func parseSessions(out []byte) []Session {
 			conv:        f[15],
 			sock:        f[16],
 			bypass:      f[17] == "1",
-			account:     f[18],
+			account:     f[19],
 		})
 	}
 	return sessions
