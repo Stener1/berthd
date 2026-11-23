@@ -110,6 +110,28 @@ export declare const Tip: ComponentType<{ label: ReactNode; side?: "top" | "bott
 export declare const AgentPicker: ComponentType<{ presets: { id: string; name: string }[]; value: string; onChange(id: string): void; allowNone?: boolean; className?: string }>;
 // AgentIcon: an agent's mark, by preset id ("claude", "codex", …).
 export declare const AgentIcon: ComponentType<{ agent?: string; className?: string }>;
+// AgentStatusCard: an agent as the Agent Dashboard's live status card, for
+// a board of your own: what it does now and for how long, its model, which
+// step of its task list it is on, the steps it took this turn, and Pause,
+// Stop, Approve and Deny, Answer, Reply and Open run as its state calls for.
+// It reads the session on `box` named `session` itself, and draws nothing
+// once the box no longer lists it. What you can add: `title` (your own
+// name for it, instead of its work's title), `mark` (before that, such as a
+// status emoji), `children` (lines of your own under where it works),
+// `actions` (buttons after the card's own), `onOpen` (what opening it
+// does; its tab by default) and `highlighted` (a ring, for the one that
+// stands out).
+export declare const AgentStatusCard: ComponentType<{
+  box: string;
+  session: string;
+  title?: ReactNode;
+  mark?: ReactNode;
+  children?: ReactNode;
+  actions?: ReactNode;
+  onOpen?(): void;
+  highlighted?: boolean;
+  className?: string;
+}>;
 // The strip at the top of a screen: <ViewHeader title description actions />.
 // Render it anywhere in a screen and it takes the app's strip, so the screen
 // names itself once, the way the app's own views do.
