@@ -79,6 +79,10 @@ type Item struct {
 	Msg *Message `json:"msg,omitempty"`
 	// MidTurn: a prompt the person typed while the agent worked.
 	MidTurn bool `json:"midTurn,omitempty"`
+	// At is when the line that made a prompt or an edit was written (Unix
+	// ms), as a tool call has its own: the dashboard's cards time a turn
+	// and its steps from them.
+	At int64 `json:"at,omitempty"`
 
 	// pending are the tool calls in a group still waiting for a result.
 	pending map[string]bool
@@ -260,6 +264,9 @@ func (c *conv) add(it Item) int {
 		c.items[n-1].pending = nil
 	}
 	it.Off = c.lineOff
+	if it.At == 0 && (it.Kind == "user" || it.Kind == "edit") {
+		it.At = c.lineAt
+	}
 	n := keep
 	if c.limit > 0 {
 		n = c.limit
