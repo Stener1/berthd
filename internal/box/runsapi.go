@@ -40,6 +40,9 @@ type RunRequest struct {
 	Group   string       `json:"group,omitempty"`
 	Parent  string       `json:"parent,omitempty"`
 	Budget  *runs.Budget `json:"budget,omitempty"`
+	// FromSession is the session starting the run, from its BERTH_SESSION
+	// (callerSession): what the sessions it starts are started by.
+	FromSession string `json:"from_session,omitempty"`
 	// IdemKey is the Idempotency-Key, for callers that cannot send headers
 	// (the app, through the laptop's agent).
 	IdemKey string `json:"idem_key,omitempty"`
@@ -133,6 +136,9 @@ func (b *Box) startRun(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := b.before(r, "run.start", map[string]any{"template": req.Template, "path": path, "steps": len(req.Flow)}); err != nil {
 		return err
+	}
+	if by := b.callerSession(r, req.FromSession); by != "" {
+		vars[varStartedBy] = by
 	}
 	s, dup, err := eng.Start(runs.Request{Template: req.Template, Title: req.Title, Flow: req.Flow, Params: req.Params, Vars: vars,
 		IdemKey: idem, Group: req.Group, Parent: req.Parent, Budget: req.Budget, Origin: from, Path: path})

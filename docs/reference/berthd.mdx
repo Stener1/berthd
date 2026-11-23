@@ -71,10 +71,14 @@ asks the app to open the page as a browser tab beside the agent; the
 | --- | --- |
 | `berthd sessions [--json]` | List sessions |
 | `berthd agents [--json]` | Agent CLIs this box can start |
-| `berthd task new LOC/NAME [--agent ID] [--prompt TEXT] [--env KEY=VALUE]... [--open split\|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]` | A worktree with an agent (or a command) running in it; from an agent's session, that agent [hears back](/guides/orchestration#hearing-back) when its first turn ends, and the new worktree nests under that agent's. `--env` sets a variable [for this agent only](/reference/files#a-sessions-own-variables) |
-| `berthd session new LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--env KEY=VALUE]... [--open split\|tab] [-- COMMAND...]` | Start an agent or a command (default: a shell) there, `--env` as for `task new` |
+| `berthd task new LOC/NAME [--agent ID] [--prompt TEXT] [--env KEY=VALUE]... [--claim K]... [--open split\|tab] [--branch B] [--base REF] [--no-notify] [-- COMMAND...]` | A worktree with an agent (or a command) running in it; from an agent's session, that agent [hears back](/guides/orchestration#hearing-back) when its first turn ends, and the new worktree nests under that agent's. `--env` sets a variable [for this agent only](/reference/files#a-sessions-own-variables) |
+| `berthd session new LOC[/WORKTREE] [--name N] [--agent ID [--prompt TEXT]] [--env KEY=VALUE]... [--claim K]... [--open split\|tab] [-- COMMAND...]` | Start an agent or a command (default: a shell) there, `--env` as for `task new`. Run from a session, like `task new` and an agent's MCP tools, the new one records it as `started_by` in its JSON |
 | `berthd session screen NAME [--history N]` | Print what the session shows |
-| `berthd session send NAME TEXT [--when now\|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--no-notify]` | Type a prompt into a session (or hold it until the agent is idle), and wait for its turn; without `--wait`, an agent sending it hears back when the turn ends |
+| `berthd session send NAME TEXT [--when now\|idle] [--force] [--idem KEY] [--no-enter] [--wait [--timeout 30m]] [--no-notify] [--key K [--source S]]` | Type a prompt into a session (or hold it until the agent is idle), and wait for its turn; without `--wait`, an agent sending it hears back when the turn ends. `--key` keeps a [delivery record](#threads) of it for that thread |
+| `berthd session queue NAME [--json]` | The prompts held for a session until its agent is idle |
+| `berthd session unqueue NAME TURN [--json]` | Cancel a held prompt: it's never typed |
+| `berthd session resume NAME [--json]` | Start a structured session's ended agent again, in that session. A terminal session is refused: start its agent again instead |
+| `berthd conversation resume ID [--open split\|tab] [--json]` | Start a structured conversation again: in its session if that's still there, else in a new one, which takes on what the conversation's earlier sessions claimed |
 | `berthd session wait NAME [--turn ID] [--for finished,waiting] [--timeout 30m]` | Wait for a turn (from `session send`), or its agent's current one, to end |
 | `berthd session turns NAME [--limit 10] [--json]` | List a session's turns: who prompted, how it ended, how long it took |
 | `berthd exec LOC[/WORKTREE] [--timeout 10m] [--detach [--no-notify]] -- COMMAND...` | Run a command there and print its output; `--detach` runs it as a run, which reports back to an agent that started it |
@@ -91,6 +95,91 @@ asks the app to open the page as a browser tab beside the agent; the
 | `berthd flow secret FLOW [--scope S]` | Make a webhook flow's signing secret |
 | `berthd session rename NAME [TITLE]` | Name a session's work; no TITLE clears it |
 | `berthd session kill NAME` | Stop a session |
+
+## Work records
+
+A work record is a piece of running work: a title, its sessions, a status
+(`open`, `parked`, `waiting` or `closed`), a tracker issue and project when
+known, Not now, Waiting on and when a person last touched it. The box keeps
+them in `~/.berth/box/work.json`, and they outlive their sessions: a session
+ending changes only that session's line, and the record's status is its own.
+Grouping moves sessions between records and never touches the sessions.
+
+An agent session joins a record by rule: the oldest open record naming its
+tracker id, including ranges and lists (`X-1..5`, `X-1/2`), found in its title
+and worktree name; else one holding its worktree; else its parent's; else it
+gets its own. A closed record takes no new sessions. A session naming several
+records joins the oldest and suggests the others (`suggested_with`), since only
+a person can say that they are one piece of work. Shells and service terminals
+get no record of their own.
+
+`last_seen` moves when a person prompts or answers a session from the app, the
+phone, a laptop's `berth` or its terminal, and on `work seen`; not on an agent's
+send, a `/loop` wakeup or a restart. At a terminal a slash command doesn't
+count, because Claude Code's transcript can't tell it from one a wakeup ran.
+
+A parked or waiting record's dates don't change its status when they pass:
+whatever shows the record decides what a date in the past means.
+
+| Command | What it does |
+| --- | --- |
+| `berthd work list [--all] [--status open\|parked\|waiting\|closed] [--json]` | Open, parked and waiting work; `--all` adds closed |
+| `berthd work get ID [--json]` | One record with its sessions |
+| `berthd work create [--title T] [--session NAME,NAME] [--issue ID] [--project P] [--json]` | Make a record by hand |
+| `berthd work update ID [--title T] [--status S] [--issue ID] [--project P] [--not-until DATE] [--waiting-on WHO] [--check-back DATE] [--suggest ID,ID] [--json]` | Change a record. `--not-until` parks it and `--waiting-on` makes it waiting unless `--status` says otherwise; `--status open` clears them; a flag given empty clears its field |
+| `berthd work group ID [--with ID,ID] [--session NAME,NAME] [--json]` | Group other records or sessions into it. Its own state stands, and the records go |
+| `berthd work ungroup ID --session NAME,NAME [--json]` | Take sessions out, each into a record of its own, where rules leave them |
+| `berthd work accept\|reject ID [--json]` | Take up or turn down what's suggested with it; one turned down isn't proposed again |
+| `berthd work seen ID [--json]` | Say a person has just looked at it |
+| `berthd work pins [--json]` | What's pinned |
+| `berthd work pin\|unpin repo\|project\|work TARGET [--json]` | Pin a repo, a tracker project or a work record until it's removed. A record that closes loses its pin. Pins are the box's, so every computer reads the same ones |
+| `berthd work settings [--id-pattern RE\|--default] [--json]` | The regular expression that finds a tracker id. The default takes uppercase ids (`ACME-12`); `(?i)` takes a branch's `acme-12` too. Records already formed stay as they are |
+
+## Threads
+
+A thread is whatever a key names: an issue, a pull request, a service. Keys are
+opaque strings (`ACME-12`, `shop#12`, `service:api`, `gap:name`, `file:a/b`).
+The box only compares them, exactly, and never reads what one means.
+
+A session holds a key in one of two ways, and each of a record's `keys` says
+which:
+
+- **`claimed`:** someone said so, with `--claim` as it started or with
+  `work claim`. Only this can make a session a thread's owner.
+- **`mentioned`:** the id rule found it in a title or a worktree name. A title
+  can be a guess, so this groups sessions and makes them subscribers, and never
+  makes an owner.
+
+A thread's **owner** is the newest live session that claimed its key, leaving
+out sessions named `router-*`. Live means it's running with its agent up,
+whatever its title says. Claiming again makes that the newest claim, which is
+how a session takes a thread back. Every other session on the key is a
+subscriber. A new session reusing an old session's name doesn't inherit what
+that one claimed.
+
+Claims stay on their session when grouping moves it. A new claimant on its own
+in a record nobody has touched joins the record already holding the key, and
+otherwise the two are suggested as a group.
+
+Each box answers only for its own sessions, since only it sees one end: to look
+across boxes, ask each. A box that can't list its sessions answers with an error
+rather than saying a thread has no owner.
+
+| Command | What it does |
+| --- | --- |
+| `berthd work find --key K [--json]` | The thread: its record, `owner` (null with no live claimant), `claimants` (newest first, with who has ended and the `conversation` to resume them from), `subscribers`, and what each is doing |
+| `berthd work claim\|unclaim\|subscribe\|unsubscribe --key K [--key K] [--session NAME] [--json]` | Put a session on a key or take it off; no `--session` is the one it runs in. A session that unsubscribes stays off, whatever its title names |
+| `berthd work deliveries [--key K] [--session NAME] [--state S] [--json]` | Prompts sent on a thread's behalf, oldest first |
+| `berthd work delivery ID [--json]` | One delivery |
+| `berthd work undo ID [--json]` | Undo a delivery. One still held is taken out and never typed (`retracted: true`). One already typed can't be, so it only reads `undone`, and the caller tells the session to disregard it |
+| `berthd work hand-back ID [--why TEXT] [--json]` | Say a delivery that reached a session isn't its work |
+
+`session send --key K` keeps a delivery record: `id`, `key`, `to` (`box` and
+`name`), `turn`, `from`, `source` and `state`. The state is `held`, `typed`,
+`cancelled` (by `session unqueue`), `undone`, `handed_back` or `lost`. **A held
+prompt is dropped when its session ends**, so its delivery reads `lost` and
+`work.lost` fires, and the caller can start the work again. The prompt's text
+isn't in the record or its events.
 
 ## Ports and sharing
 

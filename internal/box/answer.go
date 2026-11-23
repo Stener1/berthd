@@ -63,6 +63,12 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	turn := ""
+	if b.Turns != nil {
+		if st, ok := b.Turns.State(sess.Name); ok {
+			turn = st.Turn
+		}
+	}
 	shown, err := b.answer(r.Context(), sess, req)
 	if err != nil {
 		// Every answer that didn't go says why in the box's log.
@@ -70,6 +76,8 @@ func (b *Box) answerSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	log.Printf("answer %s: answered %d questions", sess.Name, len(shown))
+	// As an answer typed at a question is: who, never what.
+	b.publish(r, "session.sent", map[string]any{"name": sess.Name, "from": gateOrigin(r), "answer": true, "turn": turn})
 	writeJSON(w, AnswerResult{Answered: shown})
 	return nil
 }

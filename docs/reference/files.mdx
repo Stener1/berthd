@@ -76,6 +76,7 @@ State, in `<state>/box/`:
 | `runs/<id>.d/` | A run's headless agents' prompts and JSON output |
 | `flow-runs.json.imported` | Flow runs from before durable runs, once imported |
 | `autofix.json` | Each worktree's Auto-fix this PR settings |
+| `work.json` | [Work records](/reference/berthd#work-records), [thread claims and deliveries](/reference/berthd#threads), pins, the box's id pattern, and how far it has read the journal for `last_seen` |
 | `reviews.json` | [Review](/guides/review-a-pr) settings: `idle_days`. Each review's mark (its PR, commit, author, and the keys it doesn't get) is in `locations.json` |
 | `browser/shots/<location>/<worktree>/` | Agents' browser screenshots, 20 per worktree |
 | `browser/viewports.json` | The [size](/guides/agent-browser#size) an agent chose for each worktree's browser, by path; a worktree at the default 1920×1080 has none |

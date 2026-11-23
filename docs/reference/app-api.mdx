@@ -144,11 +144,25 @@ failed after it went out (the box may have acted on it). The box API:
 | `DELETE locations/{name}/worktrees/{wt}?force=1` | |
 | `PATCH locations/{name}/worktrees/{wt}` | `{ title }` → `Worktree`: its display name (`title`), shown in place of its name; `""` clears it. The branch and folder are untouched; `worktree.renamed` follows. Boxes that take it list `worktree.titles` in `capabilities`; an older one answers 405 |
 | `GET sessions` | `Session[]` |
-| `POST sessions` | `{ name?, location: "loc" or "loc/wt", command?, agent?, prompt?, open? }` → `Session`. Or `{ home: true, command?, name? }`: a terminal in the box user's home folder, tied to no worktree (no location, no agent); boxes that take it list `session.home` in `capabilities` |
+| `POST sessions` | `{ name?, location: "loc" or "loc/wt", command?, agent?, prompt?, open?, claims?: [key] }` → `Session`. Or `{ home: true, command?, name? }`: a terminal in the box user's home folder, tied to no worktree (no location, no agent); boxes that take it list `session.home` in `capabilities` |
 | `DELETE sessions/{name}` | |
 | `GET sessions/{name}/screen?history=N` | `{ screen: string }` |
+| `GET work?all=1&status=S` | `WorkRecord[]`, open, parked and waiting unless `all=1` or `status` says otherwise; on a box with the `work` capability |
+| `POST work` | `{ title?, sessions?: [{ box?, name }], issue?, project? }` → `WorkRecord` |
+| `GET work/{id}`, `PATCH work/{id}` | `{ title?, status?, issue?, project?, not_until?, waiting_on?, check_back?, suggested_with? }` → `WorkRecord`; a field left out stays, an empty one is cleared |
+| `POST work/{id}/group` | `{ with?: [id], sessions?: [{ box?, name }] }` → `WorkRecord` |
+| `POST work/{id}/ungroup` | `{ sessions: [name] }` → the new `WorkRecord[]` |
+| `POST work/{id}/accept`, `POST work/{id}/reject` | → `WorkRecord`: takes up or turns down `suggested_with` |
+| `POST work/{id}/seen` | → `WorkRecord`: a person has just looked at it |
+| `GET work/pins`, `POST work/pins`, `DELETE work/pins?kind=K&target=T` | `WorkPin[]`; `{ kind: "repo"\|"project"\|"work", target }` → `WorkPin` |
+| `GET work/settings`, `PUT work/settings` | `{ id_pattern? }`: the regular expression that finds a tracker id |
+| `GET work/threads?key=K` | `Thread`: `{ key, provenance?, owner, claimants, subscribers, record, also? }`; on a box with the `threads` capability. See [threads](/reference/berthd#threads) |
+| `POST work/threads/claim`, `…/unclaim`, `…/subscribe`, `…/unsubscribe` | `{ session?, keys: [key] }` → `WorkRecord` |
+| `GET work/deliveries?key=K&session=S&state=ST` | `WorkDelivery[]`, oldest first |
+| `GET work/deliveries/{id}`, `POST work/deliveries/{id}/undo` | → `WorkDelivery`; on an undo, `retracted` says a held one was taken out before it was typed |
+| `POST work/deliveries/{id}/hand-back` | `{ why? }` → `WorkDelivery`; 409 unless it was typed |
 | `GET sessions/{name}/transcript?since=N&gen=G` | `{ source, items, next, crew, truncated?, artifacts?, gen?, reset?, start?, file? }`: the agent's conversation for the Conversation view, read from Claude Code's or Codex's own transcript (`source` is `claude`, `codex` or `none`). Items from index `N`; pass `next` back as `since`, and `gen` back as `gen`. The tool group just before `N` is sent again, so replace items by `id`. An item's `id` names where its line starts in the record (`off`), so it is the same however the record is read. When the box has read the record afresh since `gen` (a restart, a conversation let go while unread, a rewind) the answer is `reset`: the whole window from `start`, the offset of its first item; keep what you hold before `start`, take the rest from it, and read anything between with `?before=start`. `file` names the record; another one is another conversation. Tool output and thinking are never included. `artifacts` lists the claude.ai pages the agent published with Claude Code's Artifact tool, one per page (`url`, `title`, `description?`, `file?`, `at`, `tool`, `updated?`), newest last; each publish is also an `artifact` item. Boxes that serve it list `transcript` in `capabilities`. |
-| `POST tasks` | `TaskRequest` (`{ location, name, branch?, base?, agent?, command?, prompt?, … }`) → `{ worktree, session }`: a worktree with an agent already running in it |
+| `POST tasks` | `TaskRequest` (`{ location, name, branch?, base?, agent?, command?, prompt?, claims?, … }`) → `{ worktree, session }`: a worktree with an agent already running in it |
 | `GET stats` | `Stats`: memory, disks, load, agents |
 | `GET services` | `Service[]`: listening ports by worktree |
 | `GET ports` | `Port[]` |

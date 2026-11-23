@@ -36,6 +36,7 @@ import { mockHistoryCall } from "@/lib/mock-history";
 import { BENCH, benchFleet, benchTerm, noisyTerm, seedBenchChats } from "@/lib/mock-bench";
 import { mockAnswer, mockToolDetailSync, WEBHOOK_TEST } from "@/lib/mock-conversation";
 import { crowd } from "@/lib/mock-crowd";
+import { installMockWorkControls, mockWorkCall, needsMeScene } from "@/lib/mock-work";
 
 // Mock mode (?mock=1) runs the whole UI on fixtures, so it can be worked on
 // without an agent or a box. State is mutable: new tasks and sessions appear,
@@ -233,6 +234,8 @@ const stats: Record<string, Stats> = {
 
 // ?mock=1&crowd=1: many more agents, on more boxes (lib/mock-crowd.ts).
 if (new URLSearchParams(location.search).has("crowd")) crowd({ status, locations, sessions, stats });
+// ?scene=needs-me: one of everything Needs me sorts (lib/mock-work.ts).
+if (new URLSearchParams(location.search).get("scene") === "needs-me") needsMeScene(sessions);
 // ?structured: search-perf's Claude runs structured (Labs), its chat's
 // /resume the app's own picker of Claude's past conversations there. On
 // gpu, the working Claude, the one asking questions and ci-flake's (waiting
@@ -399,6 +402,8 @@ if (!fresh && !__BERTH_DEMO__ && !new URLSearchParams(location.search).has("stil
 }, 25_000);
 
 const delay = <T,>(v: T, ms = 120) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
+
+installMockWorkControls({ sessions, emit, delay });
 
 // mockOrchestration answers send, wait and exec: a prompted agent works for
 // a moment and finishes, and a worktree's check fails once, then passes, so
@@ -733,6 +738,8 @@ function boxCall(box: string, method: string, path: string, body?: unknown): Pro
   } catch (err) {
     return Promise.reject(new ApiError((err as Error).message, /didn't start/.test((err as Error).message) ? 403 : 404));
   }
+  const work = mockWorkCall(box, method, path, body, { sessions, emit, delay });
+  if (work) return work;
   const computers = computersBoxCall(box, method, path);
   if (computers) return computers;
   const thisMac = localBoxFolders(box, method, path);
