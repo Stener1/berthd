@@ -22,19 +22,22 @@ func (b *Box) listQueue(w http.ResponseWriter, r *http.Request) error {
 
 // cancelQueued drops a held prompt before it is typed.
 func (b *Box) cancelQueued(w http.ResponseWriter, r *http.Request) error {
-	if b.Turns == nil {
-		return httpError{http.StatusNotImplemented, "this box keeps no turns"}
-	}
 	name, turn := r.PathValue("name"), r.PathValue("turn")
-	unlock := b.lockSend(name)
-	err := b.Turns.Cancel(name, turn)
-	unlock()
-	if err != nil {
+	if err := b.cancelHeld(name, turn); err != nil {
 		return err
 	}
 	b.publish(r, "session.unqueued", map[string]any{"name": name, "turn": turn})
 	writeJSON(w, map[string]any{"cancelled": turn})
 	return nil
+}
+
+// cancelHeld takes a held prompt out, under its session's send lock.
+func (b *Box) cancelHeld(name, turn string) error {
+	if b.Turns == nil {
+		return httpError{http.StatusNotImplemented, "this box keeps no turns"}
+	}
+	defer b.lockSend(name)()
+	return b.Turns.Cancel(name, turn)
 }
 
 // sendQueued types a held prompt now, ahead of the agent finishing. Like
@@ -85,7 +88,7 @@ func (b *Box) sendQueued(w http.ResponseWriter, r *http.Request) error {
 	if waiting != "" {
 		// Typed at a question, it is an answer there, not a turn of its own.
 		data["answer"], data["turn"] = true, waiting
-		b.Turns.endQueued(name, turn, "sent as an answer")
+		b.Turns.endQueued(name, turn, turnSentAsAnswer)
 	} else {
 		data["turn"] = turn
 	}
