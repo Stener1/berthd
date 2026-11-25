@@ -159,6 +159,7 @@ type Box struct {
 	// tellMu and tellAgain keep tellAskers to one at a time.
 	tellMu    sync.Mutex
 	tellAgain atomic.Bool
+	accountCounts accountCounts
 }
 
 func (b *Box) own(path string) {

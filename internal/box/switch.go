@@ -291,8 +291,8 @@ func (b *Box) respawnAgent(ctx context.Context, sess Session, command string, en
 	argv := []string{shell, "-lc", withPATH(shell, launchPATH(command, agent), sourceCommand(shell, file))}
 	target := "=" + sess.Name + ":"
 	args := []string{"respawn-pane", "-k", "-t", target, "-c", sess.Dir}
-	// A default for one of the session's own would hide its value.
-	for _, kv := range append(append(withoutVars(withAgentBrowserIdle(extra), own), "BERTH_SESSION="+sess.Name, "BERTH_AGENT="+agent), env...) {
+	env = append(append(withoutVars(withAgentBrowserIdle(extra), own), "BERTH_SESSION="+sess.Name, "BERTH_AGENT="+agent), env...)
+	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
 	args = append(append(args, "--"), groups.Wrap(append(append([]string(nil), wrap...), argv...))...)
@@ -301,6 +301,13 @@ func (b *Box) respawnAgent(ctx context.Context, sess Session, command string, en
 	}
 	set("@berth_command", plainCommand(command))
 	set("@berth_command_file", file)
+	// Without its variable here, the agent runs on the account the
+	// session's own environment picks: what it ran on before is forgotten.
+	if v, ok := accountVar(agent, env); ok {
+		set(labelAccount, accountLabel(v))
+	} else {
+		args = append(args, ";", "set-option", "-u", "-t", target, labelAccount)
+	}
 	for _, k := range slices.Sorted(maps.Keys(labels)) {
 		set(k, labels[k])
 	}
