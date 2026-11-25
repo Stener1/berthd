@@ -90,6 +90,18 @@
     --spacing-page: 1.5rem;
     --spacing-rail: 60px;
     --spacing-rail-folded: max(88px, 5.5rem);
+    /* Stacking: the few layers outside Tailwind's z-10…z-50, named so
+       nobody reaches for z-[999]. z-raised lifts a sticky header over its
+       own rows. z-scrim and z-drawer are a floating panel's backdrop and
+       the panel, over a pane's own layers (z-30, z-40) and under menus and
+       dialogs (z-50). z-overlay sits over every dialog (the mock's traffic
+       lights), and z-drag, a dragged tab's ghost, over everything. Where
+       a local order is enough, a parent with `isolate` beats a new layer. */
+    --z-index-raised: 1;
+    --z-index-scrim: 41;
+    --z-index-drawer: 42;
+    --z-index-overlay: 100;
+    --z-index-drag: 1000;
     /* The type scale, Settings' and every page's: text-page-title, text-title,
        text-heading, text-subtitle, text-body, text-section, text-row,
        text-desc, text-label, text-meta, text-tag, text-mono. It is the only

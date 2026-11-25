@@ -1,7 +1,9 @@
 // Archive… from a worktree's menu: the dialog closes as soon as Archive is
 // pressed, the row says "Archiving…" until its box is done, it is a
-// one-row job in the background-jobs tray, and a toast says how it went. The mock's box takes 4 s to remove a worktree with no
-// archive script (?slowremove), as one with a big node_modules does.
+// one-row job in the background-jobs tray, and a toast says how it went.
+// The mock's devl and gpu have runs, so each archive is a stop run there,
+// in the box's own line. The mock's box takes 4 s to remove a worktree with
+// no archive script (?slowremove), as one with a big node_modules does.
 // features/worktree-archive.md.
 
 export const params = { slowremove: "4000", sidebar: "list" };
@@ -9,7 +11,9 @@ export const params = { slowremove: "4000", sidebar: "list" };
 const SLOW = 4000;
 
 export async function run({ page, shot, step, expect }) {
-  const toast = (text) => page.locator("[data-slot=toast-viewport] > *", { hasText: text });
+  // A toast by its title: role dialog, unlike the tray's jobs (groups), so a
+  // second toast for the same archive fails strict mode.
+  const toast = (title) => page.getByRole("dialog", { name: title });
   const leaving = (name) => page.locator("[data-leaving]", { hasText: name });
   const job = (name) => page.getByRole("region", { name: "Background jobs" }).getByRole("group", { name: `Archiving ${name}` });
   const archive = async (w) => {
@@ -44,12 +48,12 @@ export async function run({ page, shot, step, expect }) {
   await expect(leaving("ci-flake")).toContainText("Archiving…");
   await expect(job("ci-flake").getByRole("listitem")).toContainText("Archiving…");
 
-  step("archive gpu/judge-v2 straight after: it waits its turn on gpu, marked too");
+  step("archive gpu/judge-v2 straight after: it waits its turn in gpu's line, marked too");
   await pressArchive(await archive("gpu/judge-v2"), "3-second-archive");
   await expect(leaving("ci-flake")).toContainText("Archiving…");
   await expect(leaving("judge-v2")).toContainText("Archiving…");
-  step("the tray has both, judge-v2 waiting for gpu");
-  await expect(job("judge-v2").getByRole("listitem")).toContainText("Waiting for gpu");
+  step("the tray has both, each a run gpu has taken");
+  await expect(job("judge-v2").getByRole("listitem")).toContainText("Archiving…");
   await shot("4-both-archiving");
 
   step("when gpu answers, ci-flake goes and says its branch is kept");
@@ -67,13 +71,14 @@ export async function run({ page, shot, step, expect }) {
   await expect(page.locator('[data-worktree="gpu/judge-v2"]')).toHaveCount(0);
   await shot("6-both-archived");
 
-  step("devl/qa-deck (archive script pnpm db:drop): the box runs it in the background");
+  step("devl/qa-deck (archive script pnpm db:drop): the box's run waits for the script, and the tray with it");
   const scripted = await archive("devl/qa-deck");
   await expect(scripted).toContainText("pnpm db:drop");
   await pressArchive(scripted, "7-script-just-after-archive");
-  await expect(toast("Archiving qa-deck")).toContainText("Its archive script is running on the box");
+  await expect(job("qa-deck").getByRole("listitem")).toContainText("Archiving…");
   await shot("8-script-running");
   await expect(toast("Archived qa-deck")).toBeVisible({ timeout: 10_000 });
+  await expect(job("qa-deck")).toContainText("Archived qa-deck");
   await expect(page.locator('[data-worktree="devl/qa-deck"]')).toHaveCount(0);
 
   step("devl/checkout-fix (uncommitted work): kept, and a warning says why");

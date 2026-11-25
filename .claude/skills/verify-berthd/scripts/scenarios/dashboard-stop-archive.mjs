@@ -1,13 +1,16 @@
 // The Agent Dashboard's bulk Stop, with "Archive their worktrees where it's
 // safe" ticked (views/dashboard/stop.tsx): the dialog closes at once and
 // the run goes on in the background-jobs tray (components/jobs-tray.tsx).
-// A clean worktree with an archive script archives in the background, one
-// without archives (slowly: ?slowremove), a dirty one is kept, and one with
-// another agent still in it is kept; the tray reports those two. Then a
+// With ?noruns every box is one from before runs, so this is the app's own
+// loop, the fallback (boxes with runs: dashboard-stop-lid on a real box, and
+// the e2e). A clean worktree with an archive script archives in the
+// background, one without archives (slowly: ?slowremove), a dirty one is
+// kept, and one with another agent still in it is kept; the tray reports
+// those two. Then a
 // clean run fades, and Stop the rest leaves the unsent ones (?slowstop).
 // features/dashboard-stop.md.
 
-export const params = { slowremove: "4000", slowstop: "1500" };
+export const params = { slowremove: "4000", slowstop: "1500", noruns: "1" };
 
 const picks = [
   // devl / search-perf: shop has an archive script, so it runs first.
@@ -90,7 +93,7 @@ export async function run({ page, shot, step, expect }) {
   await pill.click();
 
   step("it ends as a report of what was kept, each saying why");
-  await expect(first).toContainText("4 stopped, 1 archived, 1 archiving, 2 kept", { timeout: 15_000 });
+  await expect(first).toContainText("4 stopped, 2 archived, 2 kept", { timeout: 15_000 });
   await expect(first.getByRole("listitem")).toHaveCount(2);
   await expect(jobRow("Stopping 4 agents", "checkout-fix")).toContainText("Stopped · Kept: uncommitted changes");
   await expect(jobRow("Stopping 4 agents", "order-export")).toContainText("Stopped · Kept: another agent is still running there");

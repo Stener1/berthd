@@ -56,6 +56,7 @@ export function HomeGrid({ className }: { className?: string }) {
 
   // Columns as drawn, for the keyboard's up and down and each body's span.
   const wrap = useRef<HTMLDivElement>(null);
+  const top = useRef<HTMLElement>(null);
   const [cols, setCols] = useState(4);
   useLayoutEffect(() => {
     const el = wrap.current;
@@ -162,39 +163,29 @@ export function HomeGrid({ className }: { className?: string }) {
   };
 
   return (
-    <section aria-label="Your widgets" data-testid="home-grid" data-editing={edit || undefined} className={cn("w-full", className)}>
-      <div className="mb-2.5 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1.5">
-        {edit ? (
-          <>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <h2 className="text-section">Customize Home</h2>
-              <p id="home-grid-hint" className="text-desc text-muted-foreground">
-                Drag a heading to move a widget, or focus it and use the arrow keys. <kbd className="font-mono">[</kbd> <kbd className="font-mono">]</kbd> resize, Delete removes. Saved as you go.
-              </p>
-            </div>
-            <Button size="sm" variant="ghost" onClick={reset}>
-              <RotateCcwIcon />
-              Reset
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setPicker(true)}>
-              <PlusIcon />
-              Add widget
-            </Button>
-            <Button size="sm" onClick={() => setEdit(false)}>
-              <CheckIcon />
-              Done
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="flex-1" />
-            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setEdit(true)} data-testid="home-customize">
-              <LayoutGridIcon />
-              Customize
-            </Button>
-          </>
-        )}
-      </div>
+    <section ref={top} aria-label="Your widgets" data-testid="home-grid" data-editing={edit || undefined} className={cn("w-full scroll-mt-4", className)}>
+      {edit && (
+        <div className="mb-2.5 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h2 className="text-section">Customize Home</h2>
+            <p id="home-grid-hint" className="text-desc text-muted-foreground">
+              Drag a heading to move a widget, or focus it and use the arrow keys. <kbd className="font-mono">[</kbd> <kbd className="font-mono">]</kbd> resize, Delete removes. Saved as you go.
+            </p>
+          </div>
+          <Button size="sm" variant="ghost" onClick={reset}>
+            <RotateCcwIcon />
+            Reset
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPicker(true)}>
+            <PlusIcon />
+            Add widget
+          </Button>
+          <Button size="sm" onClick={() => setEdit(false)}>
+            <CheckIcon />
+            Done
+          </Button>
+        </div>
+      )}
       <div ref={wrap} className="@container">
         {drawn.length === 0 ? (
           <EmptyGrid onAdd={() => setPicker(true)} onReset={reset} />
@@ -244,6 +235,26 @@ export function HomeGrid({ className }: { className?: string }) {
           </div>
         )}
       </div>
+      {/* Under the widgets, not over them: Home opens on what needs you.
+          Each widget's menu offers Customize too. It brings the grid's top,
+          where Done is, into view. */}
+      {!edit && (
+        <div className="mt-2.5 flex justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => {
+              setEdit(true);
+              requestAnimationFrame(() => top.current?.scrollIntoView({ block: "start", behavior: scrollBehavior() }));
+            }}
+            data-testid="home-customize"
+          >
+            <LayoutGridIcon />
+            Customize
+          </Button>
+        </div>
+      )}
       <p className="sr-only" aria-live="polite">
         {said}
       </p>

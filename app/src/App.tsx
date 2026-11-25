@@ -43,6 +43,8 @@ import { startOutdatedWatch } from "@/lib/outdated";
 import { startBoxDefaultsSync } from "@/lib/box-defaults";
 import { startSkillsNoticeWatch } from "@/lib/skills-notice";
 import { startRunsWatch } from "@/lib/runs";
+import { reattachStopJobs } from "@/lib/stop-job";
+import { stopRuns } from "@/lib/stop-on-box";
 import { watchStillness } from "@/lib/still";
 import { watchKeyboardLayout } from "@/lib/keyboard-layout";
 import { useStore } from "@/lib/store";
@@ -100,6 +102,9 @@ export default function App() {
   // panel, Automations and Review (lib/runs.ts).
   const connectedToAgent = useStore((s) => !!s.client);
   useEffect(() => (connectedToAgent ? startRunsWatch() : undefined), [connectedToAgent]);
+  // Stop jobs the boxes carried on with while the app was closed come back
+  // to the tray (lib/stop-job.ts).
+  useEffect(() => void (connectedToAgent && reattachStopJobs({ runs: stopRuns })), [connectedToAgent]);
   // Which boxes run an older berthd (lib/outdated.ts).
   useEffect(() => (connectedToAgent ? startOutdatedWatch() : undefined), [connectedToAgent]);
   // Agents started without the app (another agent, the CLI, a run) follow

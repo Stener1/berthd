@@ -19,7 +19,7 @@ import { useReview } from "@/views/review/review-store";
 
 import { fitRows, useHomeWidget } from "./env";
 import { DiffStat, More, shortAgo, WidgetEmpty, WidgetRow, WidgetSkeleton } from "./parts";
-import { placeLabel, worktreeLabel } from "@/lib/worktree-names";
+import { placeLabel } from "@/lib/worktree-names";
 
 // The agents' widgets: what needs you (answered in place where it can be),
 // what is working and on which step, what just finished, and where you and
@@ -33,7 +33,9 @@ export interface AgentRow {
   session: Session;
   agent: string;
   title: string;
-  // "shop / checkout-fix · devl"
+  // Where it works, project first (placeLabel), and the box when there is
+  // more than one: "shop / checkout-fix · devl". Just the box when the
+  // title already is the place.
   where: string;
   worktree?: WorktreeRef;
   state: "waiting" | "running" | "finished";
@@ -49,19 +51,23 @@ export function useAgentRows(): AgentRow[] {
 // Worked out once for every widget and count that asks (lastOf).
 const agentRows = lastOf((all: SessionEntry[], boxes: Record<string, BoxData>): AgentRow[] => {
   const rows: AgentRow[] = [];
+  // The box helps say where only when there is more than one.
+  const many = Object.keys(boxes).length > 1;
   for (const e of all) {
     const agent = agentOf(e.session);
     if (!agent || (e.state !== "waiting" && e.state !== "running" && e.state !== "finished")) continue;
     const wt = worktreeOf(boxes[e.box]?.locations, e.session);
-    const place = wt ? (wt.worktree.main ? wt.location.name : `${wt.location.name} / ${worktreeLabel(wt.worktree)}`) : "";
+    const ref = wt ? { box: e.box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main } : undefined;
+    const place = ref ? placeLabel(ref, boxes) : (e.session.location ?? "");
+    const title = e.session.title?.trim();
     rows.push({
       key: `${e.box}/${e.session.name}`,
       box: e.box,
       session: e.session,
       agent,
-      title: e.session.title?.trim() || place || e.session.name,
-      where: [e.session.title?.trim() ? place : "", e.box].filter(Boolean).join(" · "),
-      worktree: wt ? { box: e.box, location: wt.location.name, worktree: wt.worktree.name, path: wt.worktree.path, main: wt.worktree.main } : undefined,
+      title: title || place || e.session.name,
+      where: [title ? place : "", many || !place ? e.box : ""].filter(Boolean).join(" · "),
+      worktree: ref,
       state: e.state,
       since: e.session.state_since ?? e.session.created,
     });
@@ -151,14 +157,19 @@ function WaitingRow({ r }: { r: AgentRow }) {
   const open = () => void focusSession(r.box, s.name);
 
   return (
-    <div className="group/row flex min-w-0 flex-col gap-1 rounded-md px-2 py-1.5 hover:bg-accent/60">
+    <div data-agent-row="" className="group/row flex min-w-0 flex-col gap-1 rounded-md px-2 py-1.5 hover:bg-accent/60">
       <button type="button" onClick={open} className="flex w-full min-w-0 items-center gap-2.5 rounded-sm text-left text-body outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <StateGlyph state="waiting" />
         <span className="min-w-0 flex-1 truncate text-row">{r.title}</span>
         <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{shortAgo(r.since)}</span>
       </button>
       <span className="flex min-w-0 items-center gap-2 pl-6 text-meta text-muted-foreground">
-        <span className={cn("min-w-0 flex-1 truncate", tool && !question && "font-mono")}>{detail}</span>
+        {/* Where first, then what it asks: the project is never pushed out. */}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {r.where && <span className="max-w-[60%] shrink-0 truncate">{r.where}</span>}
+          {r.where && <span aria-hidden>·</span>}
+          <span className={cn("min-w-0 flex-1 truncate", tool && !question && "font-mono")}>{detail}</span>
+        </span>
         {answered ? (
           <span className="shrink-0">{answered === "Deny" ? "Denied" : "Allowed"} · resuming</span>
         ) : allow && deny ? (
@@ -255,6 +266,7 @@ function WorkingRow({ r }: { r: AgentRow }) {
   return (
     <button
       type="button"
+      data-agent-row=""
       onClick={() => void focusSession(r.box, r.session.name)}
       className="flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
@@ -264,9 +276,15 @@ function WorkingRow({ r }: { r: AgentRow }) {
         <AgentIcon agent={r.agent} className="size-3 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{step?.elapsed ?? shortAgo(r.since)}</span>
       </span>
+      {/* Where first, then the step its screen shows. */}
       <span className="flex min-w-0 items-center gap-1.5 pl-6 text-meta text-muted-foreground">
-        <span className="min-w-0 truncate font-mono">{step?.now ?? `${agentLabel(r.agent)} · ${r.where}`}</span>
-        {step?.sub && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground @max-[300px]:hidden">· {step.sub}</span>}
+        <span className="max-w-[60%] shrink-0 truncate">{r.where || agentLabel(r.agent)}</span>
+        {step?.now && (
+          <>
+            <span aria-hidden className="@max-[300px]:hidden">·</span>
+            <span className="min-w-0 flex-1 truncate font-mono @max-[300px]:hidden">{step.now}</span>
+          </>
+        )}
       </span>
     </button>
   );

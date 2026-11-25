@@ -1,13 +1,15 @@
-import { CheckCheckIcon, CheckIcon, ChevronDownIcon, GitBranchIcon, GitCommitHorizontalIcon, GitPullRequestIcon, GlobeIcon, MessageSquareReplyIcon, MessageSquareTextIcon, SendIcon, SquareArrowOutUpRightIcon, Trash2Icon, XIcon } from "lucide-react";
+import { CheckCheckIcon, CheckIcon, ChevronDownIcon, EllipsisIcon, GitBranchIcon, GitCommitHorizontalIcon, GitPullRequestIcon, GlobeIcon, MessageSquareReplyIcon, MessageSquareTextIcon, SendIcon, SquareArrowOutUpRightIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Tip } from "@/components/tip";
 import { AgentIcon } from "@/components/agent-glyph";
+import { Markdown } from "@/components/conversation/markdown";
+import { reflowScreen } from "@/lib/reflow";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Frame, FrameHeader, FramePanel, FrameTitle } from "@/components/ui/frame";
 import { Kbd } from "@/components/ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "@/components/ui/menu";
 import { boxApi } from "@/lib/api";
 import { useShotUrl } from "@/lib/agent-browser";
 import { agentLabel } from "@/lib/derive";
@@ -23,7 +25,7 @@ import { useStore } from "@/lib/store";
 import { useSessionTitle } from "@/hooks/use-session-name";
 import { cn } from "@/lib/utils";
 import type { ApproveMode } from "@/views/review/review-actions";
-import { type ReviewEntry, useReview, useReviewName, where } from "@/views/review/review-store";
+import { placeOf, type ReviewEntry, useReview, useReviewName, where } from "@/views/review/review-store";
 import { lastMessage } from "@/views/review/summary";
 
 export interface DetailActions {
@@ -66,10 +68,7 @@ export function ReviewDetail({ entry, actions }: { entry: ReviewEntry; actions: 
               )}
             </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
-              <span>
-                {work && `${name} · `}
-                {entry.box} · {entry.location}
-              </span>
+              <span>{placeOf(entry, !!work)}</span>
               {entry.branch && (
                 <span className="inline-flex min-w-0 items-center gap-1 font-mono">
                   <GitBranchIcon className="size-3" />
@@ -92,12 +91,14 @@ export function ReviewDetail({ entry, actions }: { entry: ReviewEntry; actions: 
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        {/* The decision on the left, Approve first; looking and tidying on
+            the right, with Discard kept apart in the ⋯ menu. */}
+        <div className="flex items-center gap-1.5">
           <div className="flex">
             <Button size="sm" className="rounded-r-none" onClick={() => actions.approve(hasFiles ? "commit" : "push")}>
               <CheckIcon />
               Approve…
-              <Kbd className="ml-0.5 hidden h-4.5 bg-primary-foreground/15 text-tag text-primary-foreground xl:inline-flex">A</Kbd>
+              <Kbd className="ml-0.5 h-4.5 bg-primary-foreground/15 text-tag text-primary-foreground">A</Kbd>
             </Button>
             <Menu>
               <MenuTrigger render={<Button size="sm" className="rounded-l-none border-l border-l-primary-foreground/20 px-1.5" aria-label="More ways to approve" />}>
@@ -124,29 +125,35 @@ export function ReviewDetail({ entry, actions }: { entry: ReviewEntry; actions: 
           <Button size="sm" variant="outline" onClick={actions.sendBack}>
             <MessageSquareReplyIcon />
             Send back…
-            <Kbd className="ml-0.5 hidden h-4.5 text-tag xl:inline-flex">S</Kbd>
+            <Kbd className="ml-0.5 h-4.5 text-tag">S</Kbd>
           </Button>
-          <Tip label={hasFiles ? undefined : "Nothing uncommitted to discard"}>
-            <Button size="sm" variant="outline" onClick={actions.discard} disabled={!hasFiles}>
-              <Trash2Icon />
-              Discard…
-              <Kbd className="ml-0.5 hidden h-4.5 text-tag xl:inline-flex">D</Kbd>
-            </Button>
-          </Tip>
-          <span className="mx-1 h-5 w-px bg-border" />
-          <Button size="sm" variant="ghost" onClick={actions.open}>
-            <SquareArrowOutUpRightIcon />
-            <span className="hidden xl:inline">Open worktree</span>
-            <span className="xl:hidden">Open</span>
-            <Kbd className="ml-0.5 hidden h-4.5 text-tag xl:inline-flex">↵</Kbd>
-          </Button>
-          <Tip label="Mark reviewed (E): it comes back if the agent changes anything">
-            <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" onClick={actions.markReviewed}>
-              <CheckCheckIcon />
-              <span className="hidden xl:inline">Mark reviewed</span>
-              <Kbd className="ml-0.5 hidden h-4.5 text-tag xl:inline-flex">E</Kbd>
-            </Button>
-          </Tip>
+          <div className="ml-auto flex items-center gap-0.5">
+            <Tip label="Open its worktree (↵)">
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={actions.open}>
+                <SquareArrowOutUpRightIcon />
+                Open
+              </Button>
+            </Tip>
+            <Tip label="Mark reviewed (E): it comes back if the agent changes anything">
+              <Button size="icon-sm" variant="ghost" className="text-muted-foreground" onClick={actions.markReviewed} aria-label="Mark reviewed">
+                <CheckCheckIcon />
+              </Button>
+            </Tip>
+            <Menu>
+              <Tip label="More">
+                <MenuTrigger render={<Button size="icon-sm" variant="ghost" className="text-muted-foreground" aria-label="More actions" />}>
+                  <EllipsisIcon />
+                </MenuTrigger>
+              </Tip>
+              <MenuPopup align="end">
+                <MenuItem variant="destructive" onClick={actions.discard} disabled={!hasFiles}>
+                  <Trash2Icon />
+                  {hasFiles ? "Discard changes…" : "Nothing uncommitted to discard"}
+                  {hasFiles && <MenuShortcut>D</MenuShortcut>}
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </div>
         </div>
       </header>
 
@@ -231,12 +238,10 @@ function LastWords({ entry }: { entry: ReviewEntry }) {
         ) : lines.length === 0 ? (
           <p className="text-muted-foreground text-body">Nothing on its screen to show.</p>
         ) : (
-          <div className="max-h-56 overflow-y-auto font-mono text-mono">
-            {lines.map((l, i) => (
-              <div key={i} className="whitespace-pre-wrap break-words">
-                {l || " "}
-              </div>
-            ))}
+          // Prose, wrapped to the card: the terminal's line breaks go
+          // (lib/reflow.ts), its lists and code spans stay.
+          <div className="max-h-56 overflow-y-auto text-body" data-testid="review-last-message">
+            <Markdown text={reflowScreen(lines)} copy={false} />
           </div>
         )}
       </FramePanel>
