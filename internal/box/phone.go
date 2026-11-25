@@ -253,7 +253,11 @@ func (p *Phone) Handler(b *Box, listenAddr string) http.Handler {
 
 	api := http.NewServeMux()
 	api.HandleFunc("GET /phone/v1/info", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"box": b.Name, "version": 1})
+		// transcript: a session's chat (sessions/{name}/transcript). answer:
+		// the form of an agent's questions (sessions/{name}/answer); a
+		// permission or a plan is answered with send, by its choice's key.
+		// An app without them shows the screen.
+		writeJSON(w, map[string]any{"box": b.Name, "version": 1, "capabilities": []string{"transcript", "answer"}})
 	})
 	api.HandleFunc("GET /phone/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		all, err := b.Sessions.List(r.Context())
@@ -282,6 +286,26 @@ func (p *Phone) Handler(b *Box, listenAddr string) http.Handler {
 			return
 		}
 		writeJSON(w, map[string]string{"screen": text})
+	})
+	// The chat: the same handler as the app API's transcript, so the two
+	// cannot drift. Tool output and thinking are not in it, and the tool
+	// detail route is not mounted here.
+	api.HandleFunc("GET /phone/v1/sessions/{name}/transcript", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.transcript(w, r); err != nil {
+			writeError(w, statusFor(err), err.Error())
+		}
+	})
+	api.HandleFunc("POST /phone/v1/sessions/{name}/answer", func(w http.ResponseWriter, r *http.Request) {
+		// Answering fills in the agent's form as typing would, so the same
+		// gate decides.
+		name := r.PathValue("name")
+		if err := b.before(r, "session.send", map[string]any{"name": name, "from": "phone", "answer": true}); err != nil {
+			writeError(w, statusFor(err), err.Error())
+			return
+		}
+		if err := b.answerSession(w, r); err != nil {
+			writeError(w, statusFor(err), err.Error())
+		}
 	})
 	api.HandleFunc("POST /phone/v1/sessions/{name}/send", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

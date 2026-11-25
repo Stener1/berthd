@@ -1,0 +1,9 @@
+{"source":"claude","next":6,"gen":"g1","file":"conv-acme-1","crew":[],"items":[
+ {"kind":"user","id":"u1","off":10,"text":"Fix the **rounding** bug in checkout"},
+ {"kind":"text","id":"t1","off":120,"text":"I'll look at `price.ts`.\n\n```ts\nconst total = round(a + b)\n```"},
+ {"kind":"tools","id":"g1","off":300,"verb":"Read","done":false,"items":[{"verb":"Read","target":"src/price.ts","id":"c1"}]},
+ {"kind":"edit","id":"e1","off":400,"file":"src/price.ts","added":3,"removed":1,"tool":"c2"},
+ {"kind":"artifact","id":"a1","off":500,"text":"Rounding report","url":"https://claude.ai/artifact/acme-1","description":"Before and after","done":true},
+ {"kind":"question","id":"q1","off":600,"tool":"toolu_acme1","done":false,"questions":[
+   {"question":"Which rounding?","header":"Rounding","options":[{"label":"Half up","description":"2.5 becomes 3"},{"label":"Half even"}]}]}
+]}

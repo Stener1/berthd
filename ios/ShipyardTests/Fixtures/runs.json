@@ -1,0 +1,5 @@
+[
+  {"id":"r_01","template":"attempts","title":"refunds: 3 attempts","status":"waiting_gate","cursor":"2.t.0","created":"2026-10-24T09:00:00Z","updated":"2026-10-24T09:40:00.5Z","gate":{"path":"2.t.0","title":"Pick the best attempt at refunds","text":"Winner: attempt 3.","pick":true,"default":2},"steps":4,"candidates":3},
+  {"id":"r_02","template":"loop","title":"Loop until pnpm test passes","status":"running","cursor":"1.r2.0","created":"2026-10-24T09:30:00Z","updated":"2026-10-24T09:45:00Z"},
+  {"id":"r_03","template":"review","status":"succeeded","created":"2026-10-23T09:00:00Z","updated":"2026-10-23T09:10:00Z","finished":"2026-10-23T09:10:00Z","steps":2}
+]

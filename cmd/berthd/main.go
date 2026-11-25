@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -382,7 +383,7 @@ func serve(b boxHome, args []string) error {
 		Paused:           &box.PauseStore{Path: filepath.Join(b.dir, "paused.json")},
 		Secrets:          b.boxSecrets(),
 		Socket:           b.socket(),
-		Phone:            &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Log: logger},
+		Phone:            &box.Phone{Path: filepath.Join(b.dir, "phone.json"), Addr: tailnetAddr, Port: phonePort(), Log: logger},
 		Guard:            &box.Guard{Path: filepath.Join(userDir, "guard.json")},
 		Invites:          &box.Invites{Address: func() string { return pairAddress(b) }, TTL: defaultTTL},
 		TurnCheck:        &box.TurnCheck{Path: filepath.Join(userDir, "turncheck.json"), KeyPath: filepath.Join(b.dir, "turncheck.key"), Log: logger},
@@ -624,4 +625,13 @@ func listClients(b boxHome) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name, p.Fingerprint.Short(), p.PairedAt.Local().Format("2006-01-02 15:04"))
 	}
 	return w.Flush()
+}
+
+// phonePort is where the phone app listens: BERTH_PHONE_PORT, for a second
+// box on one machine (a test, a throwaway home), or the usual 1379.
+func phonePort() int {
+	if n, err := strconv.Atoi(os.Getenv("BERTH_PHONE_PORT")); err == nil && n > 0 && n < 65536 {
+		return n
+	}
+	return 0
 }

@@ -146,6 +146,7 @@ See [events and gates](/reference/events#what-a-hook-gets).
 | `OP_SERVICE_ACCOUNT_TOKEN`, other `OP_*` | Passed to `op`, from berthd's environment or `env.json` |
 | `SHELL` | The shell scripts, sessions and `exec` run in |
 | `BERTH_PROXY_ADDR`, `BERTH_UI_ADDR` | `berth agent` only: where a second agent (a test, a throwaway home) listens instead of 1377 and 1378 |
+| `BERTH_PHONE_PORT` | `berthd` only: where the [phone companion](/guides/phone) listens instead of 1379, for a second box on the same machine |
 | `BERTH_PLUGIN_REGISTRY` | `berth agent` only: the [plugin listing](/guides/plugins#publish-it-to-the-listing) to browse instead of `https://berthd.app/plugins/index.json`. An `https://` link to an `index.json`; plain `http://` only on `localhost` or `127.0.0.1` |
 | `BERTH_CHROMIUM` | berthd: the Chromium for [agents' browsers](/guides/agent-browser) |
 | `BERTH_CLI` | A dev build of the desktop app (`pnpm tauri dev`): the `berth` to run for the laptop agent. The packaged app ignores it and runs only the copy it carries |

@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig (gitignored) and fill in. Used by `make ios-install`.
+DEVELOPMENT_TEAM = ABCDE12345
+PRODUCT_BUNDLE_IDENTIFIER = com.example.shipyard
