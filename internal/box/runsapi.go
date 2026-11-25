@@ -61,6 +61,8 @@ func runErr(err error) error {
 		return httpError{http.StatusNotFound, err.Error()}
 	case errors.Is(err, runs.ErrNoGate), errors.Is(err, runs.ErrDone), errors.Is(err, runs.ErrQueueFull):
 		return httpError{http.StatusConflict, err.Error()}
+	case errors.Is(err, errRateLimited):
+		return httpError{http.StatusTooManyRequests, err.Error()}
 	}
 	return err
 }
@@ -97,7 +99,7 @@ func (b *Box) startRun(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		e := eventAs(b, origin(r), triggerType(sf.Flow.Trigger), req.Data)
-		s, err := b.startFlowRun(r.Context(), sf, e, flowStart{idem: idem})
+		s, err := b.startFlowRun(r.Context(), sf, e, flowStart{via: "api", idem: idem})
 		if err != nil {
 			return runErr(err)
 		}

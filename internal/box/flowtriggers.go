@@ -3,6 +3,7 @@ package box
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,13 +38,21 @@ func (b *Box) flowTargets(ctx context.Context, sf ScopedFlow, withMain bool) []s
 	Loc Location
 	Wt  Worktree
 } {
-	var out []struct {
-		Loc Location
-		Wt  Worktree
-	}
 	locs, err := b.Locations.List(ctx)
 	if err != nil {
 		return nil
+	}
+	return flowTargetsIn(locs, sf, withMain)
+}
+
+// flowTargetsIn is flowTargets among locs, read once for many flows.
+func flowTargetsIn(locs []Location, sf ScopedFlow, withMain bool) []struct {
+	Loc Location
+	Wt  Worktree
+} {
+	var out []struct {
+		Loc Location
+		Wt  Worktree
 	}
 	want := sf.Flow.Trigger.Where.Location
 	if name, ok := strings.CutPrefix(sf.Scope, "repo:"); ok {
@@ -75,12 +84,16 @@ func (b *Box) flowTargets(ctx context.Context, sf ScopedFlow, withMain bool) []s
 	return out
 }
 
-// fireScheduled starts the scheduled flows due in minute t.
+// fireScheduled starts the scheduled flows due in minute t, and returns
+// how many runs it started. A start the runs-per-hour limit refused is
+// logged once per streak (allowRate); any other refusal is a flow.skipped
+// event, as the event bus's are.
 func (b *Box) fireScheduled(ctx context.Context, t time.Time) int {
 	all, err := b.ActiveFlows(ctx)
 	if err != nil {
 		return 0
 	}
+	b.warnRates(ctx, all)
 	t = t.Truncate(time.Minute)
 	fired := 0
 	for _, sf := range all {
@@ -89,7 +102,7 @@ func (b *Box) fireScheduled(ctx context.Context, t time.Time) int {
 			continue
 		}
 		c, err := ParseCron(tr.Schedule)
-		if err != nil || !c.Matches(t) || !b.Flows.firstFiring(sf.Scope+"/"+sf.Flow.ID, t) {
+		if err != nil || !c.Matches(t) || !b.Flows.firstFiring(sf.key(), t) {
 			continue
 		}
 		base := map[string]any{"schedule": tr.Schedule, "time": t.Format(time.RFC3339)}
@@ -116,8 +129,13 @@ func (b *Box) fireScheduled(ctx context.Context, t time.Time) int {
 			for k, v := range base {
 				data[k] = v
 			}
-			fired++
-			b.startFlowRun(context.WithoutCancel(ctx), sf, events.Event{Type: "schedule.fired", Box: b.Name, Origin: "schedule", Time: t, Data: data}, flowStart{idem: fmt.Sprintf("schedule:%s/%s:%s:%v", sf.Scope, sf.Flow.ID, t.Format(time.RFC3339), data["path"])})
+			_, err := b.startFlowRun(context.WithoutCancel(ctx), sf, events.Event{Type: "schedule.fired", Box: b.Name, Origin: "schedule", Time: t, Data: data}, flowStart{via: "cron", idem: fmt.Sprintf("schedule:%s/%s:%s:%v", sf.Scope, sf.Flow.ID, t.Format(time.RFC3339), data["path"])})
+			switch {
+			case err == nil:
+				fired++
+			case !errors.Is(err, errRateLimited):
+				b.flowSkipped(sf, err)
+			}
 		}
 	}
 	return fired
@@ -301,7 +319,7 @@ func (b *Box) pollGitHub(ctx context.Context, now time.Time) int {
 		if !sf.Flow.Enabled || gt == nil {
 			continue
 		}
-		key := sf.Scope + "/" + sf.Flow.ID
+		key := sf.key()
 		every := 2 * time.Minute
 		if d, err := time.ParseDuration(gt.Poll); err == nil && d >= time.Minute {
 			every = d
@@ -413,7 +431,7 @@ func (b *Box) admitGitHub(ctx context.Context, sf ScopedFlow, e events.Event, id
 	if sf.autofix != nil && !b.autofixAllowed(sf) {
 		return false, true
 	}
-	_, err := b.startFlowRun(ctx, sf, e, flowStart{idem: idem, item: item})
+	_, err := b.startFlowRun(ctx, sf, e, flowStart{via: "github", idem: idem, item: item})
 	return err == nil, err == nil
 }
 
@@ -423,7 +441,7 @@ func (b *Box) admitGitHub(ctx context.Context, sf ScopedFlow, e events.Event, id
 // that; where.author narrows it further by the issue's author.
 func (b *Box) pollIssues(ctx context.Context, sf ScopedFlow, now time.Time, budget int) (started, calls int) {
 	gt := sf.Flow.Trigger.GitHub
-	key := sf.Scope + "/" + sf.Flow.ID
+	key := sf.key()
 	sel := sf
 	sel.Flow.Trigger.Where.Branch = ""
 	for _, tg := range b.flowTargets(ctx, sel, true) {
